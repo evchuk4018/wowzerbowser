@@ -18,7 +18,7 @@ export async function sendOwnerMagicLink(emailInput: string): Promise<void> {
   // Return normally for non-owner addresses so the endpoint does not disclose the allowlist.
   if (email !== ownerEmail()) return;
 
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://wowzerbowser.vercel.app";
   await sendSupabaseMagicLink(email, new URL("/", siteUrl).toString());
 }
 

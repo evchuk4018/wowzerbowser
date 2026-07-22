@@ -24,7 +24,8 @@ npm run build
 
 The app uses Supabase passwordless email authentication. Anonymous visitors see
 an email form; Supabase emails a magic link that returns to
-`http://localhost:3000`, and the browser keeps the resulting session refreshed.
+`https://wowzerbowser.vercel.app` in production, and the browser keeps the
+resulting session refreshed.
 
 Copy `.env.example` to an ignored `.env` and provide these settings before
 starting the app:
@@ -35,13 +36,15 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 SUPABASE_URL=your-project-url
 SUPABASE_SECRET_KEY=your-server-secret-key
 APP_OWNER_EMAIL=the-only-email-allowed-to-sign-in
-NEXT_PUBLIC_SITE_URL=http://localhost:3000
+NEXT_PUBLIC_SITE_URL=https://wowzerbowser.vercel.app
 ```
 
-Add `http://localhost:3000` to the allowed redirect URLs in the Supabase Auth
-dashboard. Keep `SUPABASE_SECRET_KEY` server-only. Provider SDK access stays in
-the browser and server Supabase adapters; UI components call the domain-facing
-auth service and hook instead.
+Add `https://wowzerbowser.vercel.app` to the allowed redirect URLs in the
+Supabase Auth dashboard. For local testing, set `NEXT_PUBLIC_SITE_URL` to
+`http://localhost:3000` and add that URL to the dashboard as well. Keep
+`SUPABASE_SECRET_KEY` server-only. Provider SDK access stays in the browser and
+server Supabase adapters; UI components call the domain-facing auth service and
+hook instead.
 
 ## Useful Commands
 
