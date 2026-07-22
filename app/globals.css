@@ -49,6 +49,8 @@ button {
 
 .app-shell {
   display: grid;
+  height: 100dvh;
+  min-height: 0;
   grid-template-columns: 300px minmax(0, 1fr);
 }
 
@@ -150,7 +152,7 @@ button {
   position: relative;
   z-index: 20;
   display: flex;
-  min-height: 100dvh;
+  min-height: 0;
   flex-direction: column;
   border-right: 1px solid #2c2d2a;
   background: var(--sidebar);
@@ -355,11 +357,13 @@ button {
 .chat-area {
   position: relative;
   display: flex;
+  height: 100%;
   min-width: 0;
-  min-height: 100dvh;
+  min-height: 0;
   align-items: center;
   flex-direction: column;
   justify-content: center;
+  overflow: hidden;
   background:
     radial-gradient(circle at 50% 38%, rgba(255, 255, 255, .018), transparent 31%),
     var(--bg);
@@ -520,11 +524,13 @@ button {
 }
 
 .chat-active .composer-wrap {
-  position: fixed;
-  left: calc(300px + (100vw - 300px) / 2);
+  position: absolute;
+  right: 0;
+  bottom: 24px;
+  left: 0;
   z-index: 5;
-  width: min(860px, calc(100vw - 300px - 42px));
-  transform: translateX(-50%);
+  width: min(860px, calc(100% - 42px));
+  margin: 0 auto;
 }
 
 .composer {
@@ -781,7 +787,9 @@ button {
     position: fixed;
     bottom: 12px;
     left: 50%;
+    right: auto;
     width: calc(100% - 24px);
+    margin: 0;
     transform: translateX(-50%);
   }
 

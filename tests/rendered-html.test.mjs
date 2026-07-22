@@ -1,36 +1,59 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-async function render() {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
+const nextCli = fileURLToPath(new URL("../node_modules/next/dist/bin/next", import.meta.url));
 
-  return worker.fetch(
-    new Request("http://localhost:3000/", {
-      headers: { accept: "text/html" },
-    }),
-    {
-      ASSETS: {
-        fetch: async () => new Response("Not found", { status: 404 }),
-      },
-    },
-    {
-      waitUntil() {},
-      passThroughOnException() {},
-    },
-  );
+const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+async function withNextServer(callback) {
+  const port = 43123;
+  const server = spawn(process.execPath, [nextCli, "start", "-p", String(port)], {
+    cwd: process.cwd(),
+    env: { ...process.env, PORT: String(port) },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let serverOutput = "";
+  server.stdout.on("data", (chunk) => {
+    serverOutput += chunk.toString();
+  });
+  server.stderr.on("data", (chunk) => {
+    serverOutput += chunk.toString();
+  });
+
+  try {
+    let response;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (server.exitCode !== null) {
+        throw new Error(`Next server exited before becoming ready:\n${serverOutput}`);
+      }
+      try {
+        response = await fetch(`http://127.0.0.1:${port}/`);
+        break;
+      } catch {
+        await delay(100);
+      }
+    }
+    if (!response) {
+      throw new Error(`Next server did not become ready:\n${serverOutput}`);
+    }
+    return await callback(response);
+  } finally {
+    server.kill();
+  }
 }
 
 test("server renders the local auth-aware app shell", async () => {
-  const response = await render();
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
+  await withNextServer(async (response) => {
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
-  const html = await response.text();
-  assert.match(html, /<title>Chat<\/title>/i);
-  assert.match(html, /aria-label="Loading session"/);
+    const html = await response.text();
+    assert.match(html, /<title>Chat<\/title>/i);
+    assert.match(html, /aria-label="Loading session"/);
+  });
 });
 
 test("keeps Supabase calls behind adapters and owner authorization", async () => {
@@ -96,5 +119,22 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.doesNotMatch(styles, /privacy-note/);
   assert.match(styles, /bottom: calc\(100% \+ 8px\)/);
   assert.match(styles, /padding: 34px 0 220px/);
-  assert.match(styles, /width: min\(860px, calc\(100vw - 300px - 42px\)\)/);
+  assert.match(styles, /height: 100dvh;/);
+  assert.match(styles, /\.chat-area[\s\S]*?overflow: hidden;/);
+  assert.match(styles, /\.transcript[\s\S]*?overflow-y: auto;/);
+  assert.match(styles, /\.chat-active \.composer-wrap[\s\S]*?position: absolute;/);
+});
+
+test("does not retain removed hosting integrations", async () => {
+  const files = [
+    "../package.json",
+    "../README.md",
+    "../.gitignore",
+    "../app/globals.css",
+  ];
+  const contents = await Promise.all(
+    files.map((file) => readFile(new URL(file, import.meta.url), "utf8")),
+  );
+  const source = contents.join("\n");
+  assert.doesNotMatch(source, /openai|\.openai|sites-vite|cloudflare|vinext|wrangler|D1Database/i);
 });

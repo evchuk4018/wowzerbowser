@@ -1,8 +1,6 @@
-# vinext-starter
+# Local Chat UI
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+A private chat workspace built with Next.js and ready for Vercel deployment.
 
 ## Prerequisites
 
@@ -16,16 +14,11 @@ npm run dev
 npm run build
 ```
 
-This starter does not use `wrangler.jsonc`.
-
 ## Included Shape
 
 - edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+- Next.js API routes live under `app/api/`
+- Vercel uses the standard Next.js build and start commands
 
 ## Authentication
 
@@ -53,11 +46,10 @@ auth service and hook instead.
 ## Useful Commands
 
 - `npm run dev`: start local development at `http://localhost:3000`
-- `npm run build`: verify the vinext build output
+- `npm run build`: verify the Next.js production build
 - `npm test`: build the app and verify its rendered shell and auth boundaries
-- `npm run db:generate`: generate Drizzle migrations after schema changes
 
 ## Learn More
 
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+- [Next.js Documentation](https://nextjs.org/docs)
+- [Vercel Documentation](https://vercel.com/docs)
