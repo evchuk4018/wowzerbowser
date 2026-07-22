@@ -1,10 +1,11 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { MagicLinkForm } from "./auth/magic-link-form";
 import type { AuthUser } from "./auth/types";
 import { useAuthSession } from "./auth/use-auth-session";
 import { fetchChatModels, streamChatResponse } from "./chat/chat-service";
+import { ChatComposer } from "./chat/chat-composer";
 import type {
   ChatModelId,
   ChatReasoningEffort,
@@ -92,6 +93,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [thinkingMessageId, setThinkingMessageId] = useState<string | null>(null);
   const [thinkingNow, setThinkingNow] = useState(0);
+  const [openMenu, setOpenMenu] = useState<"model" | "thinking" | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const thinkingStartedAtRef = useRef<number | null>(null);
@@ -146,6 +148,48 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   const active = conversations.find((conversation) => conversation.id === activeId);
   const latestMessage = active ? active.messages[active.messages.length - 1] : undefined;
   const isStreaming = streamingMessageId !== null;
+  const selectedModel = models.find((availableModel) => availableModel.id === model) ?? models[0];
+  const supportedEfforts = useMemo(
+    () => selectedModel?.supportedEfforts ?? [],
+    [selectedModel],
+  );
+  const canThink = Boolean(selectedModel?.thinkingSupported && supportedEfforts.length);
+  const effectiveThinking = thinking && canThink;
+  const effectiveEffort = supportedEfforts.includes(effort)
+    ? effort
+    : (supportedEfforts[0] ?? "high");
+
+  useEffect(() => {
+    if (!models.length) return;
+    const available = models.some((availableModel) => availableModel.id === model);
+    if (!available) setModel(models[0].id);
+  }, [model, models]);
+
+  useEffect(() => {
+    if (!canThink && thinking) setThinking(false);
+    if (canThink && !supportedEfforts.includes(effort)) setEffort(supportedEfforts[0]);
+  }, [canThink, effort, supportedEfforts, thinking]);
+
+  useEffect(() => {
+    const closeMenus = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest(".composer-menu")) {
+        setOpenMenu(null);
+      }
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setOpenMenu(null);
+    };
+    document.addEventListener("pointerdown", closeMenus);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeMenus);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isStreaming) setOpenMenu(null);
+  }, [isStreaming]);
 
   useEffect(() => {
     if (!thinkingMessageId || thinkingStartedAtRef.current === null) return;
@@ -235,7 +279,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
       role: "assistant",
       content: "",
       reasoning: "",
-      thinkingEnabled: thinking,
+      thinkingEnabled: effectiveThinking,
       status: "streaming",
     };
     const conversationId = active.id;
@@ -258,14 +302,16 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
     setDraft("");
 
     const controller = new AbortController();
+    const requestThinkingStartedAt = effectiveThinking ? performance.now() : null;
+    let requestThinkingFinished = false;
     activeRequestRef.current = {
       conversationId,
       messageId: assistantMessage.id,
       controller,
     };
     setStreamingMessageId(assistantMessage.id);
-    if (thinking) {
-      thinkingStartedAtRef.current = performance.now();
+    if (requestThinkingStartedAt !== null) {
+      thinkingStartedAtRef.current = requestThinkingStartedAt;
       setThinkingNow(0);
       setThinkingMessageId(assistantMessage.id);
     }
@@ -278,8 +324,8 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
       const request = {
         messages: requestMessages,
         model,
-        thinking,
-        reasoningEffort: effort,
+        thinking: effectiveThinking,
+        reasoningEffort: effectiveEffort,
       };
 
       for await (const event of streamChatResponse(request, accessToken, controller.signal)) {
@@ -289,10 +335,13 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
             reasoning: `${message.reasoning ?? ""}${event.delta}`,
           }));
         } else if (event.type === "content") {
-          if (thinking && thinkingStartedAtRef.current !== null) {
-            const duration = performance.now() - thinkingStartedAtRef.current;
-            thinkingStartedAtRef.current = null;
-            setThinkingMessageId(null);
+          if (requestThinkingStartedAt !== null && !requestThinkingFinished) {
+            const duration = performance.now() - requestThinkingStartedAt;
+            requestThinkingFinished = true;
+            if (activeRequestRef.current?.messageId === assistantMessage.id) {
+              thinkingStartedAtRef.current = null;
+              setThinkingMessageId(null);
+            }
             updateMessage(conversationId, assistantMessage.id, (message) => ({
               ...message,
               thinkingDurationMs: duration,
@@ -332,14 +381,15 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
         }));
       }
     } finally {
-      if (activeRequestRef.current?.messageId === assistantMessage.id) {
+      const isCurrentRequest = activeRequestRef.current?.messageId === assistantMessage.id;
+      if (isCurrentRequest) {
         activeRequestRef.current = null;
         setStreamingMessageId(null);
-      }
-      if (thinkingStartedAtRef.current !== null) {
-        const duration = performance.now() - thinkingStartedAtRef.current;
         thinkingStartedAtRef.current = null;
         setThinkingMessageId(null);
+      }
+      if (requestThinkingStartedAt !== null && !requestThinkingFinished) {
+        const duration = performance.now() - requestThinkingStartedAt;
         updateMessage(conversationId, assistantMessage.id, (message) => ({
           ...message,
           thinkingDurationMs: duration,
@@ -469,79 +519,29 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
           </div>
         )}
 
-        <form className="composer-wrap" onSubmit={(event) => void sendMessage(event)}>
-          <div className="composer">
-            <textarea
-              ref={textareaRef}
-              value={draft}
-              rows={1}
-              aria-label="Message"
-              placeholder="Message"
-              disabled={isStreaming}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={handleKeyDown}
-            />
-            <div className="composer-settings">
-              <label className="setting-control">
-                <span>Model</span>
-                <select
-                  value={model}
-                  disabled={isStreaming}
-                  aria-label="Model"
-                  onChange={(event) => setModel(event.target.value as ChatModelId)}
-                >
-                  {models.map((availableModel) => (
-                    <option key={availableModel.id} value={availableModel.id}>
-                      {availableModel.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="thinking-toggle">
-                <input
-                  type="checkbox"
-                  checked={thinking}
-                  disabled={isStreaming}
-                  onChange={(event) => setThinking(event.target.checked)}
-                />
-                <span>Thinking</span>
-              </label>
-              {thinking && (
-                <label className="setting-control">
-                  <span>Effort</span>
-                  <select
-                    value={effort}
-                    disabled={isStreaming}
-                    aria-label="Reasoning effort"
-                    onChange={(event) => setEffort(event.target.value as ChatReasoningEffort)}
-                  >
-                    <option value="high">High</option>
-                    <option value="max">Max</option>
-                  </select>
-                </label>
-              )}
-            </div>
-            <div className="composer-actions">
-              <button type="button" className="attach-button" aria-label="Attach a file">+</button>
-              <span className="privacy-note">Messages stay on this device</span>
-              {isStreaming ? (
-                <button type="button" className="stop-button" onClick={stopStreaming}>
-                  Stop
-                </button>
-              ) : (
-                <button
-                  type="submit"
-                  className="send-button"
-                  aria-label="Send message"
-                  disabled={!draft.trim()}
-                >
-                  ↑
-                </button>
-              )}
-            </div>
-          </div>
-          <p className="helper-text">Press Enter to send · Shift + Enter for a new line</p>
-        </form>
+        <ChatComposer
+          draft={draft}
+          setDraft={setDraft}
+          textareaRef={textareaRef}
+          isStreaming={isStreaming}
+          models={models}
+          model={model}
+          setModel={setModel}
+          selectedModel={selectedModel}
+          openMenu={openMenu}
+          setOpenMenu={setOpenMenu}
+          thinking={thinking}
+          setThinking={setThinking}
+          effort={effort}
+          setEffort={setEffort}
+          supportedEfforts={supportedEfforts}
+          canThink={canThink}
+          effectiveThinking={effectiveThinking}
+          effectiveEffort={effectiveEffort}
+          onSubmit={(event) => void sendMessage(event)}
+          onKeyDown={handleKeyDown}
+          onStop={stopStreaming}
+        />
       </section>
     </main>
   );

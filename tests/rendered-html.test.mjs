@@ -78,3 +78,23 @@ test("keeps DeepSeek access server-side and uses the V4 thinking contract", asyn
   assert.match(route, /text\/event-stream/);
   assert.match(modelsRoute, /listDeepSeekModels/);
 });
+
+test("keeps composer model and thinking controls accessible and responsive", async () => {
+  const [page, composer, styles] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/chat-composer.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(composer, /aria-label="Choose model"/);
+  assert.match(composer, /aria-label="Choose thinking mode"/);
+  assert.match(composer, /aria-controls="model-options"/);
+  assert.match(composer, /aria-controls="thinking-options"/);
+  assert.match(composer, /aria-pressed=/);
+  assert.match(page, /supportedEfforts/);
+  assert.doesNotMatch(page, /Messages stay on this device/);
+  assert.doesNotMatch(styles, /privacy-note/);
+  assert.match(styles, /bottom: calc\(100% \+ 8px\)/);
+  assert.match(styles, /padding: 34px 0 220px/);
+  assert.match(styles, /width: min\(860px, calc\(100vw - 300px - 42px\)\)/);
+});

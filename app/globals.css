@@ -366,7 +366,7 @@ button {
 }
 
 .chat-area.chat-active {
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 .empty-state {
@@ -397,10 +397,13 @@ button {
 }
 
 .transcript {
-  width: min(780px, calc(100% - 42px));
+  width: min(860px, calc(100% - 42px));
+  min-height: 0;
+  flex: 1;
   margin: 0 auto;
-  padding: 72px 0 190px;
+  padding: 34px 0 220px;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .message {
@@ -513,18 +516,19 @@ button {
 .composer-wrap {
   position: absolute;
   bottom: 24px;
-  width: min(780px, calc(100% - 42px));
+  width: min(860px, calc(100% - 42px));
 }
 
 .chat-active .composer-wrap {
   position: fixed;
   left: calc(300px + (100vw - 300px) / 2);
   z-index: 5;
+  width: min(860px, calc(100vw - 300px - 42px));
   transform: translateX(-50%);
 }
 
 .composer {
-  min-height: 124px;
+  min-height: 108px;
   border: 1px solid #3b3c38;
   border-radius: 20px;
   background: var(--panel);
@@ -555,54 +559,97 @@ button {
   color: #92938c;
 }
 
-.composer-settings {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 4px 0 9px;
-}
-
-.setting-control,
-.thinking-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 30px;
-  border: 1px solid #41423d;
-  border-radius: 9px;
-  background: #252623;
-  padding: 0 8px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.setting-control select {
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.setting-control select option {
-  background: var(--panel);
-  color: var(--text);
-}
-
-.thinking-toggle {
-  cursor: pointer;
-}
-
-.thinking-toggle input {
-  accent-color: var(--accent);
-}
-
 .composer-actions {
   display: flex;
   align-items: center;
   gap: 11px;
+}
+
+.composer-action-spacer {
+  flex: 1;
+}
+
+.composer-menu {
+  position: relative;
+}
+
+.composer-menu-trigger {
+  display: inline-flex;
+  max-width: 150px;
+  height: 34px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #41423d;
+  border-radius: 9px;
+  background: #252623;
+  padding: 0 9px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.composer-menu-trigger:hover:not(:disabled),
+.composer-menu-trigger[aria-expanded="true"] {
+  border-color: #60625a;
+  background: #30312d;
+  color: var(--text);
+}
+
+.composer-menu-trigger:disabled,
+.composer-menu-option:disabled,
+.attach-button:disabled {
+  cursor: default;
+  opacity: .45;
+}
+
+.menu-trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-chevron {
+  color: var(--quiet);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.composer-menu-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  display: grid;
+  min-width: 156px;
+  gap: 2px;
+  border: 1px solid #4a4b45;
+  border-radius: 11px;
+  background: #242521;
+  padding: 5px;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, .38);
+}
+
+.composer-menu-option {
+  display: flex;
+  width: 100%;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  padding: 0 9px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+}
+
+.composer-menu-option:hover:not(:disabled),
+.composer-menu-option.selected {
+  background: #33342f;
+  color: var(--text);
 }
 
 .attach-button {
@@ -612,11 +659,6 @@ button {
   color: #d8d8d1;
   font-size: 24px;
   font-weight: 300;
-}
-
-.privacy-note {
-  color: var(--quiet);
-  font-size: 12px;
 }
 
 .send-button {
@@ -730,8 +772,8 @@ button {
 
   .transcript {
     width: calc(100% - 28px);
-    padding-top: 78px;
-    padding-bottom: 172px;
+    padding-top: 70px;
+    padding-bottom: 210px;
   }
 
   .composer-wrap,
@@ -744,11 +786,17 @@ button {
   }
 
   .composer {
-    min-height: 142px;
+    min-height: 118px;
+    padding: 14px 13px 11px;
   }
 
-  .privacy-note {
-    display: none;
+  .composer-actions {
+    gap: 6px;
+  }
+
+  .composer-menu-trigger {
+    max-width: 126px;
+    padding-inline: 7px;
   }
 }
 
