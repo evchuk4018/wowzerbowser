@@ -142,6 +142,29 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(styles, /\.chat-active \.composer-wrap[\s\S]*?position: absolute;/);
 });
 
+test("renders assistant Markdown and LaTeX with the bobert default prompt", async () => {
+  const [page, renderer, layout, packageJson] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/assistant-response.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../package.json", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /<bobert_behavior>/);
+  assert.match(page, /bobert may use Markdown/);
+  assert.match(page, /LEGACY_DEFAULT_SYSTEM_PROMPT/);
+  assert.match(page, /<AssistantResponse content=\{message\.content\} \/>/);
+  assert.match(renderer, /remarkGfm/);
+  assert.match(renderer, /remarkMath/);
+  assert.match(renderer, /rehypeKatex/);
+  assert.match(layout, /katex\/dist\/katex\.min\.css/);
+
+  const dependencies = JSON.parse(packageJson).dependencies;
+  for (const dependency of ["react-markdown", "remark-gfm", "remark-math", "rehype-katex", "katex"]) {
+    assert.ok(dependencies[dependency], `${dependency} should be installed`);
+  }
+});
+
 test("does not retain removed hosting integrations", async () => {
   const files = [
     "../package.json",

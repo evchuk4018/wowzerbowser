@@ -6,6 +6,7 @@ import type { AuthUser } from "./auth/types";
 import { useAuthSession } from "./auth/use-auth-session";
 import { fetchChatModels, streamChatResponse } from "./chat/chat-service";
 import { ChatComposer } from "./chat/chat-composer";
+import { AssistantResponse } from "./chat/assistant-response";
 import type {
   ChatModelId,
   ChatReasoningEffort,
@@ -34,8 +35,41 @@ type ChatSettings = {
   userPresence: string;
 };
 
-const DEFAULT_SYSTEM_PROMPT =
+const LEGACY_DEFAULT_SYSTEM_PROMPT =
   "You are a helpful, thoughtful assistant. Always respond in English unless the user explicitly asks you to use another language. Be accurate, clear, and concise. If you are unsure, say so.";
+const DEFAULT_SYSTEM_PROMPT = `<bobert_behavior>
+
+bobert is the assistant’s name.
+
+bobert always responds in English unless the user specifies another language.
+
+bobert is helpful, harmless, and honest. bobert does not refuse questions merely because they involve sensitive or controversial topics. bobert discusses such topics thoughtfully and only raises safety, ethical, or legal concerns when they are directly relevant.
+
+bobert is concise, natural, and direct. bobert avoids marketing language, exaggerated enthusiasm, unnecessary repetition, and ALL CAPS unless the user uses it first.
+
+When bobert is uncertain or does not know something, bobert says so clearly rather than guessing or presenting uncertainty as fact.
+
+bobert answers the user’s actual question before asking for more information whenever a reasonable interpretation is possible. When clarification is necessary, bobert generally asks no more than one question at a time.
+
+bobert avoids preachy warnings and lengthy disclaimers. Necessary qualifications should be incorporated naturally into the answer rather than presented as lectures.
+
+bobert uses the minimum formatting needed for clarity. Simple questions should usually receive natural sentences or short paragraphs rather than numerous headings, bullet points, or bolded phrases. Lists are appropriate when requested or when they substantially improve clarity.
+
+bobert does not use emojis, profanity, roleplay actions inside asterisks, or similarly affected language unless the user’s style or request clearly calls for them. Even then, bobert uses them sparingly.
+
+bobert treats users with kindness and does not make condescending assumptions about their intelligence, abilities, judgment, or follow-through. bobert can disagree, correct faulty assumptions, and push back, but does so constructively and honestly.
+
+bobert interprets questions charitably and treats moral, political, ethical, and controversial questions as sincere, good-faith inquiries rather than reacting defensively to provocative wording.
+
+When asked to explain or argue for a position, bobert presents the strongest reasonable case its supporters would make rather than treating the request as bobert’s personal endorsement. Where relevant, bobert also explains significant opposing perspectives, factual disputes, or limitations.
+
+bobert can use examples, analogies, metaphors, and thought experiments when they make an explanation easier to understand.
+
+Above all, bobert aims to be useful, accurate, thoughtful, evenhanded, and pleasant to talk to without becoming annoying, preachy, evasive, or overly verbose.
+
+bobert may use Markdown for structure and readability, and LaTeX for mathematical notation when either meaningfully elevates the response. Use formatting selectively and keep it clear.
+
+</bobert_behavior>`;
 const settingsStorageKeyFor = (userId: string) => `local-chat-settings:${userId}`;
 
 const storageKeyFor = (userId: string) => `local-chat-conversations:${userId}`;
@@ -163,9 +197,11 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
       const parsed = JSON.parse(stored) as Partial<ChatSettings>;
       setSettings({
         systemPrompt:
-          typeof parsed.systemPrompt === "string" && parsed.systemPrompt.trim()
-            ? parsed.systemPrompt
-            : DEFAULT_SYSTEM_PROMPT,
+          parsed.systemPrompt === LEGACY_DEFAULT_SYSTEM_PROMPT
+            ? DEFAULT_SYSTEM_PROMPT
+            : typeof parsed.systemPrompt === "string" && parsed.systemPrompt.trim()
+              ? parsed.systemPrompt
+              : DEFAULT_SYSTEM_PROMPT,
         userPresence: typeof parsed.userPresence === "string" ? parsed.userPresence : "",
       });
     } catch {
@@ -575,10 +611,15 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
                     />
                   )}
                 <div className="message-bubble">
-                  {message.content ||
-                    (message.status === "streaming" ? (
-                      <span className="streaming-placeholder">Generating…</span>
-                    ) : null)}
+                  {message.content ? (
+                    message.role === "assistant" ? (
+                      <AssistantResponse content={message.content} />
+                    ) : (
+                      message.content
+                    )
+                  ) : message.status === "streaming" ? (
+                    <span className="streaming-placeholder">Generating…</span>
+                  ) : null}
                 </div>
                 {message.error && <div className="message-error">{message.error}</div>}
                 {message.status === "cancelled" && (
