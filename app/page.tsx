@@ -4,11 +4,22 @@ import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { MagicLinkForm } from "./auth/magic-link-form";
 import type { AuthUser } from "./auth/types";
 import { useAuthSession } from "./auth/use-auth-session";
+import { fetchChatModels, streamChatResponse } from "./chat/chat-service";
+import type {
+  ChatModelId,
+  ChatReasoningEffort,
+} from "../lib/chat-protocol";
+import { DEFAULT_CHAT_MODELS } from "../lib/chat-protocol";
 
 type Message = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  reasoning?: string;
+  thinkingEnabled?: boolean;
+  thinkingDurationMs?: number;
+  status?: "streaming" | "complete" | "error" | "cancelled";
+  error?: string;
 };
 
 type Conversation = {
@@ -32,7 +43,7 @@ const createConversation = (): Conversation => ({
 });
 
 export default function Home() {
-  const { state, sendMagicLink, signOut } = useAuthSession();
+  const { state, sendMagicLink, signOut, getAccessToken } = useAuthSession();
 
   if (state.status === "loading") {
     return <main className="loading-shell" aria-label="Loading session" />;
@@ -47,22 +58,48 @@ export default function Home() {
     );
   }
 
-  return <ChatWorkspace key={state.user.id} user={state.user} onSignOut={signOut} />;
+  return (
+    <ChatWorkspace
+      key={state.user.id}
+      user={state.user}
+      getAccessToken={getAccessToken}
+      onSignOut={signOut}
+    />
+  );
 }
 
 type ChatWorkspaceProps = {
   user: AuthUser;
+  getAccessToken: () => Promise<string | null>;
   onSignOut: () => Promise<void>;
 };
 
-function ChatWorkspace({ user, onSignOut }: ChatWorkspaceProps) {
+function formatDuration(milliseconds: number): string {
+  if (milliseconds < 1000) return `${Math.max(0, Math.round(milliseconds))}ms`;
+  return `${(milliseconds / 1000).toFixed(1)}s`;
+}
+
+function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState("");
   const [draft, setDraft] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [ready, setReady] = useState(false);
+  const [models, setModels] = useState(DEFAULT_CHAT_MODELS);
+  const [model, setModel] = useState<ChatModelId>("deepseek-v4-flash");
+  const [thinking, setThinking] = useState(false);
+  const [effort, setEffort] = useState<ChatReasoningEffort>("high");
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
+  const [thinkingMessageId, setThinkingMessageId] = useState<string | null>(null);
+  const [thinkingNow, setThinkingNow] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const thinkingStartedAtRef = useRef<number | null>(null);
+  const activeRequestRef = useRef<{
+    conversationId: string;
+    messageId: string;
+    controller: AbortController;
+  } | null>(null);
 
   useEffect(() => {
     const loadStoredChats = window.setTimeout(() => {
@@ -93,11 +130,52 @@ function ChatWorkspace({ user, onSignOut }: ChatWorkspaceProps) {
     }
   }, [conversations, ready, user.id]);
 
+  useEffect(() => {
+    let mounted = true;
+    void getAccessToken()
+      .then((token) => (token ? fetchChatModels(token) : []))
+      .then((availableModels) => {
+        if (mounted && availableModels.length) setModels(availableModels);
+      })
+      .catch(() => undefined);
+    return () => {
+      mounted = false;
+    };
+  }, [getAccessToken]);
+
   const active = conversations.find((conversation) => conversation.id === activeId);
+  const latestMessage = active ? active.messages[active.messages.length - 1] : undefined;
+  const isStreaming = streamingMessageId !== null;
+
+  useEffect(() => {
+    if (!thinkingMessageId || thinkingStartedAtRef.current === null) return;
+    const update = () => {
+      const startedAt = thinkingStartedAtRef.current;
+      if (startedAt !== null) setThinkingNow(performance.now() - startedAt);
+    };
+    update();
+    const timer = window.setInterval(update, 100);
+    return () => window.clearInterval(timer);
+  }, [thinkingMessageId]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [active?.messages.length]);
+  }, [active?.messages.length, latestMessage?.content.length, latestMessage?.reasoning?.length]);
+
+  useEffect(() => {
+    const handleShortcut = (event: globalThis.KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        startNewChat();
+      }
+    };
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  });
+
+  useEffect(() => {
+    return () => activeRequestRef.current?.controller.abort();
+  }, []);
 
   const startNewChat = () => {
     const existingBlank = conversations.find((item) => item.messages.length === 0);
@@ -113,46 +191,167 @@ function ChatWorkspace({ user, onSignOut }: ChatWorkspaceProps) {
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
 
-  useEffect(() => {
-    const handleShortcut = (event: globalThis.KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        startNewChat();
-      }
-    };
-    window.addEventListener("keydown", handleShortcut);
-    return () => window.removeEventListener("keydown", handleShortcut);
-  });
+  const updateMessage = (
+    conversationId: string,
+    messageId: string,
+    update: (message: Message) => Message,
+  ) => {
+    setConversations((current) =>
+      current.map((conversation) =>
+        conversation.id === conversationId
+          ? {
+              ...conversation,
+              messages: conversation.messages.map((message) =>
+                message.id === messageId ? update(message) : message,
+              ),
+            }
+          : conversation,
+      ),
+    );
+  };
 
-  const sendMessage = (event?: FormEvent) => {
+  const stopStreaming = () => {
+    const activeRequest = activeRequestRef.current;
+    if (!activeRequest) return;
+    activeRequest.controller.abort();
+    updateMessage(activeRequest.conversationId, activeRequest.messageId, (message) => ({
+      ...message,
+      status: "cancelled",
+    }));
+    activeRequestRef.current = null;
+    setStreamingMessageId(null);
+    setThinkingMessageId(null);
+    thinkingStartedAtRef.current = null;
+  };
+
+  const sendMessage = async (event?: FormEvent) => {
     event?.preventDefault();
     const content = draft.trim();
-    if (!content || !activeId) return;
+    if (!content || !activeId || isStreaming || !active) return;
 
     const userMessage: Message = { id: makeId(), role: "user", content };
-    const echoMessage: Message = { id: makeId(), role: "assistant", content };
+    const assistantMessage: Message = {
+      id: makeId(),
+      role: "assistant",
+      content: "",
+      reasoning: "",
+      thinkingEnabled: thinking,
+      status: "streaming",
+    };
+    const conversationId = active.id;
+    const requestMessages = [...active.messages, userMessage]
+      .filter((message) => message.content.trim())
+      .map(({ role, content: messageContent }) => ({ role, content: messageContent }));
 
     setConversations((current) =>
       current.map((conversation) =>
-        conversation.id === activeId
+        conversation.id === conversationId
           ? {
               ...conversation,
               title:
-                conversation.messages.length === 0
-                  ? content.slice(0, 42)
-                  : conversation.title,
-              messages: [...conversation.messages, userMessage, echoMessage],
+                conversation.messages.length === 0 ? content.slice(0, 42) : conversation.title,
+              messages: [...conversation.messages, userMessage, assistantMessage],
             }
           : conversation,
       ),
     );
     setDraft("");
+
+    const controller = new AbortController();
+    activeRequestRef.current = {
+      conversationId,
+      messageId: assistantMessage.id,
+      controller,
+    };
+    setStreamingMessageId(assistantMessage.id);
+    if (thinking) {
+      thinkingStartedAtRef.current = performance.now();
+      setThinkingNow(0);
+      setThinkingMessageId(assistantMessage.id);
+    }
+
+    let streamError = false;
+    try {
+      const accessToken = await getAccessToken();
+      if (!accessToken) throw new Error("Your session expired. Please sign in again.");
+
+      const request = {
+        messages: requestMessages,
+        model,
+        thinking,
+        reasoningEffort: effort,
+      };
+
+      for await (const event of streamChatResponse(request, accessToken, controller.signal)) {
+        if (event.type === "reasoning") {
+          updateMessage(conversationId, assistantMessage.id, (message) => ({
+            ...message,
+            reasoning: `${message.reasoning ?? ""}${event.delta}`,
+          }));
+        } else if (event.type === "content") {
+          if (thinking && thinkingStartedAtRef.current !== null) {
+            const duration = performance.now() - thinkingStartedAtRef.current;
+            thinkingStartedAtRef.current = null;
+            setThinkingMessageId(null);
+            updateMessage(conversationId, assistantMessage.id, (message) => ({
+              ...message,
+              thinkingDurationMs: duration,
+              content: `${message.content}${event.delta}`,
+            }));
+          } else {
+            updateMessage(conversationId, assistantMessage.id, (message) => ({
+              ...message,
+              content: `${message.content}${event.delta}`,
+            }));
+          }
+        } else if (event.type === "error") {
+          streamError = true;
+          updateMessage(conversationId, assistantMessage.id, (message) => ({
+            ...message,
+            status: "error",
+            error: event.message,
+          }));
+        } else if (event.type === "done") {
+          updateMessage(conversationId, assistantMessage.id, (message) => ({
+            ...message,
+            status: streamError ? "error" : "complete",
+          }));
+        }
+      }
+    } catch (error: unknown) {
+      if (controller.signal.aborted) {
+        updateMessage(conversationId, assistantMessage.id, (message) => ({
+          ...message,
+          status: "cancelled",
+        }));
+      } else {
+        updateMessage(conversationId, assistantMessage.id, (message) => ({
+          ...message,
+          status: "error",
+          error: error instanceof Error ? error.message : "The response failed.",
+        }));
+      }
+    } finally {
+      if (activeRequestRef.current?.messageId === assistantMessage.id) {
+        activeRequestRef.current = null;
+        setStreamingMessageId(null);
+      }
+      if (thinkingStartedAtRef.current !== null) {
+        const duration = performance.now() - thinkingStartedAtRef.current;
+        thinkingStartedAtRef.current = null;
+        setThinkingMessageId(null);
+        updateMessage(conversationId, assistantMessage.id, (message) => ({
+          ...message,
+          thinkingDurationMs: duration,
+        }));
+      }
+    }
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      sendMessage();
+      void sendMessage();
     }
   };
 
@@ -244,14 +443,33 @@ function ChatWorkspace({ user, onSignOut }: ChatWorkspaceProps) {
                 <div className="message-label">
                   {message.role === "user" ? "You" : "Response"}
                 </div>
-                <div className="message-bubble">{message.content}</div>
+                {message.role === "assistant" &&
+                  (Boolean(message.reasoning) ||
+                    (message.thinkingEnabled && message.status === "streaming")) && (
+                    <ReasoningBlock
+                      message={message}
+                      liveDurationMs={
+                        thinkingMessageId === message.id ? Math.max(0, thinkingNow) : undefined
+                      }
+                    />
+                  )}
+                <div className="message-bubble">
+                  {message.content ||
+                    (message.status === "streaming" ? (
+                      <span className="streaming-placeholder">Generating…</span>
+                    ) : null)}
+                </div>
+                {message.error && <div className="message-error">{message.error}</div>}
+                {message.status === "cancelled" && (
+                  <div className="message-note">Response stopped.</div>
+                )}
               </article>
             ))}
             <div ref={endRef} />
           </div>
         )}
 
-        <form className="composer-wrap" onSubmit={sendMessage}>
+        <form className="composer-wrap" onSubmit={(event) => void sendMessage(event)}>
           <div className="composer">
             <textarea
               ref={textareaRef}
@@ -259,25 +477,104 @@ function ChatWorkspace({ user, onSignOut }: ChatWorkspaceProps) {
               rows={1}
               aria-label="Message"
               placeholder="Message"
+              disabled={isStreaming}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={handleKeyDown}
             />
+            <div className="composer-settings">
+              <label className="setting-control">
+                <span>Model</span>
+                <select
+                  value={model}
+                  disabled={isStreaming}
+                  aria-label="Model"
+                  onChange={(event) => setModel(event.target.value as ChatModelId)}
+                >
+                  {models.map((availableModel) => (
+                    <option key={availableModel.id} value={availableModel.id}>
+                      {availableModel.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="thinking-toggle">
+                <input
+                  type="checkbox"
+                  checked={thinking}
+                  disabled={isStreaming}
+                  onChange={(event) => setThinking(event.target.checked)}
+                />
+                <span>Thinking</span>
+              </label>
+              {thinking && (
+                <label className="setting-control">
+                  <span>Effort</span>
+                  <select
+                    value={effort}
+                    disabled={isStreaming}
+                    aria-label="Reasoning effort"
+                    onChange={(event) => setEffort(event.target.value as ChatReasoningEffort)}
+                  >
+                    <option value="high">High</option>
+                    <option value="max">Max</option>
+                  </select>
+                </label>
+              )}
+            </div>
             <div className="composer-actions">
               <button type="button" className="attach-button" aria-label="Attach a file">+</button>
               <span className="privacy-note">Messages stay on this device</span>
-              <button
-                type="submit"
-                className="send-button"
-                aria-label="Send message"
-                disabled={!draft.trim()}
-              >
-                ↑
-              </button>
+              {isStreaming ? (
+                <button type="button" className="stop-button" onClick={stopStreaming}>
+                  Stop
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  className="send-button"
+                  aria-label="Send message"
+                  disabled={!draft.trim()}
+                >
+                  ↑
+                </button>
+              )}
             </div>
           </div>
           <p className="helper-text">Press Enter to send · Shift + Enter for a new line</p>
         </form>
       </section>
     </main>
+  );
+}
+
+function ReasoningBlock({
+  message,
+  liveDurationMs,
+}: {
+  message: Message;
+  liveDurationMs?: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const duration = message.thinkingDurationMs ?? liveDurationMs;
+  const isThinking = message.status === "streaming" && !message.content;
+
+  return (
+    <div className={`reasoning-block ${open ? "reasoning-open" : ""}`}>
+      <button
+        type="button"
+        className="reasoning-summary"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span className="reasoning-chevron" aria-hidden="true">›</span>
+        <span>{isThinking ? "Thinking" : "Thought process"}</span>
+        {duration !== undefined && <span className="reasoning-duration">{formatDuration(duration)}</span>}
+      </button>
+      {open && (
+        <div className="reasoning-content">
+          {message.reasoning || (isThinking ? "Waiting for reasoning…" : "No reasoning returned.")}
+        </div>
+      )}
+    </div>
   );
 }

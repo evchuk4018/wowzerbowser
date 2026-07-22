@@ -7,6 +7,10 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
   return authorizeSession(await supabaseBrowserAuth.getSession());
 }
 
+export async function getCurrentAccessToken(): Promise<string | null> {
+  return (await supabaseBrowserAuth.getSession())?.accessToken ?? null;
+}
+
 export function subscribeToAuth(listener: (user: AuthUser | null) => void): () => void {
   return supabaseBrowserAuth.onSessionChange((session) => {
     void authorizeSession(session).then(listener).catch(() => listener(null));

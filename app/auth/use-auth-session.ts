@@ -1,7 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { getCurrentUser, requestMagicLink, signOut, subscribeToAuth } from "./auth-service";
+import {
+  getCurrentAccessToken,
+  getCurrentUser,
+  requestMagicLink,
+  signOut,
+  subscribeToAuth,
+} from "./auth-service";
 import type { AuthState } from "./types";
 
 const INITIAL_STATE: AuthState = { status: "loading", user: null, error: null };
@@ -70,5 +76,5 @@ export function useAuthSession() {
     }
   }, []);
 
-  return { state, sendMagicLink, signOut: endSession };
+  return { state, sendMagicLink, signOut: endSession, getAccessToken: getCurrentAccessToken };
 }

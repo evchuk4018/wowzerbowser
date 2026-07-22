@@ -51,3 +51,30 @@ test("keeps Supabase calls behind adapters and owner authorization", async () =>
   assert.match(ownerService, /NEXT_PUBLIC_SITE_URL/);
   assert.match(magicLinkRoute, /sendOwnerMagicLink/);
 });
+
+test("keeps DeepSeek access server-side and uses the V4 thinking contract", async () => {
+  const [page, client, protocol, adapter, route, modelsRoute, envExample] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/chat-service.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/chat-protocol.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/providers/deepseek/deepseek-adapter.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/chat/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/chat/models/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../.env.example", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(envExample, /^DEEPSEEK_API_KEY=$/m);
+  assert.doesNotMatch(page, /api\.deepseek\.com|DEEPSEEK_API_KEY|@supabase\/supabase-js/);
+  assert.doesNotMatch(client, /api\.deepseek\.com|DEEPSEEK_API_KEY|@supabase\/supabase-js/);
+  assert.match(protocol, /deepseek-v4-flash/);
+  assert.match(protocol, /deepseek-v4-pro/);
+  assert.match(protocol, /reasoningEffort/);
+  assert.match(adapter, /https:\/\/api\.deepseek\.com/);
+  assert.match(adapter, /reasoning_content/);
+  assert.match(adapter, /reasoning_effort/);
+  assert.match(adapter, /thinking/);
+  assert.doesNotMatch(adapter, /deepseek-chat|deepseek-reasoner/);
+  assert.match(route, /authorizeOwnerSession/);
+  assert.match(route, /text\/event-stream/);
+  assert.match(modelsRoute, /listDeepSeekModels/);
+});
