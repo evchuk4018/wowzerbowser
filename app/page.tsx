@@ -305,6 +305,28 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   }, []);
 
   useEffect(() => {
+    if (!openMessageActions) return;
+    const closeMessageActions = (event: PointerEvent) => {
+      if (!(event.target instanceof Element)) {
+        setOpenMessageActions(null);
+        return;
+      }
+      if (!event.target.closest(".message-action-popover")) {
+        setOpenMessageActions(null);
+      }
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setOpenMessageActions(null);
+    };
+    document.addEventListener("pointerdown", closeMessageActions);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeMessageActions);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [openMessageActions]);
+
+  useEffect(() => {
     if (isStreaming) setOpenMenu(null);
   }, [isStreaming]);
 
@@ -410,6 +432,20 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
       window.setTimeout(() => setCopiedMessageId(null), 1400);
     } catch {
       // Clipboard access can be unavailable in an insecure or restricted context.
+    }
+  };
+
+  const sharePrompt = async (message: Message) => {
+    try {
+      if (navigator.share) {
+        await navigator.share({ text: message.content });
+      } else {
+        await navigator.clipboard.writeText(message.content);
+        setCopiedMessageId(message.id);
+        window.setTimeout(() => setCopiedMessageId(null), 1400);
+      }
+    } catch {
+      // Sharing can be cancelled by the user or unavailable in restricted contexts.
     }
   };
 
@@ -732,8 +768,12 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
             <h1>What can I help with?</h1>
             <p>Start a conversation below.</p>
           </div>
-        ) : (
-          <div className="transcript" aria-live="polite">
+          ) : (
+          <div
+            className="transcript"
+            aria-live="polite"
+            onScroll={() => setOpenMessageActions(null)}
+          >
             {active.turns.map((turn) => {
               const version = turn.versions[turn.activeVersion];
               const userMessage = version.user;
@@ -755,12 +795,6 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
                   <article className="message user">
                     <div className="message-label">You</div>
                     <div className="message-bubble">{userMessage.content}</div>
-                    <div className="message-actions" aria-label="Prompt actions">
-                      <button type="button" onClick={() => void copyPrompt(userMessage)}>
-                        {copiedMessageId === userMessage.id ? "Copied" : "Copy"}
-                      </button>
-                      <button type="button" onClick={() => editTurn(turn)}>Edit</button>
-                    </div>
                     {turn.versions.length > 1 && (
                       <div className="version-controls" aria-label="Prompt versions">
                         <button type="button" aria-label="Previous prompt version" disabled={turn.activeVersion === 0 || isStreaming} onClick={() => selectVersion(turn.id, -1)}>‹</button>
@@ -769,6 +803,44 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
                       </div>
                     )}
                   </article>
+                  {actionsOpen && (
+                    <div className="message-action-popover" role="menu" aria-label="Prompt actions">
+                      <div className="message-action-meta">Prompt actions</div>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          void copyPrompt(userMessage);
+                          setOpenMessageActions(null);
+                        }}
+                      >
+                        <span className="message-action-icon" aria-hidden="true">▣</span>
+                        <span>{copiedMessageId === userMessage.id ? "Copied" : "Copy"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          editTurn(turn);
+                          setOpenMessageActions(null);
+                        }}
+                      >
+                        <span className="message-action-icon" aria-hidden="true">⌕</span>
+                        <span>Edit</span>
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          void sharePrompt(userMessage);
+                          setOpenMessageActions(null);
+                        }}
+                      >
+                        <span className="message-action-icon" aria-hidden="true">↥</span>
+                        <span>Share prompt</span>
+                      </button>
+                    </div>
+                  )}
                   <article className="message assistant">
                     <div className="message-label">Response</div>
                     {(Boolean(assistantMessage.reasoning) || (assistantMessage.thinkingEnabled && assistantMessage.status === "streaming")) && (

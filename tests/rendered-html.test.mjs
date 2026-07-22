@@ -142,6 +142,22 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(styles, /\.chat-active \.composer-wrap[\s\S]*?position: absolute;/);
 });
 
+test("keeps mobile prompt actions prominent and ephemeral", async () => {
+  const [page, styles] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /message-action-popover/);
+  assert.match(page, /role="menuitem"/);
+  assert.match(page, /Share prompt/);
+  assert.match(page, /navigator\.share/);
+  assert.match(page, /event\.key === "Escape"\) setOpenMessageActions\(null\)/);
+  assert.match(page, /onScroll=\{\(\) => setOpenMessageActions\(null\)\}/);
+  assert.match(styles, /\.message-action-popover[\s\S]*?backdrop-filter: blur\(16px\)/);
+  assert.match(styles, /\.message-actions-open \.message\.user \.message-bubble[\s\S]*?font-size: 19px/);
+});
+
 test("renders assistant Markdown and LaTeX with the bobert default prompt", async () => {
   const [page, renderer, layout, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),

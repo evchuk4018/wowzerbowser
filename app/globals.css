@@ -586,6 +586,7 @@ button {
 }
 
 .message-pair {
+  position: relative;
   margin-bottom: 34px;
   touch-action: pan-y;
 }
@@ -624,14 +625,6 @@ button {
   padding: 12px 17px;
 }
 
-.message-actions {
-  display: flex;
-  gap: 5px;
-  margin-top: 7px;
-  opacity: .8;
-}
-
-.message-actions button,
 .version-controls button {
   border: 0;
   border-radius: 6px;
@@ -642,10 +635,71 @@ button {
   font-size: 11px;
 }
 
-.message-actions button:hover,
 .version-controls button:hover:not(:disabled) {
   background: #34352f;
   color: var(--text);
+}
+
+.message-action-popover {
+  position: absolute;
+  top: min(100%, 190px);
+  right: 0;
+  z-index: 8;
+  display: grid;
+  width: min(272px, calc(100vw - 32px));
+  gap: 2px;
+  border: 1px solid rgba(255, 255, 255, .13);
+  border-radius: 20px;
+  background: rgba(31, 31, 33, .96);
+  padding: 10px;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, .48), 0 3px 14px rgba(0, 0, 0, .24);
+  backdrop-filter: blur(16px);
+  animation: message-action-pop-in 150ms ease-out;
+}
+
+.message-action-meta {
+  padding: 3px 12px 8px;
+  color: #98989f;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.message-action-popover button {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  gap: 13px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  padding: 0 12px;
+  color: #f1f1f2;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 560;
+  text-align: left;
+}
+
+.message-action-popover button:hover,
+.message-action-popover button:focus-visible {
+  outline: 0;
+  background: rgba(255, 255, 255, .1);
+}
+
+.message-action-icon {
+  display: inline-flex;
+  width: 22px;
+  justify-content: center;
+  color: #e6e6e8;
+  font-size: 22px;
+  font-weight: 400;
+}
+
+@keyframes message-action-pop-in {
+  from { opacity: 0; transform: translateY(6px) scale(.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .version-controls {
@@ -1098,12 +1152,26 @@ button {
     padding-bottom: 210px;
   }
 
-  .message-actions {
-    display: none;
+  .message-actions-open .message.user .message-bubble {
+    border-color: #5b5d54;
+    background: #34352f;
+    box-shadow: 0 9px 25px rgba(0, 0, 0, .2);
+    font-size: 19px;
+    line-height: 1.55;
+    transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease, font-size 150ms ease;
   }
 
-  .message-actions-open .message-actions {
-    display: flex;
+  .message-action-popover {
+    top: min(100%, 210px);
+    right: 0;
+    width: min(276px, calc(100vw - 32px));
+    border-radius: 22px;
+    padding: 11px;
+  }
+
+  .message-action-popover button {
+    min-height: 50px;
+    font-size: 17px;
   }
 
   .composer-wrap,
