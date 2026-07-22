@@ -31,6 +31,7 @@ body {
 }
 
 button,
+input,
 textarea {
   font: inherit;
 }
@@ -40,6 +41,7 @@ button {
 }
 
 .loading-shell,
+.auth-shell,
 .app-shell {
   min-height: 100dvh;
   background: var(--bg);
@@ -48,6 +50,100 @@ button {
 .app-shell {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
+}
+
+.auth-shell {
+  display: grid;
+  min-height: 100dvh;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 50% 35%, rgba(212, 255, 112, .07), transparent 34%),
+    var(--bg);
+}
+
+.auth-card {
+  width: min(100%, 430px);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--sidebar);
+  padding: 38px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .28);
+}
+
+.auth-card .spark-mark {
+  margin: 0 0 18px;
+}
+
+.auth-card h1 {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 520;
+  letter-spacing: -.04em;
+}
+
+.auth-card > p {
+  margin: 10px 0 28px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.auth-form {
+  display: grid;
+  gap: 10px;
+}
+
+.auth-form label {
+  color: #d8d8d1;
+  font-size: 13px;
+  font-weight: 560;
+}
+
+.auth-form input {
+  width: 100%;
+  height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  outline: none;
+  background: var(--panel);
+  padding: 0 14px;
+  color: var(--text);
+}
+
+.auth-form input:focus {
+  border-color: #676960;
+  box-shadow: 0 0 0 3px rgba(212, 255, 112, .08);
+}
+
+.auth-form button {
+  height: 48px;
+  margin-top: 5px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--accent);
+  color: #20211f;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.auth-form button:disabled {
+  cursor: default;
+  opacity: .5;
+}
+
+.auth-error {
+  margin: 2px 0 0;
+  color: #ff9c91;
+  font-size: 13px;
+}
+
+.auth-success {
+  border: 1px solid rgba(212, 255, 112, .24);
+  border-radius: 12px;
+  background: rgba(212, 255, 112, .07);
+  padding: 15px;
+  color: #e6f5c1;
+  line-height: 1.55;
 }
 
 .sidebar {
@@ -215,8 +311,15 @@ button {
 }
 
 .account-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 14px;
   font-weight: 560;
+}
+
+.account-details {
+  min-width: 0;
 }
 
 .account-note {
@@ -232,6 +335,21 @@ button {
   border-radius: 8px;
   color: var(--muted);
   letter-spacing: 2px;
+}
+
+.sign-out-button {
+  flex: 0 0 auto;
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  padding: 7px 3px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.sign-out-button:hover {
+  color: var(--text);
 }
 
 .chat-area {
@@ -422,6 +540,10 @@ button {
 }
 
 @media (max-width: 760px) {
+  .auth-card {
+    padding: 30px 24px;
+  }
+
   .app-shell {
     display: block;
   }

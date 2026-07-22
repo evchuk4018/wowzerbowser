@@ -1,6 +1,9 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import { MagicLinkForm } from "./auth/magic-link-form";
+import type { AuthUser } from "./auth/types";
+import { useAuthSession } from "./auth/use-auth-session";
 
 type Message = {
   id: string;
@@ -14,7 +17,8 @@ type Conversation = {
   messages: Message[];
 };
 
-const STORAGE_KEY = "local-chat-conversations";
+const storageKeyFor = (userId: string) => `local-chat-conversations:${userId}`;
+const LEGACY_STORAGE_KEY = "local-chat-conversations";
 
 const makeId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -28,6 +32,30 @@ const createConversation = (): Conversation => ({
 });
 
 export default function Home() {
+  const { state, sendMagicLink, signOut } = useAuthSession();
+
+  if (state.status === "loading") {
+    return <main className="loading-shell" aria-label="Loading session" />;
+  }
+
+  if (state.status !== "authenticated") {
+    return (
+      <MagicLinkForm
+        error={state.status === "error" ? state.error : null}
+        onSubmit={sendMagicLink}
+      />
+    );
+  }
+
+  return <ChatWorkspace key={state.user.id} user={state.user} onSignOut={signOut} />;
+}
+
+type ChatWorkspaceProps = {
+  user: AuthUser;
+  onSignOut: () => Promise<void>;
+};
+
+function ChatWorkspace({ user, onSignOut }: ChatWorkspaceProps) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState("");
   const [draft, setDraft] = useState("");
@@ -39,9 +67,13 @@ export default function Home() {
   useEffect(() => {
     const loadStoredChats = window.setTimeout(() => {
       try {
-        const stored = localStorage.getItem(STORAGE_KEY);
+        const userStorageKey = storageKeyFor(user.id);
+        const userStored = localStorage.getItem(userStorageKey);
+        const legacyStored = userStored ? null : localStorage.getItem(LEGACY_STORAGE_KEY);
+        const stored = userStored ?? legacyStored;
         const parsed = stored ? (JSON.parse(stored) as Conversation[]) : [];
         const initial = parsed.length ? parsed : [createConversation()];
+        if (legacyStored) localStorage.setItem(userStorageKey, legacyStored);
         setConversations(initial);
         setActiveId(initial[0].id);
       } catch {
@@ -53,11 +85,13 @@ export default function Home() {
     }, 0);
 
     return () => window.clearTimeout(loadStoredChats);
-  }, []);
+  }, [user.id]);
 
   useEffect(() => {
-    if (ready) localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
-  }, [conversations, ready]);
+    if (ready) {
+      localStorage.setItem(storageKeyFor(user.id), JSON.stringify(conversations));
+    }
+  }, [conversations, ready, user.id]);
 
   const active = conversations.find((conversation) => conversation.id === activeId);
 
@@ -180,13 +214,18 @@ export default function Home() {
         </nav>
 
         <div className="sidebar-footer">
-          <div className="avatar">U</div>
-          <div>
-            <div className="account-name">User</div>
-            <div className="account-note">Local workspace</div>
+          <div className="avatar">{user.email.charAt(0).toUpperCase()}</div>
+          <div className="account-details">
+            <div className="account-name">{user.email}</div>
+            <div className="account-note">Magic link account</div>
           </div>
-          <button className="more-button" type="button" aria-label="Account options">
-            ···
+          <button
+            className="sign-out-button"
+            type="button"
+            aria-label="Sign out"
+            onClick={() => void onSignOut()}
+          >
+            Sign out
           </button>
         </div>
       </aside>
