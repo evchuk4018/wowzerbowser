@@ -156,6 +156,7 @@ test("keeps mobile prompt actions prominent and ephemeral", async () => {
   assert.match(page, /onScroll=\{\(\) => setOpenMessageActions\(null\)\}/);
   assert.match(styles, /\.message-action-popover[\s\S]*?backdrop-filter: blur\(16px\)/);
   assert.match(styles, /\.message-actions-open \.message\.user \.message-bubble[\s\S]*?font-size: 19px/);
+  assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.message\.user \.message-bubble \{[\s\S]*?user-select: none;[\s\S]*?-webkit-user-select: none;/);
 });
 
 test("renders assistant Markdown and LaTeX with the bobert default prompt", async () => {

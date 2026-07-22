@@ -1088,6 +1088,11 @@ button {
 }
 
 @media (max-width: 760px) {
+  .message.user .message-bubble {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
   .auth-card {
     padding: 30px 24px;
   }
