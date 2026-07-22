@@ -101,7 +101,10 @@ test("keeps DeepSeek access server-side and uses the V4 thinking contract", asyn
   assert.match(protocol, /deepseek-v4-flash/);
   assert.match(protocol, /deepseek-v4-pro/);
   assert.match(protocol, /reasoningEffort/);
+  assert.match(protocol, /systemPrompt/);
+  assert.match(protocol, /userPresence/);
   assert.match(adapter, /https:\/\/api\.deepseek\.com/);
+  assert.match(adapter, /role: "system"/);
   assert.match(adapter, /reasoning_content/);
   assert.match(adapter, /reasoning_effort/);
   assert.match(adapter, /thinking/);
@@ -124,6 +127,11 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(composer, /aria-controls="thinking-options"/);
   assert.match(composer, /aria-pressed=/);
   assert.match(page, /supportedEfforts/);
+  assert.match(page, /Open settings/);
+  assert.match(page, /local-chat-settings/);
+  assert.match(page, /Always respond in English/);
+  assert.match(page, /User presence/);
+  assert.match(styles, /backdrop-filter: blur\(8px\)/);
   assert.doesNotMatch(page, /Messages stay on this device/);
   assert.doesNotMatch(styles, /privacy-note/);
   assert.match(styles, /bottom: calc\(100% \+ 8px\)/);

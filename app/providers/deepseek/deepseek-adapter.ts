@@ -157,7 +157,13 @@ export async function* streamDeepSeekChat(
     signal,
     body: JSON.stringify({
       model: request.model,
-      messages: request.messages,
+      messages: [
+        { role: "system", content: request.systemPrompt },
+        ...(request.userPresence
+          ? [{ role: "system" as const, content: request.userPresence }]
+          : []),
+        ...request.messages,
+      ],
       stream: true,
       thinking: { type: request.thinking ? "enabled" : "disabled" },
       ...(request.thinking ? { reasoning_effort: request.reasoningEffort } : {}),

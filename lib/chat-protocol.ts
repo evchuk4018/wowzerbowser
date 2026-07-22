@@ -1,5 +1,6 @@
 export const CHAT_MODEL_IDS = ["deepseek-v4-flash", "deepseek-v4-pro"] as const;
 export type ChatModelId = (typeof CHAT_MODEL_IDS)[number];
+const MAX_PROMPT_LENGTH = 12000;
 
 export type ChatReasoningEffort = "high" | "max";
 
@@ -9,6 +10,8 @@ export type ChatMessageInput = {
 };
 
 export type ChatRequest = {
+  systemPrompt: string;
+  userPresence: string;
   messages: ChatMessageInput[];
   model: ChatModelId;
   thinking: boolean;
@@ -64,10 +67,24 @@ function readNonEmptyString(value: unknown, field: string): string {
   return value.trim();
 }
 
+function readString(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw new ChatRequestValidationError(`${field} must be a string.`);
+  }
+  const result = value.trim();
+  if (result.length > MAX_PROMPT_LENGTH) {
+    throw new ChatRequestValidationError(`${field} is too long.`);
+  }
+  return result;
+}
+
 export function parseChatRequest(value: unknown): ChatRequest {
   if (!isRecord(value) || !Array.isArray(value.messages)) {
     throw new ChatRequestValidationError("messages must be an array.");
   }
+
+  const systemPrompt = readNonEmptyString(value.systemPrompt, "systemPrompt");
+  const userPresence = readString(value.userPresence, "userPresence");
 
   const messages = value.messages.map((message, index) => {
     if (!isRecord(message) || (message.role !== "user" && message.role !== "assistant")) {
@@ -96,6 +113,8 @@ export function parseChatRequest(value: unknown): ChatRequest {
   }
 
   return {
+    systemPrompt,
+    userPresence,
     messages,
     model: value.model as ChatModelId,
     thinking: value.thinking,
