@@ -24,10 +24,22 @@ type Message = {
   error?: string;
 };
 
+type TurnVersion = {
+  id: string;
+  user: Message;
+  assistant: Message;
+};
+
+type ConversationTurn = {
+  id: string;
+  versions: TurnVersion[];
+  activeVersion: number;
+};
+
 type Conversation = {
   id: string;
   title: string;
-  messages: Message[];
+  turns: ConversationTurn[];
 };
 
 type ChatSettings = {
@@ -83,8 +95,29 @@ const makeId = () =>
 const createConversation = (): Conversation => ({
   id: makeId(),
   title: "New conversation",
-  messages: [],
+  turns: [],
 });
+
+function migrateConversation(value: unknown): Conversation | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<Conversation> & { messages?: Message[] };
+  if (typeof candidate.id !== "string" || typeof candidate.title !== "string") return null;
+  if (Array.isArray(candidate.turns)) return candidate as Conversation;
+  if (!Array.isArray(candidate.messages)) return null;
+
+  const turns: ConversationTurn[] = [];
+  for (let index = 0; index < candidate.messages.length; index += 2) {
+    const user = candidate.messages[index];
+    const assistant = candidate.messages[index + 1];
+    if (!user || user.role !== "user" || !assistant || assistant.role !== "assistant") continue;
+    turns.push({
+      id: makeId(),
+      versions: [{ id: makeId(), user, assistant }],
+      activeVersion: 0,
+    });
+  }
+  return { id: candidate.id, title: candidate.title, turns };
+}
 
 export default function Home() {
   const {
@@ -146,6 +179,9 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   const [thinkingMessageId, setThinkingMessageId] = useState<string | null>(null);
   const [thinkingNow, setThinkingNow] = useState(0);
   const [openMenu, setOpenMenu] = useState<"model" | "thinking" | null>(null);
+  const [editingTurnId, setEditingTurnId] = useState<string | null>(null);
+  const [openMessageActions, setOpenMessageActions] = useState<string | null>(null);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [settings, setSettings] = useState<ChatSettings>({
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     userPresence: "",
@@ -155,6 +191,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const thinkingStartedAtRef = useRef<number | null>(null);
+  const longPressTimerRef = useRef<number | null>(null);
   const activeRequestRef = useRef<{
     conversationId: string;
     messageId: string;
@@ -168,8 +205,9 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
         const userStored = localStorage.getItem(userStorageKey);
         const legacyStored = userStored ? null : localStorage.getItem(LEGACY_STORAGE_KEY);
         const stored = userStored ?? legacyStored;
-        const parsed = stored ? (JSON.parse(stored) as Conversation[]) : [];
-        const initial = parsed.length ? parsed : [createConversation()];
+        const parsed = stored ? (JSON.parse(stored) as unknown[]) : [];
+        const migrated = parsed.map(migrateConversation).filter((item): item is Conversation => item !== null);
+        const initial = migrated.length ? migrated : [createConversation()];
         if (legacyStored) localStorage.setItem(userStorageKey, legacyStored);
         setConversations(initial);
         setActiveId(initial[0].id);
@@ -223,7 +261,9 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   }, [getAccessToken]);
 
   const active = conversations.find((conversation) => conversation.id === activeId);
-  const latestMessage = active ? active.messages[active.messages.length - 1] : undefined;
+  const latestTurn = active?.turns[active.turns.length - 1];
+  const latestVersion = latestTurn?.versions[latestTurn.activeVersion];
+  const latestMessage = latestVersion?.assistant;
   const isStreaming = streamingMessageId !== null;
   const selectedModel = models.find((availableModel) => availableModel.id === model) ?? models[0];
   const supportedEfforts = useMemo(
@@ -281,7 +321,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [active?.messages.length, latestMessage?.content.length, latestMessage?.reasoning?.length]);
+  }, [active?.turns.length, latestMessage?.content.length, latestMessage?.reasoning?.length]);
 
   useEffect(() => {
     const handleShortcut = (event: globalThis.KeyboardEvent) => {
@@ -299,7 +339,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   }, []);
 
   const startNewChat = () => {
-    const existingBlank = conversations.find((item) => item.messages.length === 0);
+    const existingBlank = conversations.find((item) => item.turns.length === 0);
     if (existingBlank) {
       setActiveId(existingBlank.id);
     } else {
@@ -308,6 +348,8 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
       setActiveId(next.id);
     }
     setDraft("");
+    setEditingTurnId(null);
+    setOpenMessageActions(null);
     setSidebarOpen(false);
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
@@ -319,12 +361,20 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   ) => {
     setConversations((current) =>
       current.map((conversation) =>
-        conversation.id === conversationId
+      conversation.id === conversationId
           ? {
               ...conversation,
-              messages: conversation.messages.map((message) =>
-                message.id === messageId ? update(message) : message,
-              ),
+              turns: conversation.turns.map((turn) => ({
+                ...turn,
+                versions: turn.versions.map((version) => ({
+                  ...version,
+                  user: version.user.id === messageId ? update(version.user) : version.user,
+                  assistant:
+                    version.assistant.id === messageId
+                      ? update(version.assistant)
+                      : version.assistant,
+                })),
+              })),
             }
           : conversation,
       ),
@@ -345,6 +395,63 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
     thinkingStartedAtRef.current = null;
   };
 
+  const editTurn = (turn: ConversationTurn) => {
+    const version = turn.versions[turn.activeVersion];
+    setDraft(version.user.content);
+    setEditingTurnId(turn.id);
+    setOpenMessageActions(null);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
+  const copyPrompt = async (message: Message) => {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopiedMessageId(message.id);
+      window.setTimeout(() => setCopiedMessageId(null), 1400);
+    } catch {
+      // Clipboard access can be unavailable in an insecure or restricted context.
+    }
+  };
+
+  const selectVersion = (turnId: string, direction: -1 | 1) => {
+    setConversations((current) =>
+      current.map((conversation) =>
+        conversation.id !== activeId
+          ? conversation
+          : {
+              ...conversation,
+              turns: conversation.turns.map((turn) =>
+                turn.id !== turnId
+                  ? turn
+                  : {
+                      ...turn,
+                      activeVersion: Math.max(
+                        0,
+                        Math.min(turn.versions.length - 1, turn.activeVersion + direction),
+                      ),
+                    },
+              ),
+            },
+      ),
+    );
+  };
+
+  const cancelLongPress = () => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const startLongPress = (turnId: string, pointerType: string) => {
+    cancelLongPress();
+    if (pointerType !== "touch") return;
+    longPressTimerRef.current = window.setTimeout(() => {
+      setOpenMessageActions(turnId);
+      longPressTimerRef.current = null;
+    }, 500);
+  };
+
   const sendMessage = async (event?: FormEvent) => {
     event?.preventDefault();
     const content = draft.trim();
@@ -360,7 +467,16 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
       status: "streaming",
     };
     const conversationId = active.id;
-    const requestMessages = [...active.messages, userMessage]
+    const editingTurnIndex = editingTurnId
+      ? active.turns.findIndex((turn) => turn.id === editingTurnId)
+      : -1;
+    const contextTurns = editingTurnIndex >= 0 ? active.turns.slice(0, editingTurnIndex) : active.turns;
+    const requestMessages = contextTurns
+      .flatMap((turn) => {
+        const version = turn.versions[turn.activeVersion];
+        return [version.user, version.assistant];
+      })
+      .concat(userMessage)
       .filter((message) => message.content.trim())
       .map(({ role, content: messageContent }) => ({ role, content: messageContent }));
 
@@ -370,13 +486,36 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
           ? {
               ...conversation,
               title:
-                conversation.messages.length === 0 ? content.slice(0, 42) : conversation.title,
-              messages: [...conversation.messages, userMessage, assistantMessage],
+                conversation.turns.length === 0 ? content.slice(0, 42) : conversation.title,
+              turns:
+                editingTurnIndex >= 0
+                  ? conversation.turns.map((turn, index) =>
+                      index === editingTurnIndex
+                        ? {
+                            ...turn,
+                            versions: [
+                              ...turn.versions,
+                              { id: makeId(), user: userMessage, assistant: assistantMessage },
+                            ],
+                            activeVersion: turn.versions.length,
+                          }
+                        : turn,
+                    )
+                  : [
+                      ...conversation.turns,
+                      {
+                        id: makeId(),
+                        versions: [{ id: makeId(), user: userMessage, assistant: assistantMessage }],
+                        activeVersion: 0,
+                      },
+                    ],
             }
           : conversation,
       ),
     );
     setDraft("");
+    setEditingTurnId(null);
+    setOpenMessageActions(null);
 
     const controller = new AbortController();
     const requestThinkingStartedAt = effectiveThinking ? performance.now() : null;
@@ -486,7 +625,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
 
   if (!ready || !active) return <main className="loading-shell" aria-label="Loading chat" />;
 
-  const hasMessages = active.messages.length > 0;
+  const hasMessages = active.turns.length > 0;
   const closeSettings = () => {
     setSettingsOpen(false);
     requestAnimationFrame(() => settingsButtonRef.current?.focus());
@@ -595,7 +734,59 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
           </div>
         ) : (
           <div className="transcript" aria-live="polite">
-            {active.messages.map((message) => (
+            {active.turns.map((turn) => {
+              const version = turn.versions[turn.activeVersion];
+              const userMessage = version.user;
+              const assistantMessage = version.assistant;
+              const actionsOpen = openMessageActions === turn.id;
+              return (
+                <article
+                  key={turn.id}
+                  className={`message-pair ${actionsOpen ? "message-actions-open" : ""}`}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setOpenMessageActions(turn.id);
+                  }}
+                  onPointerDown={(event) => startLongPress(turn.id, event.pointerType)}
+                  onPointerUp={cancelLongPress}
+                  onPointerCancel={cancelLongPress}
+                  onPointerMove={cancelLongPress}
+                >
+                  <article className="message user">
+                    <div className="message-label">You</div>
+                    <div className="message-bubble">{userMessage.content}</div>
+                    <div className="message-actions" aria-label="Prompt actions">
+                      <button type="button" onClick={() => void copyPrompt(userMessage)}>
+                        {copiedMessageId === userMessage.id ? "Copied" : "Copy"}
+                      </button>
+                      <button type="button" onClick={() => editTurn(turn)}>Edit</button>
+                    </div>
+                    {turn.versions.length > 1 && (
+                      <div className="version-controls" aria-label="Prompt versions">
+                        <button type="button" aria-label="Previous prompt version" disabled={turn.activeVersion === 0 || isStreaming} onClick={() => selectVersion(turn.id, -1)}>‹</button>
+                        <span>{turn.activeVersion + 1} / {turn.versions.length}</span>
+                        <button type="button" aria-label="Next prompt version" disabled={turn.activeVersion === turn.versions.length - 1 || isStreaming} onClick={() => selectVersion(turn.id, 1)}>›</button>
+                      </div>
+                    )}
+                  </article>
+                  <article className="message assistant">
+                    <div className="message-label">Response</div>
+                    {(Boolean(assistantMessage.reasoning) || (assistantMessage.thinkingEnabled && assistantMessage.status === "streaming")) && (
+                      <ReasoningBlock
+                        message={assistantMessage}
+                        liveDurationMs={thinkingMessageId === assistantMessage.id ? Math.max(0, thinkingNow) : undefined}
+                      />
+                    )}
+                    <div className="message-bubble">
+                      {assistantMessage.content ? <AssistantResponse content={assistantMessage.content} /> : assistantMessage.status === "streaming" ? <span className="streaming-placeholder">Generatingâ€¦</span> : null}
+                    </div>
+                    {assistantMessage.error && <div className="message-error">{assistantMessage.error}</div>}
+                    {assistantMessage.status === "cancelled" && <div className="message-note">Response stopped.</div>}
+                  </article>
+                </article>
+              );
+            })}
+            {/* legacy renderer retained only in history-compatible source context
               <article key={message.id} className={`message ${message.role}`}>
                 <div className="message-label">
                   {message.role === "user" ? "You" : "Response"}
@@ -626,7 +817,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
                   <div className="message-note">Response stopped.</div>
                 )}
               </article>
-            ))}
+            */}
             <div ref={endRef} />
           </div>
         )}
@@ -650,6 +841,11 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
           canThink={canThink}
           effectiveThinking={effectiveThinking}
           effectiveEffort={effectiveEffort}
+          editing={editingTurnId !== null}
+          onCancelEdit={() => {
+            setEditingTurnId(null);
+            setDraft("");
+          }}
           onSubmit={(event) => void sendMessage(event)}
           onKeyDown={handleKeyDown}
           onStop={stopStreaming}

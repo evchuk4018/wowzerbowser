@@ -585,6 +585,15 @@ button {
   margin-bottom: 34px;
 }
 
+.message-pair {
+  margin-bottom: 34px;
+  touch-action: pan-y;
+}
+
+.message-pair .message {
+  margin-bottom: 0;
+}
+
 .message.user {
   display: flex;
   align-items: flex-end;
@@ -613,6 +622,51 @@ button {
   border-radius: 18px 18px 5px 18px;
   background: #2b2c29;
   padding: 12px 17px;
+}
+
+.message-actions {
+  display: flex;
+  gap: 5px;
+  margin-top: 7px;
+  opacity: .8;
+}
+
+.message-actions button,
+.version-controls button {
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  padding: 3px 6px;
+  color: var(--quiet);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.message-actions button:hover,
+.version-controls button:hover:not(:disabled) {
+  background: #34352f;
+  color: var(--text);
+}
+
+.version-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 4px;
+  color: var(--quiet);
+  font-size: 11px;
+}
+
+.version-controls button {
+  min-width: 22px;
+  padding: 0;
+  font-size: 17px;
+  line-height: 18px;
+}
+
+.version-controls button:disabled {
+  cursor: default;
+  opacity: .3;
 }
 
 .message.assistant .message-bubble {
@@ -799,6 +853,28 @@ button {
   color: var(--text);
   font-size: 16px;
   line-height: 1.5;
+}
+
+.composer-editing {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: -2px 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.composer-editing button {
+  border: 0;
+  background: transparent;
+  padding: 2px 4px;
+  color: var(--quiet);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.composer-editing button:hover {
+  color: var(--text);
 }
 
 .composer textarea::placeholder {
@@ -1020,6 +1096,14 @@ button {
     width: calc(100% - 28px);
     padding-top: 70px;
     padding-bottom: 210px;
+  }
+
+  .message-actions {
+    display: none;
+  }
+
+  .message-actions-open .message-actions {
+    display: flex;
   }
 
   .composer-wrap,

@@ -22,6 +22,8 @@ export type ChatComposerProps = {
   canThink: boolean;
   effectiveThinking: boolean;
   effectiveEffort: ChatReasoningEffort;
+  editing: boolean;
+  onCancelEdit: () => void;
   onSubmit: (event?: FormEvent<HTMLFormElement>) => void | Promise<void>;
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onStop: () => void;
@@ -46,6 +48,8 @@ export function ChatComposer({
   canThink,
   effectiveThinking,
   effectiveEffort,
+  editing,
+  onCancelEdit,
   onSubmit,
   onKeyDown,
   onStop,
@@ -53,6 +57,12 @@ export function ChatComposer({
   return (
     <form className="composer-wrap" onSubmit={(event) => void onSubmit(event)}>
       <div className="composer">
+        {editing && (
+          <div className="composer-editing">
+            <span>Editing prompt</span>
+            <button type="button" onClick={onCancelEdit}>Cancel</button>
+          </div>
+        )}
         <textarea
           ref={textareaRef}
           value={draft}
