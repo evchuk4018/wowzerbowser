@@ -57,12 +57,14 @@ test("server renders the local auth-aware app shell", async () => {
 });
 
 test("keeps Supabase calls behind adapters and owner authorization", async () => {
-  const [page, browserAdapter, serverAdapter, ownerService, magicLinkRoute] = await Promise.all([
+  const [page, browserAdapter, serverAdapter, ownerService, magicLinkRoute, authService, authForm] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/auth/supabase-browser-adapter.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/auth/supabase-server-adapter.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/auth/owner-auth-service.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/auth/magic-link/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/auth/auth-service.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/auth/magic-link-form.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.doesNotMatch(page, /@supabase\/supabase-js|createClient\(/);
@@ -73,6 +75,13 @@ test("keeps Supabase calls behind adapters and owner authorization", async () =>
   assert.match(ownerService, /APP_OWNER_EMAIL/);
   assert.match(ownerService, /NEXT_PUBLIC_SITE_URL/);
   assert.match(magicLinkRoute, /sendOwnerMagicLink/);
+  assert.match(magicLinkRoute, /magic_link_rate_limited/);
+  assert.match(authService, /MagicLinkRateLimitError/);
+  assert.match(authService, /response\.status === 429/);
+  assert.match(browserAdapter, /signInWithPassword/);
+  assert.match(browserAdapter, /signUp/);
+  assert.match(authForm, /Create password account/);
+  assert.match(authForm, /isMagicLinkRateLimitError/);
 });
 
 test("keeps DeepSeek access server-side and uses the V4 thinking contract", async () => {

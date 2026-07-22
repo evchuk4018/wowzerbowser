@@ -44,7 +44,14 @@ const createConversation = (): Conversation => ({
 });
 
 export default function Home() {
-  const { state, sendMagicLink, signOut, getAccessToken } = useAuthSession();
+  const {
+    state,
+    sendMagicLink,
+    signInWithPassword,
+    signUpWithPassword,
+    signOut,
+    getAccessToken,
+  } = useAuthSession();
 
   if (state.status === "loading") {
     return <main className="loading-shell" aria-label="Loading session" />;
@@ -55,6 +62,8 @@ export default function Home() {
       <MagicLinkForm
         error={state.status === "error" ? state.error : null}
         onSubmit={sendMagicLink}
+        onPasswordSignIn={signInWithPassword}
+        onPasswordSignUp={signUpWithPassword}
       />
     );
   }

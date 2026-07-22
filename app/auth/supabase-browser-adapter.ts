@@ -29,6 +29,11 @@ function mapUser(user: User | null): AuthUser | null {
   return { id: user.id, email: user.email };
 }
 
+function mapSession(session: { access_token: string; user: User } | null): AuthSession | null {
+  const user = mapUser(session?.user ?? null);
+  return session && user ? { accessToken: session.access_token, user } : null;
+}
+
 export const supabaseBrowserAuth = {
   async getSession(): Promise<AuthSession | null> {
     const supabase = getClient();
@@ -53,10 +58,27 @@ export const supabaseBrowserAuth = {
     if (error) throw error;
   },
 
+  async signInWithPassword(email: string, password: string): Promise<AuthSession> {
+    const { data, error } = await getClient().auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    const session = mapSession(data.session);
+    if (!session) throw new Error("Password sign-in did not create a session.");
+    return session;
+  },
+
+  async signUpWithPassword(email: string, password: string): Promise<AuthSession> {
+    const { data, error } = await getClient().auth.signUp({ email, password });
+    if (error) throw error;
+    const session = mapSession(data.session);
+    if (!session) {
+      throw new Error("Account created, but email confirmation is enabled. Disable it in Supabase to sign in automatically.");
+    }
+    return session;
+  },
+
   onSessionChange(listener: (session: AuthSession | null) => void): () => void {
     const { data } = getClient().auth.onAuthStateChange((_event, session) => {
-      const user = mapUser(session?.user ?? null);
-      listener(session && user ? { accessToken: session.access_token, user } : null);
+      listener(mapSession(session));
     });
     return () => data.subscription.unsubscribe();
   },

@@ -22,10 +22,10 @@ npm run build
 
 ## Authentication
 
-The app uses Supabase passwordless email authentication. Anonymous visitors see
-an email form; Supabase emails a magic link that returns to
-`https://wowzerbowser.vercel.app` in production, and the browser keeps the
-resulting session refreshed.
+The app uses Supabase email magic-link authentication with a password fallback
+when magic-link delivery is rate-limited. Anonymous visitors see an email form;
+the browser keeps the resulting Supabase session refreshed. Only
+`APP_OWNER_EMAIL` is authorized to access the app.
 
 Copy `.env.example` to an ignored `.env` and provide these settings before
 starting the app:
@@ -44,7 +44,9 @@ Supabase Auth dashboard. For local testing, set `NEXT_PUBLIC_SITE_URL` to
 `http://localhost:3000` and add that URL to the dashboard as well. Keep
 `SUPABASE_SECRET_KEY` server-only. Provider SDK access stays in the browser and
 server Supabase adapters; UI components call the domain-facing auth service and
-hook instead.
+hook instead. Password account creation uses Supabase browser signup and
+requires email confirmation to be disabled in the Supabase Auth settings so the
+new account receives a session immediately without email verification.
 
 ## Useful Commands
 

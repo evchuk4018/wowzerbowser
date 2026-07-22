@@ -133,6 +133,16 @@ button {
   opacity: .5;
 }
 
+.auth-form .text-button {
+  height: auto;
+  margin-top: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: underline;
+}
+
 .auth-error {
   margin: 2px 0 0;
   color: #ff9c91;

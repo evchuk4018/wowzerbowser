@@ -3,6 +3,19 @@ import type { AuthSession, AuthUser } from "./types";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+export class MagicLinkRateLimitError extends Error {
+  readonly code = "magic_link_rate_limited";
+
+  constructor() {
+    super("Magic links are temporarily rate-limited.");
+    this.name = "MagicLinkRateLimitError";
+  }
+}
+
+export function isMagicLinkRateLimitError(error: unknown): error is MagicLinkRateLimitError {
+  return error instanceof MagicLinkRateLimitError;
+}
+
 export async function getCurrentUser(): Promise<AuthUser | null> {
   return authorizeSession(await supabaseBrowserAuth.getSession());
 }
@@ -30,9 +43,26 @@ export async function requestMagicLink(emailInput: string): Promise<void> {
   });
 
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
+    const body = (await response.json().catch(() => null)) as
+      | { code?: string; error?: string }
+      | null;
+    if (body?.code === "magic_link_rate_limited" || response.status === 429) {
+      throw new MagicLinkRateLimitError();
+    }
     throw new Error(body?.error ?? "Could not send the magic link.");
   }
+}
+
+export async function signInWithPassword(emailInput: string, password: string): Promise<void> {
+  const email = normalizeEmail(emailInput);
+  validateEmail(email);
+  await supabaseBrowserAuth.signInWithPassword(email, password);
+}
+
+export async function signUpWithPassword(emailInput: string, password: string): Promise<void> {
+  const email = normalizeEmail(emailInput);
+  validateEmail(email);
+  await supabaseBrowserAuth.signUpWithPassword(email, password);
 }
 
 export async function signOut(): Promise<void> {
@@ -53,4 +83,12 @@ async function authorizeSession(session: AuthSession | null): Promise<AuthUser |
 
   const body = (await response.json()) as { user?: AuthUser };
   return body.user ?? null;
+}
+
+function normalizeEmail(emailInput: string): string {
+  return emailInput.trim().toLowerCase();
+}
+
+function validateEmail(email: string): void {
+  if (!EMAIL_PATTERN.test(email)) throw new Error("Enter a valid email address.");
 }

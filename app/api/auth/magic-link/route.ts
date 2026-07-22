@@ -18,6 +18,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ sent: true }, { status: 202 });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Could not send the magic link.";
+    const providerError = error as { status?: unknown; code?: unknown };
+    const isRateLimited =
+      providerError.status === 429 ||
+      String(providerError.code ?? "").toLowerCase().includes("rate_limit") ||
+      message.toLowerCase().includes("rate limit");
+    if (isRateLimited) {
+      return NextResponse.json(
+        { code: "magic_link_rate_limited", error: "Magic links are temporarily rate-limited." },
+        { status: 429 },
+      );
+    }
     const status = message === "Enter a valid email address." ? 400 : 500;
     return NextResponse.json({ error: message }, { status });
   }

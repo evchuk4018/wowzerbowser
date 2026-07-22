@@ -5,6 +5,8 @@ import {
   getCurrentAccessToken,
   getCurrentUser,
   requestMagicLink,
+  signInWithPassword,
+  signUpWithPassword,
   signOut,
   subscribeToAuth,
 } from "./auth-service";
@@ -64,6 +66,14 @@ export function useAuthSession() {
   }, []);
 
   const sendMagicLink = useCallback((email: string) => requestMagicLink(email), []);
+  const passwordSignIn = useCallback(
+    (email: string, password: string) => signInWithPassword(email, password),
+    [],
+  );
+  const passwordSignUp = useCallback(
+    (email: string, password: string) => signUpWithPassword(email, password),
+    [],
+  );
   const endSession = useCallback(async () => {
     try {
       await signOut();
@@ -76,5 +86,12 @@ export function useAuthSession() {
     }
   }, []);
 
-  return { state, sendMagicLink, signOut: endSession, getAccessToken: getCurrentAccessToken };
+  return {
+    state,
+    sendMagicLink,
+    signInWithPassword: passwordSignIn,
+    signUpWithPassword: passwordSignUp,
+    signOut: endSession,
+    getAccessToken: getCurrentAccessToken,
+  };
 }
