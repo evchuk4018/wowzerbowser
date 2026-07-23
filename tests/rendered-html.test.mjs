@@ -254,6 +254,33 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(styles, /\.chat-active \.composer-wrap[\s\S]*?position: absolute;/);
 });
 
+test("shows call activity without a generic generation indicator", async () => {
+  const [page, styles] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.doesNotMatch(page, /Generating(?:…|Ã¢â‚¬Â¦)/);
+  const waitingGuard = "if (controller.signal.aborted || activeRequestRef.current?.messageId !== assistantMessage.id)";
+  const waitingStateSetter = "setWaitingMessageId(assistantMessage.id)";
+  assert.ok(page.includes(waitingGuard));
+  assert.ok(page.includes(waitingStateSetter));
+  assert.ok(
+    page.indexOf(waitingGuard) < page.indexOf(waitingStateSetter),
+    "the cancelled-request guard must run before the waiting indicator state is set",
+  );
+  assert.match(page, /event\.type === "reasoning"[\s\S]*?current === assistantMessage\.id \? null : current/);
+  assert.match(page, /\{Boolean\(assistantMessage\.reasoning\) && \(/);
+  assert.doesNotMatch(page, /Waiting for reasoning/);
+  assert.match(page, /!assistantMessage\.thinkingEnabled && waitingMessageId === assistantMessage\.id[\s\S]*?<CallActivityIndicator \/>/);
+  assert.match(page, /!message\.thinkingEnabled && message\.status === "streaming"[\s\S]*?<CallActivityIndicator \/>/);
+  assert.match(page, /role="status" aria-label="Waiting for response"/);
+  assert.match(page, /<span aria-hidden="true">✦<\/span>/);
+  assert.match(styles, /\.call-activity-indicator > span[\s\S]*?animation: call-activity-pulse/);
+  assert.match(styles, /@keyframes call-activity-pulse/);
+  assert.match(styles, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.call-activity-indicator > span \{[\s\S]*?animation: none;/);
+});
+
 test("keeps mobile prompt actions prominent and ephemeral", async () => {
   const [page, styles] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),

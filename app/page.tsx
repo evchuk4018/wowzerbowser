@@ -176,6 +176,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   const [thinking, setThinking] = useState(false);
   const [effort, setEffort] = useState<ChatReasoningEffort>("high");
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
+  const [waitingMessageId, setWaitingMessageId] = useState<string | null>(null);
   const [thinkingMessageId, setThinkingMessageId] = useState<string | null>(null);
   const [thinkingNow, setThinkingNow] = useState(0);
   const [openMenu, setOpenMenu] = useState<"model" | "thinking" | null>(null);
@@ -413,6 +414,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
     }));
     activeRequestRef.current = null;
     setStreamingMessageId(null);
+    setWaitingMessageId(null);
     setThinkingMessageId(null);
     thinkingStartedAtRef.current = null;
   };
@@ -572,6 +574,9 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
     try {
       const accessToken = await getAccessToken();
       if (!accessToken) throw new Error("Your session expired. Please sign in again.");
+      if (controller.signal.aborted || activeRequestRef.current?.messageId !== assistantMessage.id) {
+        return;
+      }
 
       const request = {
         messages: requestMessages,
@@ -582,13 +587,20 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
         reasoningEffort: effectiveEffort,
       };
 
+      setWaitingMessageId(assistantMessage.id);
       for await (const event of streamChatResponse(request, accessToken, controller.signal)) {
         if (event.type === "reasoning") {
+          setWaitingMessageId((current) =>
+            current === assistantMessage.id ? null : current,
+          );
           updateMessage(conversationId, assistantMessage.id, (message) => ({
             ...message,
             reasoning: `${message.reasoning ?? ""}${event.delta}`,
           }));
         } else if (event.type === "content") {
+          setWaitingMessageId((current) =>
+            current === assistantMessage.id ? null : current,
+          );
           if (requestThinkingStartedAt !== null && !requestThinkingFinished) {
             const duration = performance.now() - requestThinkingStartedAt;
             requestThinkingFinished = true;
@@ -608,6 +620,9 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
             }));
           }
         } else if (event.type === "error") {
+          setWaitingMessageId((current) =>
+            current === assistantMessage.id ? null : current,
+          );
           streamError = true;
           updateMessage(conversationId, assistantMessage.id, (message) => ({
             ...message,
@@ -615,6 +630,9 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
             error: event.message,
           }));
         } else if (event.type === "done") {
+          setWaitingMessageId((current) =>
+            current === assistantMessage.id ? null : current,
+          );
           updateMessage(conversationId, assistantMessage.id, (message) => ({
             ...message,
             status: streamError ? "error" : "complete",
@@ -639,6 +657,9 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
       if (isCurrentRequest) {
         activeRequestRef.current = null;
         setStreamingMessageId(null);
+        setWaitingMessageId((current) =>
+          current === assistantMessage.id ? null : current,
+        );
         thinkingStartedAtRef.current = null;
         setThinkingMessageId(null);
       }
@@ -857,14 +878,18 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
                   </div>
                   <article className="message assistant">
                     <div className="message-label">Response</div>
-                    {(Boolean(assistantMessage.reasoning) || (assistantMessage.thinkingEnabled && assistantMessage.status === "streaming")) && (
+                    {Boolean(assistantMessage.reasoning) && (
                       <ReasoningBlock
                         message={assistantMessage}
                         liveDurationMs={thinkingMessageId === assistantMessage.id ? Math.max(0, thinkingNow) : undefined}
                       />
                     )}
                     <div className="message-bubble">
-                      {assistantMessage.content ? <AssistantResponse content={assistantMessage.content} /> : assistantMessage.status === "streaming" ? <span className="streaming-placeholder">Generatingâ€¦</span> : null}
+                      {assistantMessage.content ? (
+                        <AssistantResponse content={assistantMessage.content} />
+                      ) : !assistantMessage.thinkingEnabled && waitingMessageId === assistantMessage.id ? (
+                        <CallActivityIndicator />
+                      ) : null}
                     </div>
                     {assistantMessage.error && <div className="message-error">{assistantMessage.error}</div>}
                     {assistantMessage.status === "cancelled" && <div className="message-note">Response stopped.</div>}
@@ -877,9 +902,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
                 <div className="message-label">
                   {message.role === "user" ? "You" : "Response"}
                 </div>
-                {message.role === "assistant" &&
-                  (Boolean(message.reasoning) ||
-                    (message.thinkingEnabled && message.status === "streaming")) && (
+                {message.role === "assistant" && Boolean(message.reasoning) && (
                     <ReasoningBlock
                       message={message}
                       liveDurationMs={
@@ -894,8 +917,8 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
                     ) : (
                       message.content
                     )
-                  ) : message.status === "streaming" ? (
-                    <span className="streaming-placeholder">Generating…</span>
+                  ) : !message.thinkingEnabled && message.status === "streaming" ? (
+                    <CallActivityIndicator />
                   ) : null}
                 </div>
                 {message.error && <div className="message-error">{message.error}</div>}
@@ -1026,6 +1049,14 @@ function SettingsModal({
   );
 }
 
+function CallActivityIndicator() {
+  return (
+    <div className="call-activity-indicator" role="status" aria-label="Waiting for response">
+      <span aria-hidden="true">✦</span>
+    </div>
+  );
+}
+
 function ReasoningBlock({
   message,
   liveDurationMs,
@@ -1051,7 +1082,7 @@ function ReasoningBlock({
       </button>
       {open && (
         <div className="reasoning-content">
-          {message.reasoning || (isThinking ? "Waiting for reasoning…" : "No reasoning returned.")}
+          {message.reasoning}
         </div>
       )}
     </div>

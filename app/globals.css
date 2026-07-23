@@ -829,9 +829,31 @@ button {
   padding: 4px 0;
 }
 
-.streaming-placeholder {
-  color: var(--quiet);
-  font-style: italic;
+.call-activity-indicator {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  color: var(--accent);
+}
+
+.call-activity-indicator > span {
+  font-size: 24px;
+  line-height: 1;
+  animation: call-activity-pulse 1.35s ease-in-out infinite;
+}
+
+@keyframes call-activity-pulse {
+  0%,
+  100% {
+    opacity: .28;
+    transform: scale(.86);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .message-error {
@@ -1250,5 +1272,9 @@ button {
   *::after {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
+  }
+
+  .call-activity-indicator > span {
+    animation: none;
   }
 }
