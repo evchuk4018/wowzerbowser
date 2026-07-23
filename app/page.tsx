@@ -65,6 +65,12 @@ type DrawerGesture = {
   width: number;
 };
 
+type ActiveRequest = {
+  conversationId: string;
+  messageId: string;
+  controller: AbortController;
+};
+
 const DRAWER_DIRECTION_LOCK_PX = 8;
 const DRAWER_OPEN_THRESHOLD = 0.25;
 const DRAWER_GESTURE_IGNORE_SELECTOR = [
@@ -209,9 +215,9 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   const [model, setModel] = useState<ChatModelId>("deepseek-v4-flash");
   const [thinking, setThinking] = useState(false);
   const [effort, setEffort] = useState<ChatReasoningEffort>("high");
-  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
-  const [waitingMessageId, setWaitingMessageId] = useState<string | null>(null);
-  const [thinkingMessageId, setThinkingMessageId] = useState<string | null>(null);
+  const [runningRequests, setRunningRequests] = useState<Record<string, string>>({});
+  const [waitingMessageIds, setWaitingMessageIds] = useState<Record<string, string>>({});
+  const [thinkingMessageIds, setThinkingMessageIds] = useState<Record<string, string>>({});
   const [thinkingNow, setThinkingNow] = useState(0);
   const [openMenu, setOpenMenu] = useState<"model" | "thinking" | null>(null);
   const [editingTurnId, setEditingTurnId] = useState<string | null>(null);
@@ -226,16 +232,12 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   const sidebarRef = useRef<HTMLElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
-  const thinkingStartedAtRef = useRef<number | null>(null);
+  const thinkingStartedAtRef = useRef<Record<string, number | null>>({});
   const longPressTimerRef = useRef<number | null>(null);
   const drawerGestureRef = useRef<DrawerGesture | null>(null);
   const drawerProgressRef = useRef(0);
   const suppressScrimClickRef = useRef(false);
-  const activeRequestRef = useRef<{
-    conversationId: string;
-    messageId: string;
-    controller: AbortController;
-  } | null>(null);
+  const activeRequestRef = useRef<Record<string, ActiveRequest>>({});
 
   useEffect(() => {
     const loadStoredChats = window.setTimeout(() => {
@@ -312,7 +314,9 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   const latestTurn = active?.turns[active.turns.length - 1];
   const latestVersion = latestTurn?.versions[latestTurn.activeVersion];
   const latestMessage = latestVersion?.assistant;
-  const isStreaming = streamingMessageId !== null;
+  const isStreaming = Boolean(runningRequests[activeId]);
+  const waitingMessageId = waitingMessageIds[activeId];
+  const thinkingMessageId = thinkingMessageIds[activeId];
   const selectedModel = models.find((availableModel) => availableModel.id === model) ?? models[0];
   const supportedEfforts = useMemo(
     () => selectedModel?.supportedEfforts ?? [],
@@ -379,15 +383,15 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   }, [isStreaming]);
 
   useEffect(() => {
-    if (!thinkingMessageId || thinkingStartedAtRef.current === null) return;
+    if (!activeId || !thinkingMessageId || thinkingStartedAtRef.current[activeId] === null) return;
     const update = () => {
-      const startedAt = thinkingStartedAtRef.current;
+      const startedAt = thinkingStartedAtRef.current[activeId];
       if (startedAt !== null) setThinkingNow(performance.now() - startedAt);
     };
     update();
     const timer = window.setInterval(update, 100);
     return () => window.clearInterval(timer);
-  }, [thinkingMessageId]);
+  }, [activeId, thinkingMessageId]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -405,7 +409,9 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   });
 
   useEffect(() => {
-    return () => activeRequestRef.current?.controller.abort();
+    return () => {
+      Object.values(activeRequestRef.current).forEach((request) => request.controller.abort());
+    };
   }, []);
 
   const startNewChat = () => {
@@ -541,18 +547,30 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   };
 
   const stopStreaming = () => {
-    const activeRequest = activeRequestRef.current;
+    const activeRequest = activeId ? activeRequestRef.current[activeId] : undefined;
     if (!activeRequest) return;
     activeRequest.controller.abort();
     updateMessage(activeRequest.conversationId, activeRequest.messageId, (message) => ({
       ...message,
       status: "cancelled",
     }));
-    activeRequestRef.current = null;
-    setStreamingMessageId(null);
-    setWaitingMessageId(null);
-    setThinkingMessageId(null);
-    thinkingStartedAtRef.current = null;
+    delete activeRequestRef.current[activeRequest.conversationId];
+    setRunningRequests((current) => {
+      const next = { ...current };
+      delete next[activeRequest.conversationId];
+      return next;
+    });
+    setWaitingMessageIds((current) => {
+      const next = { ...current };
+      delete next[activeRequest.conversationId];
+      return next;
+    });
+    setThinkingMessageIds((current) => {
+      const next = { ...current };
+      delete next[activeRequest.conversationId];
+      return next;
+    });
+    delete thinkingStartedAtRef.current[activeRequest.conversationId];
   };
 
   const editTurn = (turn: ConversationTurn) => {
@@ -629,7 +647,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   const sendMessage = async (event?: FormEvent) => {
     event?.preventDefault();
     const content = draft.trim();
-    if (!content || !activeId || isStreaming || !active) return;
+    if (!content || !activeId || runningRequests[activeId] || !active) return;
 
     const userMessage: Message = { id: makeId(), role: "user", content };
     const assistantMessage: Message = {
@@ -694,23 +712,23 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
     const controller = new AbortController();
     const requestThinkingStartedAt = effectiveThinking ? performance.now() : null;
     let requestThinkingFinished = false;
-    activeRequestRef.current = {
+    activeRequestRef.current[conversationId] = {
       conversationId,
       messageId: assistantMessage.id,
       controller,
     };
-    setStreamingMessageId(assistantMessage.id);
+    setRunningRequests((current) => ({ ...current, [conversationId]: assistantMessage.id }));
     if (requestThinkingStartedAt !== null) {
-      thinkingStartedAtRef.current = requestThinkingStartedAt;
+      thinkingStartedAtRef.current[conversationId] = requestThinkingStartedAt;
       setThinkingNow(0);
-      setThinkingMessageId(assistantMessage.id);
+      setThinkingMessageIds((current) => ({ ...current, [conversationId]: assistantMessage.id }));
     }
 
     let streamError = false;
     try {
       const accessToken = await getAccessToken();
       if (!accessToken) throw new Error("Your session expired. Please sign in again.");
-      if (controller.signal.aborted || activeRequestRef.current?.messageId !== assistantMessage.id) {
+      if (controller.signal.aborted || activeRequestRef.current[conversationId]?.messageId !== assistantMessage.id) {
         return;
       }
 
@@ -723,26 +741,36 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
         reasoningEffort: effectiveEffort,
       };
 
-      setWaitingMessageId(assistantMessage.id);
+      setWaitingMessageIds((current) => ({ ...current, [conversationId]: assistantMessage.id }));
       for await (const event of streamChatResponse(request, accessToken, controller.signal)) {
         if (event.type === "reasoning") {
-          setWaitingMessageId((current) =>
-            current === assistantMessage.id ? null : current,
-          );
+          setWaitingMessageIds((current) => {
+            if (current[conversationId] !== assistantMessage.id) return current;
+            const next = { ...current };
+            delete next[conversationId];
+            return next;
+          });
           updateMessage(conversationId, assistantMessage.id, (message) => ({
             ...message,
             reasoning: `${message.reasoning ?? ""}${event.delta}`,
           }));
         } else if (event.type === "content") {
-          setWaitingMessageId((current) =>
-            current === assistantMessage.id ? null : current,
-          );
+          setWaitingMessageIds((current) => {
+            if (current[conversationId] !== assistantMessage.id) return current;
+            const next = { ...current };
+            delete next[conversationId];
+            return next;
+          });
           if (requestThinkingStartedAt !== null && !requestThinkingFinished) {
             const duration = performance.now() - requestThinkingStartedAt;
             requestThinkingFinished = true;
-            if (activeRequestRef.current?.messageId === assistantMessage.id) {
-              thinkingStartedAtRef.current = null;
-              setThinkingMessageId(null);
+            if (activeRequestRef.current[conversationId]?.messageId === assistantMessage.id) {
+              thinkingStartedAtRef.current[conversationId] = null;
+              setThinkingMessageIds((current) => {
+                const next = { ...current };
+                delete next[conversationId];
+                return next;
+              });
             }
             updateMessage(conversationId, assistantMessage.id, (message) => ({
               ...message,
@@ -756,9 +784,12 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
             }));
           }
         } else if (event.type === "error") {
-          setWaitingMessageId((current) =>
-            current === assistantMessage.id ? null : current,
-          );
+          setWaitingMessageIds((current) => {
+            if (current[conversationId] !== assistantMessage.id) return current;
+            const next = { ...current };
+            delete next[conversationId];
+            return next;
+          });
           streamError = true;
           updateMessage(conversationId, assistantMessage.id, (message) => ({
             ...message,
@@ -766,9 +797,12 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
             error: event.message,
           }));
         } else if (event.type === "done") {
-          setWaitingMessageId((current) =>
-            current === assistantMessage.id ? null : current,
-          );
+          setWaitingMessageIds((current) => {
+            if (current[conversationId] !== assistantMessage.id) return current;
+            const next = { ...current };
+            delete next[conversationId];
+            return next;
+          });
           updateMessage(conversationId, assistantMessage.id, (message) => ({
             ...message,
             status: streamError ? "error" : "complete",
@@ -789,15 +823,27 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
         }));
       }
     } finally {
-      const isCurrentRequest = activeRequestRef.current?.messageId === assistantMessage.id;
+      const isCurrentRequest = activeRequestRef.current[conversationId]?.messageId === assistantMessage.id;
       if (isCurrentRequest) {
-        activeRequestRef.current = null;
-        setStreamingMessageId(null);
-        setWaitingMessageId((current) =>
-          current === assistantMessage.id ? null : current,
-        );
-        thinkingStartedAtRef.current = null;
-        setThinkingMessageId(null);
+        delete activeRequestRef.current[conversationId];
+        setRunningRequests((current) => {
+          const next = { ...current };
+          delete next[conversationId];
+          return next;
+        });
+        setWaitingMessageIds((current) => {
+          if (current[conversationId] !== assistantMessage.id) return current;
+          const next = { ...current };
+          delete next[conversationId];
+          return next;
+        });
+        thinkingStartedAtRef.current[conversationId] = null;
+        setThinkingMessageIds((current) => {
+          if (current[conversationId] !== assistantMessage.id) return current;
+          const next = { ...current };
+          delete next[conversationId];
+          return next;
+        });
       }
       if (requestThinkingStartedAt !== null && !requestThinkingFinished) {
         const duration = performance.now() - requestThinkingStartedAt;
@@ -892,7 +938,14 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
                 setSidebarSettled(false);
               }}
             >
-              {conversation.title}
+              <span className="conversation-title">{conversation.title}</span>
+              {runningRequests[conversation.id] && (
+                <span
+                  className="conversation-streaming-indicator"
+                  role="status"
+                  aria-label="Streaming response"
+                />
+              )}
             </button>
           ))}
         </nav>

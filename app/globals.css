@@ -345,6 +345,9 @@ button {
 }
 
 .conversation-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
   overflow: hidden;
   border: 0;
@@ -356,6 +359,37 @@ button {
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.conversation-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conversation-streaming-indicator {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 0 rgba(255, 255, 255, .5);
+  animation: conversation-streaming-pulse 1.4s ease-out infinite;
+}
+
+@keyframes conversation-streaming-pulse {
+  70% {
+    box-shadow: 0 0 0 6px rgba(255, 255, 255, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conversation-streaming-indicator {
+    animation: none;
+  }
 }
 
 .conversation-item:hover,

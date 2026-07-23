@@ -283,15 +283,15 @@ test("shows call activity without a generic generation indicator", async () => {
   ]);
 
   assert.doesNotMatch(page, /Generating(?:…|Ã¢â‚¬Â¦)/);
-  const waitingGuard = "if (controller.signal.aborted || activeRequestRef.current?.messageId !== assistantMessage.id)";
-  const waitingStateSetter = "setWaitingMessageId(assistantMessage.id)";
+  const waitingGuard = "if (controller.signal.aborted || activeRequestRef.current[conversationId]?.messageId !== assistantMessage.id)";
+  const waitingStateSetter = "setWaitingMessageIds((current) => ({ ...current, [conversationId]: assistantMessage.id }))";
   assert.ok(page.includes(waitingGuard));
   assert.ok(page.includes(waitingStateSetter));
   assert.ok(
     page.indexOf(waitingGuard) < page.indexOf(waitingStateSetter),
     "the cancelled-request guard must run before the waiting indicator state is set",
   );
-  assert.match(page, /event\.type === "reasoning"[\s\S]*?current === assistantMessage\.id \? null : current/);
+  assert.match(page, /event\.type === "reasoning"[\s\S]*?current\[conversationId\] !== assistantMessage\.id/);
   assert.match(page, /\{Boolean\(assistantMessage\.reasoning\) && \(/);
   assert.doesNotMatch(page, /Waiting for reasoning/);
   assert.match(page, /!assistantMessage\.thinkingEnabled && waitingMessageId === assistantMessage\.id[\s\S]*?<CallActivityIndicator \/>/);
@@ -301,6 +301,23 @@ test("shows call activity without a generic generation indicator", async () => {
   assert.match(styles, /\.call-activity-indicator > span[\s\S]*?animation: call-activity-pulse/);
   assert.match(styles, /@keyframes call-activity-pulse/);
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.call-activity-indicator > span \{[\s\S]*?animation: none;/);
+});
+
+test("keeps concurrent streams isolated to their conversations", async () => {
+  const [page, styles] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /useState<Record<string, string>>\(\{\}\)/);
+  assert.match(page, /useRef<Record<string, ActiveRequest>>\(\{\}\)/);
+  assert.match(page, /runningRequests\[activeId\]/);
+  assert.match(page, /activeRequestRef\.current\[conversationId\]/);
+  assert.match(page, /delete activeRequestRef\.current\[activeRequest\.conversationId\]/);
+  assert.match(page, /className="conversation-streaming-indicator"/);
+  assert.match(page, /aria-label="Streaming response"/);
+  assert.match(styles, /\.conversation-streaming-indicator[\s\S]*?animation: conversation-streaming-pulse/);
+  assert.match(styles, /@keyframes conversation-streaming-pulse/);
 });
 
 test("keeps mobile prompt actions prominent and ephemeral", async () => {
