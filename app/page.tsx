@@ -494,7 +494,9 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
     drawerGestureRef.current = null;
     if (gesture.axis !== "horizontal") return;
 
-    const open = drawerProgressRef.current >= DRAWER_OPEN_THRESHOLD;
+    const open = gesture.startProgress === 0
+      ? drawerProgressRef.current >= DRAWER_OPEN_THRESHOLD
+      : drawerProgressRef.current > 1 - DRAWER_OPEN_THRESHOLD;
     if (event.currentTarget.classList.contains("sidebar-scrim")) {
       suppressScrimClickRef.current = true;
     }
