@@ -154,6 +154,23 @@ test("cancelling after crossing the opening threshold still settles the drawer o
   assert.equal(cancelled.suppressClick, true);
 });
 
+test("cancelling after crossing the closing threshold still settles the drawer closed", () => {
+  const controller = createDrawerGestureController();
+  start(controller, { open: true, x: 260 });
+  controller.move({
+    pointerId: 1,
+    x: 175,
+    y: 238,
+    width: 300,
+  });
+
+  const cancelled = controller.cancel({ pointerId: 1 });
+  assert.equal(cancelled.horizontal, true);
+  assert.equal(cancelled.open, false);
+  assert.equal(cancelled.progress, 0);
+  assert.equal(cancelled.suppressClick, true);
+});
+
 test("non-primary, mouse, invalid, and competing pointers do not take over", () => {
   const controller = createDrawerGestureController();
   assert.equal(start(controller, { isPrimary: false }).active, false);
