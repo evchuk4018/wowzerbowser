@@ -66,7 +66,7 @@ type DrawerGesture = {
 };
 
 const DRAWER_DIRECTION_LOCK_PX = 8;
-const DRAWER_OPEN_THRESHOLD = 0.5;
+const DRAWER_OPEN_THRESHOLD = 0.25;
 const DRAWER_GESTURE_IGNORE_SELECTOR = [
   ".composer-wrap",
   "a",

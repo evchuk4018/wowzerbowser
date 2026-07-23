@@ -312,7 +312,7 @@ test("keeps mobile history drawer movement progressive and chat centered", async
 
   assert.match(page, /drawerDragProgress/);
   assert.match(page, /clampDrawerProgress/);
-  assert.match(page, /DRAWER_OPEN_THRESHOLD = 0\.5/);
+  assert.match(page, /DRAWER_OPEN_THRESHOLD = 0\.25/);
   assert.match(page, /onPointerDown=\{beginDrawerGesture\}/);
   assert.match(page, /onPointerMove=\{updateDrawerGesture\}/);
   assert.match(page, /onPointerUp=\{finishDrawerGesture\}/);
