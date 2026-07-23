@@ -106,7 +106,6 @@ button {
   display: grid;
   height: 100dvh;
   min-height: 0;
-  overflow-x: clip;
   grid-template-columns: 300px minmax(0, 1fr);
 }
 
@@ -638,7 +637,6 @@ button {
   flex-direction: column;
   justify-content: center;
   overflow: hidden;
-  overscroll-behavior-x: none;
   background:
     radial-gradient(circle at 50% 38%, rgba(255, 255, 255, .018), transparent 31%),
     var(--bg);
@@ -695,8 +693,6 @@ button {
   padding: 34px 0 220px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  overscroll-behavior-x: none;
-  touch-action: pan-y;
 }
 
 .message {
@@ -897,7 +893,6 @@ button {
 }
 .assistant-markdown pre {
   overflow-x: auto;
-  touch-action: pan-x pan-y;
   border: 1px solid #3b3c38;
   border-radius: 10px;
   background: #20211f;
@@ -908,7 +903,6 @@ button {
   display: block;
   max-width: 100%;
   overflow-x: auto;
-  touch-action: pan-x pan-y;
   border-collapse: collapse;
 }
 .assistant-markdown th,
@@ -921,7 +915,6 @@ button {
 .assistant-markdown .katex-display {
   overflow-x: auto;
   overflow-y: hidden;
-  touch-action: pan-x pan-y;
   padding: 4px 0;
 }
 
@@ -1009,7 +1002,6 @@ button {
 .reasoning-content {
   max-height: 260px;
   overflow-y: auto;
-  touch-action: pan-y;
   padding: 9px 14px 5px 27px;
   color: #a4a59e;
   font-size: 13px;
@@ -1255,7 +1247,6 @@ button {
 
   .app-shell {
     display: block;
-    overflow-x: clip;
   }
 
   .sidebar {
@@ -1264,7 +1255,6 @@ button {
     bottom: 0;
     left: 0;
     width: min(86vw, 310px);
-    touch-action: pan-y;
     transform: translateX(calc(-100% + (var(--drawer-progress, 0) * 100%)));
     transition: transform 220ms ease;
   }
@@ -1281,7 +1271,6 @@ button {
     height: 100%;
     border: 0;
     background: rgba(0, 0, 0, .48);
-    touch-action: pan-y;
     opacity: var(--drawer-progress, 0);
     transition: opacity 220ms ease;
   }
