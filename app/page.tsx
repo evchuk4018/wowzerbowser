@@ -3,6 +3,7 @@
 import {
   FormEvent,
   KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type CSSProperties,
   useEffect,
@@ -58,6 +59,8 @@ type ChatSettings = {
 
 type DrawerGesture = {
   axis: "pending" | "horizontal" | "vertical";
+  captureTarget: HTMLElement;
+  summaryTarget: HTMLElement | null;
   pointerId: number;
   startProgress: number;
   startX: number;
@@ -75,6 +78,9 @@ const DRAWER_DIRECTION_LOCK_PX = 8;
 const DRAWER_OPEN_THRESHOLD = 0.25;
 const DRAWER_GESTURE_IGNORE_SELECTOR = [
   ".composer-wrap",
+  ".assistant-markdown pre",
+  ".assistant-markdown table",
+  ".assistant-markdown .katex-display",
   "a",
   "button",
   "input",
@@ -237,6 +243,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   const drawerGestureRef = useRef<DrawerGesture | null>(null);
   const drawerProgressRef = useRef(0);
   const suppressScrimClickRef = useRef(false);
+  const suppressReasoningClickRef = useRef<HTMLElement | null>(null);
   const activeRequestRef = useRef<Record<string, ActiveRequest>>({});
 
   useEffect(() => {
@@ -432,31 +439,82 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
 
   const setSidebarSettled = (open: boolean) => {
     drawerGestureRef.current = null;
+    suppressReasoningClickRef.current = null;
     drawerProgressRef.current = open ? 1 : 0;
     setDrawerDragProgress(null);
     setSidebarOpen(open);
   };
 
+  const handleDrawerClickCapture = (event: ReactMouseEvent<HTMLElement>) => {
+    const suppressedTarget = suppressReasoningClickRef.current;
+    if (!suppressedTarget) return;
+    const target = event.target instanceof Element
+      ? event.target.closest(".reasoning-summary")
+      : null;
+    if (target !== suppressedTarget) return;
+    suppressReasoningClickRef.current = null;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const releaseDrawerPointer = (gesture: DrawerGesture) => {
+    try {
+      if (gesture.captureTarget.hasPointerCapture(gesture.pointerId)) {
+        gesture.captureTarget.releasePointerCapture(gesture.pointerId);
+      }
+    } catch {
+      // The browser can report a lost pointer between hasPointerCapture and release.
+    }
+  };
+
+  const abandonDrawerGesture = (event: ReactPointerEvent<HTMLElement>) => {
+    const gesture = drawerGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    drawerGestureRef.current = null;
+    releaseDrawerPointer(gesture);
+    drawerProgressRef.current = sidebarOpen ? 1 : 0;
+    suppressScrimClickRef.current = false;
+    setDrawerDragProgress(null);
+    cancelLongPress();
+  };
+
   const beginDrawerGesture = (event: ReactPointerEvent<HTMLElement>) => {
-    if (event.pointerType !== "touch" || window.matchMedia("(min-width: 761px)").matches) return;
+    if (
+      !event.isPrimary ||
+      event.pointerType !== "touch" ||
+      window.matchMedia("(min-width: 761px)").matches ||
+      drawerGestureRef.current
+    ) return;
     const target = event.target as Element;
     const isScrim = event.currentTarget.classList.contains("sidebar-scrim");
-    if (!isScrim && target.closest(DRAWER_GESTURE_IGNORE_SELECTOR)) return;
+    const reasoningSummary = target.closest<HTMLElement>(".reasoning-summary");
+    const isReasoningSummary = Boolean(reasoningSummary);
+    suppressReasoningClickRef.current = null;
+    if (!isScrim && !isReasoningSummary && target.closest(DRAWER_GESTURE_IGNORE_SELECTOR)) return;
     if (isScrim) {
       suppressScrimClickRef.current = false;
     }
 
     const width = sidebarRef.current?.offsetWidth ?? 0;
     if (!width) return;
-    drawerGestureRef.current = {
+    const captureTarget = reasoningSummary ?? event.currentTarget;
+    const gesture: DrawerGesture = {
       axis: "pending",
+      captureTarget,
+      summaryTarget: reasoningSummary,
       pointerId: event.pointerId,
       startProgress: sidebarOpen ? 1 : 0,
       startX: event.clientX,
       startY: event.clientY,
       width,
     };
+    drawerGestureRef.current = gesture;
     drawerProgressRef.current = sidebarOpen ? 1 : 0;
+    try {
+      gesture.captureTarget.setPointerCapture(event.pointerId);
+    } catch {
+      drawerGestureRef.current = null;
+    }
   };
 
   const updateDrawerGesture = (event: ReactPointerEvent<HTMLElement>) => {
@@ -469,43 +527,47 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
       if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < DRAWER_DIRECTION_LOCK_PX) return;
       gesture.axis = Math.abs(deltaX) >= Math.abs(deltaY) ? "horizontal" : "vertical";
     }
-    if (gesture.axis !== "horizontal") return;
+    cancelLongPress();
+    if (gesture.axis !== "horizontal") {
+      abandonDrawerGesture(event);
+      return;
+    }
 
     event.preventDefault();
-    if (!event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.setPointerCapture(event.pointerId);
-    }
     const progress = clampDrawerProgress(gesture.startProgress + deltaX / gesture.width);
     drawerProgressRef.current = progress;
     setDrawerDragProgress(progress);
   };
 
   const cancelDrawerGesture = (event: ReactPointerEvent<HTMLElement>) => {
-    const gesture = drawerGestureRef.current;
-    if (!gesture || gesture.pointerId !== event.pointerId) return;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    drawerGestureRef.current = null;
-    drawerProgressRef.current = sidebarOpen ? 1 : 0;
-    suppressScrimClickRef.current = false;
-    setDrawerDragProgress(null);
+    abandonDrawerGesture(event);
   };
 
   const finishDrawerGesture = (event: ReactPointerEvent<HTMLElement>) => {
     const gesture = drawerGestureRef.current;
     if (!gesture || gesture.pointerId !== event.pointerId) return;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+    if (gesture.axis !== "horizontal") {
+      abandonDrawerGesture(event);
+      return;
     }
     drawerGestureRef.current = null;
-    if (gesture.axis !== "horizontal") return;
+    releaseDrawerPointer(gesture);
+    cancelLongPress();
 
     const open = gesture.startProgress === 0
       ? drawerProgressRef.current >= DRAWER_OPEN_THRESHOLD
       : drawerProgressRef.current > 1 - DRAWER_OPEN_THRESHOLD;
     if (event.currentTarget.classList.contains("sidebar-scrim")) {
       suppressScrimClickRef.current = true;
+    }
+    if (gesture.summaryTarget) {
+      const summaryTarget = gesture.summaryTarget;
+      suppressReasoningClickRef.current = summaryTarget;
+      window.setTimeout(() => {
+        if (suppressReasoningClickRef.current === summaryTarget) {
+          suppressReasoningClickRef.current = null;
+        }
+      }, 0);
     }
     setDrawerDragProgress(null);
     setSidebarOpen(open);
@@ -903,6 +965,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
         onPointerMove={updateDrawerGesture}
         onPointerUp={finishDrawerGesture}
         onPointerCancel={cancelDrawerGesture}
+        onLostPointerCapture={cancelDrawerGesture}
       />
 
       <aside
@@ -913,6 +976,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
         onPointerMove={updateDrawerGesture}
         onPointerUp={finishDrawerGesture}
         onPointerCancel={cancelDrawerGesture}
+        onLostPointerCapture={cancelDrawerGesture}
       >
         <div className="sidebar-top">
           <div className="product-name">Chat</div>
@@ -996,10 +1060,12 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
         className={`chat-area ${hasMessages ? "chat-active" : ""} ${
           openMessageActions ? "message-actions-active" : ""
         }`}
+        onClickCapture={handleDrawerClickCapture}
         onPointerDown={beginDrawerGesture}
         onPointerMove={updateDrawerGesture}
         onPointerUp={finishDrawerGesture}
         onPointerCancel={cancelDrawerGesture}
+        onLostPointerCapture={cancelDrawerGesture}
       >
         {openMessageActions && (
           <button
