@@ -1,6 +1,15 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  FormEvent,
+  KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type CSSProperties,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { MagicLinkForm } from "./auth/magic-link-form";
 import type { AuthUser } from "./auth/types";
 import { useAuthSession } from "./auth/use-auth-session";
@@ -46,6 +55,30 @@ type ChatSettings = {
   systemPrompt: string;
   userPresence: string;
 };
+
+type DrawerGesture = {
+  axis: "pending" | "horizontal" | "vertical";
+  pointerId: number;
+  startProgress: number;
+  startX: number;
+  startY: number;
+  width: number;
+};
+
+const DRAWER_DIRECTION_LOCK_PX = 8;
+const DRAWER_OPEN_THRESHOLD = 0.5;
+const DRAWER_GESTURE_IGNORE_SELECTOR = [
+  ".composer-wrap",
+  "a",
+  "button",
+  "input",
+  "select",
+  "textarea",
+  "[contenteditable='true']",
+  "[role='button']",
+].join(",");
+
+const clampDrawerProgress = (progress: number) => Math.min(1, Math.max(0, progress));
 
 const LEGACY_DEFAULT_SYSTEM_PROMPT =
   "You are a helpful, thoughtful assistant. Always respond in English unless the user explicitly asks you to use another language. Be accurate, clear, and concise. If you are unsure, say so.";
@@ -170,6 +203,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   const [activeId, setActiveId] = useState("");
   const [draft, setDraft] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [drawerDragProgress, setDrawerDragProgress] = useState<number | null>(null);
   const [ready, setReady] = useState(false);
   const [models, setModels] = useState(DEFAULT_CHAT_MODELS);
   const [model, setModel] = useState<ChatModelId>("deepseek-v4-flash");
@@ -189,10 +223,14 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const thinkingStartedAtRef = useRef<number | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
+  const drawerGestureRef = useRef<DrawerGesture | null>(null);
+  const drawerProgressRef = useRef(0);
+  const suppressScrimClickRef = useRef(false);
   const activeRequestRef = useRef<{
     conversationId: string;
     messageId: string;
@@ -228,6 +266,15 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
       localStorage.setItem(storageKeyFor(user.id), JSON.stringify(conversations));
     }
   }, [conversations, ready, user.id]);
+
+  useEffect(() => {
+  const closeSidebarOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setSidebarSettled(false);
+    };
+    document.addEventListener("keydown", closeSidebarOnEscape);
+    return () => document.removeEventListener("keydown", closeSidebarOnEscape);
+  }, []);
 
   useEffect(() => {
     try {
@@ -373,8 +420,95 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
     setDraft("");
     setEditingTurnId(null);
     setOpenMessageActions(null);
-    setSidebarOpen(false);
+    setSidebarSettled(false);
     requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
+  const setSidebarSettled = (open: boolean) => {
+    drawerGestureRef.current = null;
+    drawerProgressRef.current = open ? 1 : 0;
+    setDrawerDragProgress(null);
+    setSidebarOpen(open);
+  };
+
+  const beginDrawerGesture = (event: ReactPointerEvent<HTMLElement>) => {
+    if (event.pointerType !== "touch" || window.matchMedia("(min-width: 761px)").matches) return;
+    const target = event.target as Element;
+    if (!event.currentTarget.classList.contains("sidebar-scrim") && target.closest(DRAWER_GESTURE_IGNORE_SELECTOR)) return;
+    if (event.currentTarget.classList.contains("sidebar-scrim")) {
+      suppressScrimClickRef.current = false;
+    }
+
+    const width = sidebarRef.current?.offsetWidth ?? 0;
+    if (!width) return;
+    drawerGestureRef.current = {
+      axis: "pending",
+      pointerId: event.pointerId,
+      startProgress: sidebarOpen ? 1 : 0,
+      startX: event.clientX,
+      startY: event.clientY,
+      width,
+    };
+    drawerProgressRef.current = sidebarOpen ? 1 : 0;
+  };
+
+  const updateDrawerGesture = (event: ReactPointerEvent<HTMLElement>) => {
+    const gesture = drawerGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - gesture.startX;
+    const deltaY = event.clientY - gesture.startY;
+
+    if (gesture.axis === "pending") {
+      if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < DRAWER_DIRECTION_LOCK_PX) return;
+      gesture.axis = Math.abs(deltaX) >= Math.abs(deltaY) ? "horizontal" : "vertical";
+    }
+    if (gesture.axis !== "horizontal") return;
+
+    event.preventDefault();
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+    const progress = clampDrawerProgress(gesture.startProgress + deltaX / gesture.width);
+    drawerProgressRef.current = progress;
+    setDrawerDragProgress(progress);
+  };
+
+  const cancelDrawerGesture = (event: ReactPointerEvent<HTMLElement>) => {
+    const gesture = drawerGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    drawerGestureRef.current = null;
+    drawerProgressRef.current = sidebarOpen ? 1 : 0;
+    suppressScrimClickRef.current = false;
+    setDrawerDragProgress(null);
+  };
+
+  const finishDrawerGesture = (event: ReactPointerEvent<HTMLElement>) => {
+    const gesture = drawerGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    drawerGestureRef.current = null;
+    if (gesture.axis !== "horizontal") return;
+
+    const open = drawerProgressRef.current >= DRAWER_OPEN_THRESHOLD;
+    if (event.currentTarget.classList.contains("sidebar-scrim")) {
+      suppressScrimClickRef.current = true;
+    }
+    setDrawerDragProgress(null);
+    setSidebarOpen(open);
+    drawerProgressRef.current = open ? 1 : 0;
+  };
+
+  const handleScrimClick = () => {
+    if (suppressScrimClickRef.current) {
+      suppressScrimClickRef.current = false;
+      return;
+    }
+    setSidebarSettled(false);
   };
 
   const updateMessage = (
@@ -683,6 +817,10 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   if (!ready || !active) return <main className="loading-shell" aria-label="Loading chat" />;
 
   const hasMessages = active.turns.length > 0;
+  const drawerProgress = drawerDragProgress ?? (sidebarOpen ? 1 : 0);
+  const drawerStyle = {
+    "--drawer-progress": drawerProgress,
+  } as CSSProperties;
   const closeSettings = () => {
     setSettingsOpen(false);
     requestAnimationFrame(() => settingsButtonRef.current?.focus());
@@ -695,25 +833,41 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
         type="button"
         aria-label="Open conversation menu"
         aria-expanded={sidebarOpen}
-        onClick={() => setSidebarOpen((open) => !open)}
+        onClick={() => setSidebarSettled(!sidebarOpen)}
       >
         <span />
         <span />
       </button>
 
-      {sidebarOpen && (
-        <button
-          type="button"
-          className="sidebar-scrim"
-          aria-label="Close conversation menu"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
+      <button
+        type="button"
+        className={`sidebar-scrim ${drawerDragProgress !== null ? "sidebar-scrim-dragging" : ""}`}
+        aria-label="Close conversation menu"
+        aria-hidden={drawerProgress === 0}
+        tabIndex={drawerProgress > 0 ? 0 : -1}
+        style={{
+          "--drawer-progress": drawerProgress,
+          pointerEvents: drawerProgress > 0 ? "auto" : "none",
+        } as CSSProperties}
+        onClick={handleScrimClick}
+        onPointerDown={beginDrawerGesture}
+        onPointerMove={updateDrawerGesture}
+        onPointerUp={finishDrawerGesture}
+        onPointerCancel={cancelDrawerGesture}
+      />
 
-      <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
+      <aside
+        ref={sidebarRef}
+        className={`sidebar ${sidebarOpen ? "sidebar-open" : ""} ${drawerDragProgress !== null ? "sidebar-dragging" : ""}`}
+        style={drawerStyle}
+        onPointerDown={beginDrawerGesture}
+        onPointerMove={updateDrawerGesture}
+        onPointerUp={finishDrawerGesture}
+        onPointerCancel={cancelDrawerGesture}
+      >
         <div className="sidebar-top">
           <div className="product-name">Chat</div>
-          <button type="button" className="square-button" aria-label="Collapse sidebar">
+          <button type="button" className="square-button" aria-label="Collapse sidebar" onClick={() => setSidebarSettled(false)}>
             <span className="panel-icon" />
           </button>
         </div>
@@ -733,7 +887,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
               className={`conversation-item ${conversation.id === activeId ? "active" : ""}`}
               onClick={() => {
                 setActiveId(conversation.id);
-                setSidebarOpen(false);
+                setSidebarSettled(false);
               }}
             >
               {conversation.title}
@@ -786,6 +940,10 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
         className={`chat-area ${hasMessages ? "chat-active" : ""} ${
           openMessageActions ? "message-actions-active" : ""
         }`}
+        onPointerDown={beginDrawerGesture}
+        onPointerMove={updateDrawerGesture}
+        onPointerUp={finishDrawerGesture}
+        onPointerCancel={cancelDrawerGesture}
       >
         {openMessageActions && (
           <button

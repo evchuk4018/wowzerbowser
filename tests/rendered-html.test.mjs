@@ -304,6 +304,26 @@ test("keeps mobile prompt actions prominent and ephemeral", async () => {
   assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.message\.user \.message-bubble \{[\s\S]*?user-select: none;[\s\S]*?-webkit-user-select: none;/);
 });
 
+test("keeps mobile history drawer movement progressive and chat centered", async () => {
+  const [page, styles] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /drawerDragProgress/);
+  assert.match(page, /clampDrawerProgress/);
+  assert.match(page, /DRAWER_OPEN_THRESHOLD = 0\.5/);
+  assert.match(page, /onPointerDown=\{beginDrawerGesture\}/);
+  assert.match(page, /onPointerMove=\{updateDrawerGesture\}/);
+  assert.match(page, /onPointerUp=\{finishDrawerGesture\}/);
+  assert.match(page, /event\.preventDefault\(\)/);
+  assert.match(page, /DRAWER_GESTURE_IGNORE_SELECTOR/);
+  assert.match(styles, /var\(--drawer-progress, 0\) \* 100%/);
+  assert.match(styles, /\.sidebar\.sidebar-dragging[\s\S]*?transition: none;/);
+  assert.match(styles, /\.sidebar-scrim[\s\S]*?opacity: var\(--drawer-progress, 0\)/);
+  assert.match(styles, /\.chat-area \{[\s\S]*?touch-action: pan-y;/);
+});
+
 test("renders assistant Markdown and LaTeX with the bobert default prompt", async () => {
   const [page, renderer, layout, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
