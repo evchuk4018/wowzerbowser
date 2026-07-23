@@ -3,6 +3,15 @@ export const DRAWER_SETTLE_THRESHOLD = 0.25;
 
 const clampProgress = (progress) => Math.min(1, Math.max(0, progress));
 
+const settleOpenState = (startProgress, progress, settleThreshold) => {
+  const crossedThreshold = startProgress === 0
+    ? progress >= settleThreshold
+    : progress <= 1 - settleThreshold;
+  return crossedThreshold
+    ? startProgress === 0
+    : startProgress === 1;
+};
+
 export function createDrawerGestureController({
   directionLockPx = DRAWER_DIRECTION_LOCK_PX,
   settleThreshold = DRAWER_SETTLE_THRESHOLD,
@@ -102,12 +111,11 @@ export function createDrawerGestureController({
         };
       }
 
-      const crossedThreshold = completed.startProgress === 0
-        ? completed.progress >= settleThreshold
-        : completed.progress <= 1 - settleThreshold;
-      const open = crossedThreshold
-        ? completed.startProgress === 0
-        : completed.startProgress === 1;
+      const open = settleOpenState(
+        completed.startProgress,
+        completed.progress,
+        settleThreshold,
+      );
 
       return {
         active: false,
@@ -125,15 +133,18 @@ export function createDrawerGestureController({
 
       const cancelled = gesture;
       gesture = null;
-      const open = cancelled.startProgress === 1;
+      const horizontal = cancelled.axis === "horizontal";
+      const open = horizontal
+        ? settleOpenState(cancelled.startProgress, cancelled.progress, settleThreshold)
+        : cancelled.startProgress === 1;
       return {
         active: false,
         handled: true,
-        horizontal: cancelled.axis === "horizontal",
+        horizontal,
         open,
-        preventDefault: cancelled.axis === "horizontal",
-        progress: cancelled.startProgress,
-        suppressClick: cancelled.axis === "horizontal",
+        preventDefault: horizontal,
+        progress: open ? 1 : 0,
+        suppressClick: horizontal,
       };
     },
 

@@ -137,6 +137,23 @@ test("cancelling after horizontal intent restores the starting state and suppres
   assert.equal(controller.isActive(), false);
 });
 
+test("cancelling after crossing the opening threshold still settles the drawer open", () => {
+  const controller = createDrawerGestureController();
+  start(controller, { x: 180 });
+  controller.move({
+    pointerId: 1,
+    x: 275,
+    y: 242,
+    width: 300,
+  });
+
+  const cancelled = controller.cancel({ pointerId: 1 });
+  assert.equal(cancelled.horizontal, true);
+  assert.equal(cancelled.open, true);
+  assert.equal(cancelled.progress, 1);
+  assert.equal(cancelled.suppressClick, true);
+});
+
 test("non-primary, mouse, invalid, and competing pointers do not take over", () => {
   const controller = createDrawerGestureController();
   assert.equal(start(controller, { isPrimary: false }).active, false);
