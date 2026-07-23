@@ -8,6 +8,22 @@ const nextCli = fileURLToPath(new URL("../node_modules/next/dist/bin/next", impo
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
+async function assertPngRoute(path, width, height) {
+  const response = await fetch(`http://127.0.0.1:43123${path}`);
+  assert.equal(response.status, 200, `${path} should be served`);
+  assert.match(response.headers.get("content-type") ?? "", /^image\/png\b/i);
+
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  assert.deepEqual(
+    [...bytes.slice(0, 8)],
+    [137, 80, 78, 71, 13, 10, 26, 10],
+    `${path} should have a PNG signature`,
+  );
+  const header = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  assert.equal(header.getUint32(16), width, `${path} should be ${width}px wide`);
+  assert.equal(header.getUint32(20), height, `${path} should be ${height}px tall`);
+}
+
 async function withNextServer(callback) {
   const port = 43123;
   const server = spawn(process.execPath, [nextCli, "start", "-p", String(port)], {
@@ -54,6 +70,102 @@ test("server renders the local auth-aware app shell", async () => {
     assert.match(html, /<title>Chat<\/title>/i);
     assert.match(html, /aria-label="Loading session"/);
   });
+});
+
+test("renders mobile home-screen metadata and serves the manifest", async () => {
+  await withNextServer(async (response) => {
+    const html = await response.text();
+    const metaTags = html.match(/<meta\b[^>]*>/gi) ?? [];
+    const linkTags = html.match(/<link\b[^>]*>/gi) ?? [];
+    const hasMeta = (name, content) => metaTags.some((tag) =>
+      new RegExp(`\\bname="${name}"`, "i").test(tag)
+      && new RegExp(`\\bcontent="${content}"`, "i").test(tag));
+    const manifestLink = linkTags.find((tag) =>
+      /\brel="manifest"/i.test(tag) && /\bhref="\/manifest\.webmanifest"/i.test(tag));
+
+    assert.ok(hasMeta("application-name", "Chat"));
+    assert.ok(manifestLink);
+    assert.ok(hasMeta("mobile-web-app-capable", "yes"));
+    assert.ok(hasMeta("apple-mobile-web-app-title", "Chat"));
+    assert.ok(hasMeta("apple-mobile-web-app-status-bar-style", "black-translucent"));
+    assert.ok(hasMeta("theme-color", "#d4ff70"));
+    const viewportTag = metaTags.find((tag) => /\bname="viewport"/i.test(tag));
+    assert.ok(viewportTag);
+    assert.match(viewportTag, /content="[^"]*width=device-width[^"]*initial-scale=1[^"]*maximum-scale=1[^"]*user-scalable=no[^"]*viewport-fit=cover[^"]*interactive-widget=resizes-content/i);
+    assert.ok(hasMeta("color-scheme", "dark"));
+
+    const manifestResponse = await fetch("http://127.0.0.1:43123/manifest.webmanifest");
+    assert.equal(manifestResponse.status, 200);
+    assert.match(manifestResponse.headers.get("content-type") ?? "", /application\/manifest\+json/i);
+    const manifest = await manifestResponse.json();
+    assert.deepEqual(manifest, {
+      name: "Chat",
+      short_name: "Chat",
+      description: "A simple, private chat workspace.",
+      start_url: "/",
+      scope: "/",
+      display: "standalone",
+      orientation: "any",
+      background_color: "#181918",
+      theme_color: "#d4ff70",
+      icons: [
+        { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+        { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+        { src: "/icons/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+      ],
+    });
+
+    for (const [path, width, height] of [
+      ["/icons/icon-192.png", 192, 192],
+      ["/icons/icon-512.png", 512, 512],
+      ["/icons/icon-maskable-512.png", 512, 512],
+      ["/icon.png", 512, 512],
+      ["/apple-icon.png", 180, 180],
+    ]) {
+      await assertPngRoute(path, width, height);
+    }
+
+    const serviceWorkerResponse = await fetch("http://127.0.0.1:43123/sw.js");
+    assert.equal(serviceWorkerResponse.status, 200);
+    assert.match(serviceWorkerResponse.headers.get("content-type") ?? "", /javascript/i);
+    const serviceWorker = await serviceWorkerResponse.text();
+    assert.match(serviceWorker, /addEventListener\("install"/);
+    assert.match(serviceWorker, /addEventListener\("activate"/);
+    assert.doesNotMatch(serviceWorker, /cache|fetch|respondWith|offline|\/api\//i);
+  });
+});
+
+test("keeps PWA icon references and service worker behavior safe", async () => {
+  const [layout, manifestSource, registration, serviceWorker, styles] = await Promise.all([
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/manifest.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/pwa/service-worker-registration.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../public/sw.js", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  for (const icon of ["/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-maskable-512.png"]) {
+    assert.match(manifestSource, new RegExp(icon.replaceAll("/", "\\/")));
+  }
+  assert.match(layout, /ServiceWorkerRegistration/);
+  assert.match(registration, /"use client"/);
+  assert.match(registration, /process\.env\.NODE_ENV !== "production"/);
+  assert.match(registration, /"serviceWorker" in navigator/);
+  assert.match(registration, /navigator\.serviceWorker\.register\("\/sw\.js"\)/);
+  assert.match(registration, /\.catch\(\(\) =>/);
+  assert.match(serviceWorker, /addEventListener\("install"/);
+  assert.match(serviceWorker, /addEventListener\("activate"/);
+  assert.doesNotMatch(serviceWorker, /cache|fetch|respondWith|offline|\/api\//i);
+  assert.doesNotMatch(serviceWorker, /addEventListener\("fetch"/);
+  assert.match(styles, /env\(safe-area-inset-top\)/);
+  assert.match(styles, /env\(safe-area-inset-right\)/);
+  assert.match(styles, /env\(safe-area-inset-bottom\)/);
+  assert.match(styles, /env\(safe-area-inset-left\)/);
+  assert.match(styles, /\.auth-form input[\s\S]*?font-size: 16px;/);
+  assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.settings-field textarea \{[\s\S]*?font-size: 16px;/);
+  assert.match(styles, /\.composer textarea[\s\S]*?font-size: 16px;/);
+  assert.match(styles, /min-height: 100dvh;/);
+  assert.match(styles, /height: 100dvh;/);
 });
 
 test("keeps Supabase calls behind adapters and owner authorization", async () => {

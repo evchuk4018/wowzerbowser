@@ -58,7 +58,10 @@ button {
   display: grid;
   min-height: 100dvh;
   place-items: center;
-  padding: 24px;
+  padding: calc(24px + env(safe-area-inset-top))
+    calc(24px + env(safe-area-inset-right))
+    calc(24px + env(safe-area-inset-bottom))
+    calc(24px + env(safe-area-inset-left));
   background:
     radial-gradient(circle at 50% 35%, rgba(212, 255, 112, .07), transparent 34%),
     var(--bg);
@@ -110,6 +113,7 @@ button {
   background: var(--panel);
   padding: 0 14px;
   color: var(--text);
+  font-size: 16px;
 }
 
 .auth-form input:focus {
@@ -166,7 +170,10 @@ button {
   flex-direction: column;
   border-right: 1px solid #2c2d2a;
   background: var(--sidebar);
-  padding: 16px 12px 12px;
+  padding: calc(16px + env(safe-area-inset-top))
+    calc(12px + env(safe-area-inset-right))
+    calc(12px + env(safe-area-inset-bottom))
+    calc(12px + env(safe-area-inset-left));
 }
 
 .sidebar-top {
@@ -398,12 +405,18 @@ button {
   place-items: center;
   background: rgba(10, 11, 10, .54);
   backdrop-filter: blur(8px);
-  padding: 24px;
+  padding: calc(24px + env(safe-area-inset-top))
+    calc(24px + env(safe-area-inset-right))
+    calc(24px + env(safe-area-inset-bottom))
+    calc(24px + env(safe-area-inset-left));
 }
 
 .settings-dialog {
   width: min(100%, 560px);
-  max-height: min(760px, calc(100dvh - 48px));
+  max-height: min(
+    760px,
+    calc(100dvh - 48px - env(safe-area-inset-top) - env(safe-area-inset-bottom))
+  );
   overflow-y: auto;
   border: 1px solid #4a4b45;
   border-radius: 18px;
@@ -1147,8 +1160,8 @@ button {
 
   .mobile-menu {
     position: fixed;
-    top: 15px;
-    left: 15px;
+    top: calc(15px + env(safe-area-inset-top));
+    left: calc(15px + env(safe-area-inset-left));
     z-index: 12;
     display: flex;
     width: 38px;
@@ -1172,9 +1185,9 @@ button {
   }
 
   .transcript {
-    width: calc(100% - 28px);
+    width: calc(100% - 28px - env(safe-area-inset-left) - env(safe-area-inset-right));
     padding-top: 70px;
-    padding-bottom: 210px;
+    padding-bottom: calc(210px + env(safe-area-inset-bottom));
   }
 
   .message-actions-open .message.user .message-bubble {
@@ -1204,10 +1217,10 @@ button {
   .composer-wrap,
   .chat-active .composer-wrap {
     position: fixed;
-    bottom: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom));
     left: 50%;
     right: auto;
-    width: calc(100% - 24px);
+    width: calc(100% - 24px - env(safe-area-inset-left) - env(safe-area-inset-right));
     margin: 0;
     transform: translateX(-50%);
   }
@@ -1215,6 +1228,10 @@ button {
   .composer {
     min-height: 118px;
     padding: 14px 13px 11px;
+  }
+
+  .settings-field textarea {
+    font-size: 16px;
   }
 
   .composer-actions {
