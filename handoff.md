@@ -5,17 +5,24 @@
 Unresolved as of July 23, 2026.
 
 The user confirmed that the issue still persists after commit
-`105cfc2ea35c74831079cc99ff1fe6c982e875f3` (`Fix mobile drawer swipe
-overscroll`).
+`a4a5ee3434515c67f9e69ee62ea58187f2285068` (`Fix mobile drawer gestures over
+chat`). The exposed little sidebar sliver can be dragged successfully, but a
+normal drag beginning in the affected chat content still does not open the
+sidebar, no matter how far it is pulled.
 
-This document records the problem and prior attempt. No additional fix was
+This document records the problem and prior attempts. No additional fix was
 made while preparing this handoff.
 
 ## User-reported behavior
 
-- The problem occurs on mobile when thinking mode is off.
-- Swiping left or right does not open or close the conversation-history drawer
-  as intended.
+- Earlier user reporting identified the problem on mobile when thinking mode
+  was off; that observation is retained here for comparison.
+- In the updated report, the issue occurs after messaging with thinking mode
+  enabled as well.
+- Swiping normally from affected chat content does not open or close the
+  conversation-history drawer as intended, even with a very long drag.
+- Dragging the exposed little sidebar sliver does work, but this is only an
+  edge workaround and not normal swipe-anywhere behavior.
 - During the failed gesture, the conversation window visibly jiggles left and
   right.
 - The message/composer bar fixed at the bottom does not move with the
@@ -80,7 +87,9 @@ The composer uses `position: fixed` on mobile. This explains why the composer
 can remain stationary while the conversation region visibly jiggles, but it
 does not explain what is producing the unwanted conversation movement.
 
-## Attempt that did not resolve the issue
+## Attempts that did not resolve the issue
+
+### `105cfc2ea35c74831079cc99ff1fe6c982e875f3` — Fix mobile drawer swipe overscroll
 
 Commit `105cfc2ea35c74831079cc99ff1fe6c982e875f3` added:
 
@@ -97,6 +106,28 @@ The assumption was that native horizontal overscroll/rubber-banding was
 competing with the JavaScript drawer gesture. The user subsequently confirmed
 that the symptom remains, so that assumption or the selected containment
 targets were incomplete.
+
+### `a4a5ee3434515c67f9e69ee62ea58187f2285068` — Fix mobile drawer gestures over chat
+
+This follow-up attempted to make gestures over rendered assistant content
+reachable and less likely to be stolen by nested interactions. It:
+
+- restricted handling to the primary touch pointer and prevented overlapping
+  drawer gestures;
+- captured the pointer on the reasoning summary or the current gesture
+  target, released it on completion/cancel/lost capture, and explicitly
+  abandoned vertical gestures;
+- allowed reasoning-summary drags while suppressing the click that can follow
+  a horizontal drag;
+- added Markdown code-block, table, and KaTeX targets to the ignore selector;
+- added `touch-action` declarations for the transcript, reasoning content,
+  and horizontally scrollable rendered content; and
+- added source-level assertions covering pointer capture, click suppression,
+  gesture abandonment, and those styles.
+
+The latest user retest shows that this attempt also did not resolve normal
+swiping from chat content. The successful exposed-sliver drag should not be
+treated as evidence that swipe-anywhere activation works.
 
 An earlier draft considered limiting drawer opening to a 36 px left-edge
 region. That change was deliberately removed before commit because it would
@@ -115,6 +146,12 @@ The prior attempt passed:
 These checks do not reproduce real pointer sequences or mobile browser gesture
 arbitration. The drawer test in `tests/rendered-html.test.mjs` only inspects
 source and CSS with regular expressions.
+
+After `a4a5ee3`, the same automated checks still passed: `npm run lint` (one
+pre-existing `react-hooks/exhaustive-deps` warning at `app/page.tsx:420`),
+`npm run build`, and `node --test tests/rendered-html.test.mjs` (13 tests).
+They validate source/build invariants but do not reproduce the affected device
+gesture, so their success does not contradict the user's report.
 
 Per repository instructions, no browser or screenshot verification was
 performed.
@@ -147,6 +184,6 @@ These are leads, not confirmed causes:
 
 - Branch: `main`
 - Last attempted-fix commit:
-  `105cfc2ea35c74831079cc99ff1fe6c982e875f3`
+  `a4a5ee3434515c67f9e69ee62ea58187f2285068`
 - User instruction for this handoff: document the persistent problem; do not
   attempt another fix.
