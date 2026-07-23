@@ -168,6 +168,28 @@ test("keeps PWA icon references and service worker behavior safe", async () => {
   assert.match(styles, /height: 100dvh;/);
 });
 
+test("self-hosts Geist without a Google Fonts build dependency", async () => {
+  const [layout, styles, ...fontAssets] = await Promise.all([
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    ...[
+      "geist-cyrillic-ext.woff2",
+      "geist-cyrillic.woff2",
+      "geist-vietnamese.woff2",
+      "geist-latin-ext.woff2",
+      "geist-latin.woff2",
+    ].map((font) => readFile(new URL(`../public/fonts/${font}`, import.meta.url))),
+  ]);
+
+  assert.doesNotMatch(layout, /next\/font\/google/);
+  assert.doesNotMatch(styles, /fonts\.googleapis|fonts\.gstatic/);
+  assert.match(styles, /--font-geist-sans: "Geist", "Geist Fallback";/);
+  assert.match(styles, /url\("\/fonts\/geist-latin\.woff2"\)/);
+  for (const asset of fontAssets) {
+    assert.ok(asset.byteLength > 0, "self-hosted Geist font assets should not be empty");
+  }
+});
+
 test("keeps Supabase calls behind adapters and owner authorization", async () => {
   const [page, browserAdapter, serverAdapter, ownerService, magicLinkRoute, authService, authForm] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
@@ -313,6 +335,9 @@ test("keeps mobile history drawer movement progressive and chat centered", async
   assert.match(page, /drawerDragProgress/);
   assert.match(page, /clampDrawerProgress/);
   assert.match(page, /DRAWER_OPEN_THRESHOLD = 0\.25/);
+  assert.match(page, /gesture\.startProgress === 0/);
+  assert.match(page, /drawerProgressRef\.current >= DRAWER_OPEN_THRESHOLD/);
+  assert.match(page, /drawerProgressRef\.current > 1 - DRAWER_OPEN_THRESHOLD/);
   assert.match(page, /onPointerDown=\{beginDrawerGesture\}/);
   assert.match(page, /onPointerMove=\{updateDrawerGesture\}/);
   assert.match(page, /onPointerUp=\{finishDrawerGesture\}/);

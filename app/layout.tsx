@@ -1,13 +1,7 @@
 import type { Metadata, Viewport } from "next";
-import { Geist } from "next/font/google";
 import "katex/dist/katex.min.css";
 import "./globals.css";
 import { ServiceWorkerRegistration } from "./pwa/service-worker-registration";
-
-const geist = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "Chat",
@@ -39,7 +33,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={geist.variable}>
+      <body>
         <ServiceWorkerRegistration />
         {children}
       </body>
