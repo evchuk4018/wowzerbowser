@@ -343,6 +343,24 @@ test("keeps mobile prompt actions prominent and ephemeral", async () => {
   assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.message\.user \.message-bubble \{[\s\S]*?user-select: none;[\s\S]*?-webkit-user-select: none;/);
 });
 
+test("connects the progressive drawer gesture at the stable application shell", async () => {
+  const [page, gestureHook, styles] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/use-mobile-drawer-gesture.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /useMobileDrawerGesture/);
+  assert.match(page, /<main[\s\S]*?ref=\{appShellRef\}[\s\S]*?onPointerDownCapture=\{handlePointerDownCapture\}/);
+  assert.match(page, /onClickCapture=\{handleClickCapture\}/);
+  assert.match(gestureHook, /document\.addEventListener\("pointermove", move, \{ capture: true, passive: false \}\)/);
+  assert.match(gestureHook, /shell\.setPointerCapture\(pointerEvent\.pointerId\)/);
+  assert.match(gestureHook, /onHorizontalIntentRef\.current\(\)/);
+  assert.match(styles, /\.app-shell \* \{[\s\S]*?touch-action: pan-y;/);
+  assert.match(styles, /\.drawer-dragging \.sidebar \{[\s\S]*?transition: none;/);
+  assert.match(styles, /\.sidebar-scrim[\s\S]*?opacity: var\(--drawer-progress\)/);
+});
+
 test("renders assistant Markdown and LaTeX with the bobert default prompt", async () => {
   const [page, renderer, layout, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),

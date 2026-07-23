@@ -7,6 +7,7 @@ import { useAuthSession } from "./auth/use-auth-session";
 import { fetchChatModels, streamChatResponse } from "./chat/chat-service";
 import { ChatComposer } from "./chat/chat-composer";
 import { AssistantResponse } from "./chat/assistant-response";
+import { useMobileDrawerGesture } from "./chat/use-mobile-drawer-gesture";
 import type {
   ChatModelId,
   ChatReasoningEffort,
@@ -175,7 +176,6 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState("");
   const [draft, setDraft] = useState("");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [ready, setReady] = useState(false);
   const [models, setModels] = useState(DEFAULT_CHAT_MODELS);
   const [model, setModel] = useState<ChatModelId>("deepseek-v4-flash");
@@ -200,6 +200,21 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   const thinkingStartedAtRef = useRef<Record<string, number | null>>({});
   const longPressTimerRef = useRef<number | null>(null);
   const activeRequestRef = useRef<Record<string, ActiveRequest>>({});
+  const {
+    appShellRef,
+    handleClickCapture,
+    handlePointerDownCapture,
+    setSidebarOpen,
+    sidebarOpen,
+    sidebarRef,
+  } = useMobileDrawerGesture(() => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    setOpenMenu(null);
+    setOpenMessageActions(null);
+  });
 
   useEffect(() => {
     const loadStoredChats = window.setTimeout(() => {
@@ -735,31 +750,44 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   };
 
   return (
-    <main className="app-shell">
+    <main
+      ref={appShellRef}
+      className="app-shell"
+      onClickCapture={handleClickCapture}
+      onPointerDownCapture={handlePointerDownCapture}
+    >
       <button
         className="mobile-menu"
         type="button"
         aria-label="Open conversation menu"
         aria-expanded={sidebarOpen}
-        onClick={() => setSidebarOpen((open) => !open)}
+        onClick={() => setSidebarOpen(!sidebarOpen)}
       >
         <span />
         <span />
       </button>
 
-      {sidebarOpen && (
-        <button
-          type="button"
-          className="sidebar-scrim"
-          aria-label="Close conversation menu"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
+      <button
+        type="button"
+        className="sidebar-scrim"
+        aria-label="Close conversation menu"
+        aria-hidden={!sidebarOpen}
+        tabIndex={sidebarOpen ? 0 : -1}
+        onClick={() => setSidebarOpen(false)}
+      />
 
-      <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
+      <aside
+        ref={sidebarRef}
+        className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}
+      >
         <div className="sidebar-top">
           <div className="product-name">Chat</div>
-          <button type="button" className="square-button" aria-label="Collapse sidebar">
+          <button
+            type="button"
+            className="square-button"
+            aria-label="Collapse sidebar"
+            onClick={() => setSidebarOpen(false)}
+          >
             <span className="panel-icon" />
           </button>
         </div>

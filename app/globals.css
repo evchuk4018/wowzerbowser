@@ -103,10 +103,14 @@ button {
 }
 
 .app-shell {
+  --drawer-progress: 0;
+  --drawer-translate: -100%;
   display: grid;
   height: 100dvh;
   min-height: 0;
+  overflow-x: clip;
   grid-template-columns: 300px minmax(0, 1fr);
+  overscroll-behavior-x: none;
 }
 
 .auth-shell {
@@ -1247,6 +1251,11 @@ button {
 
   .app-shell {
     display: block;
+    touch-action: pan-y;
+  }
+
+  .app-shell * {
+    touch-action: pan-y;
   }
 
   .sidebar {
@@ -1255,12 +1264,13 @@ button {
     bottom: 0;
     left: 0;
     width: min(86vw, 310px);
-    transform: translateX(-102%);
+    transform: translate3d(var(--drawer-translate), 0, 0);
     transition: transform 220ms ease;
+    will-change: transform;
   }
 
-  .sidebar.sidebar-open {
-    transform: translateX(0);
+  .drawer-dragging .sidebar {
+    transition: none;
   }
 
   .sidebar-scrim {
@@ -1271,6 +1281,17 @@ button {
     height: 100%;
     border: 0;
     background: rgba(0, 0, 0, .48);
+    opacity: var(--drawer-progress);
+    pointer-events: none;
+    transition: opacity 220ms ease;
+  }
+
+  .sidebar-scrim[aria-hidden="false"] {
+    pointer-events: auto;
+  }
+
+  .drawer-dragging .sidebar-scrim {
+    transition: none;
   }
 
   .mobile-menu {
