@@ -354,9 +354,11 @@ test("connects the progressive drawer gesture at the stable application shell", 
   assert.match(page, /<main[\s\S]*?ref=\{appShellRef\}[\s\S]*?onPointerDownCapture=\{handlePointerDownCapture\}/);
   assert.match(page, /onClickCapture=\{handleClickCapture\}/);
   assert.match(gestureHook, /document\.addEventListener\("pointermove", move, \{ capture: true, passive: false \}\)/);
-  assert.match(gestureHook, /shell\.setPointerCapture\(pointerEvent\.pointerId\)/);
+  assert.match(gestureHook, /if \(shell\) \{[\s\S]*?shell\.setPointerCapture\(event\.pointerId\)/);
+  assert.match(gestureHook, /removeActiveListeners\(\);[\s\S]*?releasePointer\(pointerEvent\.pointerId\)/);
   assert.match(gestureHook, /onHorizontalIntentRef\.current\(\)/);
   assert.match(styles, /\.app-shell \* \{[\s\S]*?touch-action: pan-y;/);
+  assert.match(styles, /\.reasoning-content[\s\S]*?touch-action: pan-y;/);
   assert.match(styles, /\.drawer-dragging \.sidebar \{[\s\S]*?transition: none;/);
   assert.match(styles, /\.sidebar-scrim[\s\S]*?opacity: var\(--drawer-progress\)/);
 });

@@ -115,6 +115,15 @@ export function useMobileDrawerGesture(onHorizontalIntent: () => void) {
     }) as GestureResult;
     if (!started.active) return;
 
+    const shell = appShellRef.current;
+    if (shell) {
+      try {
+        shell.setPointerCapture(event.pointerId);
+      } catch {
+        // Document listeners retain ownership if pointer capture is unavailable.
+      }
+    }
+
     const move = (pointerEvent: PointerEvent) => {
       const result = controllerRef.current.move({
         pointerId: pointerEvent.pointerId,
@@ -125,6 +134,7 @@ export function useMobileDrawerGesture(onHorizontalIntent: () => void) {
       if (!result.handled) return;
       if (!result.active && !result.horizontal) {
         removeActiveListeners();
+        releasePointer(pointerEvent.pointerId);
         return;
       }
       if (!result.horizontal || result.progress === null) return;
@@ -132,14 +142,6 @@ export function useMobileDrawerGesture(onHorizontalIntent: () => void) {
       if (result.preventDefault) pointerEvent.preventDefault();
       onHorizontalIntentRef.current();
       presentProgress(result.progress, true);
-      const shell = appShellRef.current;
-      if (shell && !shell.hasPointerCapture(pointerEvent.pointerId)) {
-        try {
-          shell.setPointerCapture(pointerEvent.pointerId);
-        } catch {
-          // Document listeners retain ownership if pointer capture is unavailable.
-        }
-      }
     };
 
     const finish = (pointerEvent: PointerEvent) => {
@@ -165,7 +167,7 @@ export function useMobileDrawerGesture(onHorizontalIntent: () => void) {
       document.removeEventListener("pointerup", finish, true);
       document.removeEventListener("pointercancel", cancel, true);
     };
-  }, [completeGesture, presentProgress, removeActiveListeners]);
+  }, [completeGesture, presentProgress, releasePointer, removeActiveListeners]);
 
   const handleClickCapture = useCallback((event: ReactMouseEvent<HTMLElement>) => {
     if (performance.now() > suppressClickUntilRef.current) return;
