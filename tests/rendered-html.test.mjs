@@ -149,13 +149,19 @@ test("keeps mobile prompt actions prominent and ephemeral", async () => {
   ]);
 
   assert.match(page, /message-action-popover/);
+  assert.match(page, /message-actions-backdrop/);
+  assert.match(page, /message-user-container/);
+  assert.match(page, /aria-label="Close prompt actions"/);
   assert.match(page, /role="menuitem"/);
   assert.match(page, /Share prompt/);
   assert.match(page, /navigator\.share/);
   assert.match(page, /event\.key === "Escape"\) setOpenMessageActions\(null\)/);
   assert.match(page, /onScroll=\{\(\) => setOpenMessageActions\(null\)\}/);
+  assert.match(styles, /\.message-actions-backdrop[\s\S]*?backdrop-filter: blur\(8px\)/);
   assert.match(styles, /\.message-action-popover[\s\S]*?backdrop-filter: blur\(16px\)/);
-  assert.match(styles, /\.message-actions-open \.message\.user \.message-bubble[\s\S]*?font-size: 19px/);
+  assert.match(styles, /\.message-actions-open \.message-user-container[\s\S]*?z-index: 20/);
+  assert.match(styles, /\.message-actions-open \.message\.user \.message-bubble[\s\S]*?transform: scale\(1\.06\)/);
+  assert.match(styles, /\.message-action-popover[\s\S]*?top: calc\(100% - 1px\)/);
   assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.message\.user \.message-bubble \{[\s\S]*?user-select: none;[\s\S]*?-webkit-user-select: none;/);
 });
 

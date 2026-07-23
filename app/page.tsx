@@ -761,7 +761,19 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
         />
       )}
 
-      <section className={`chat-area ${hasMessages ? "chat-active" : ""}`}>
+      <section
+        className={`chat-area ${hasMessages ? "chat-active" : ""} ${
+          openMessageActions ? "message-actions-active" : ""
+        }`}
+      >
+        {openMessageActions && (
+          <button
+            type="button"
+            className="message-actions-backdrop"
+            aria-label="Close prompt actions"
+            onClick={() => setOpenMessageActions(null)}
+          />
+        )}
         {!hasMessages ? (
           <div className="empty-state">
             <div className="spark-mark" aria-hidden="true">✦</div>
@@ -792,6 +804,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
                   onPointerCancel={cancelLongPress}
                   onPointerMove={cancelLongPress}
                 >
+                  <div className="message-user-container">
                   <article className="message user">
                     <div className="message-label">You</div>
                     <div className="message-bubble">{userMessage.content}</div>
@@ -841,6 +854,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
                       </button>
                     </div>
                   )}
+                  </div>
                   <article className="message assistant">
                     <div className="message-label">Response</div>
                     {(Boolean(assistantMessage.reasoning) || (assistantMessage.thinkingEnabled && assistantMessage.status === "streaming")) && (
