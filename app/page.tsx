@@ -958,7 +958,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
         tabIndex={drawerProgress > 0 ? 0 : -1}
         style={{
           "--drawer-progress": drawerProgress,
-          pointerEvents: drawerProgress > 0 ? "auto" : "none",
+          pointerEvents: sidebarOpen ? "auto" : "none",
         } as CSSProperties}
         onClick={handleScrimClick}
         onPointerDown={beginDrawerGesture}

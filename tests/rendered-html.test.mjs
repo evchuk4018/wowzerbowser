@@ -376,6 +376,8 @@ test("keeps mobile history drawer movement progressive and chat centered", async
   assert.match(page, /\.assistant-markdown \.katex-display/);
   assert.match(page, /event\.preventDefault\(\)/);
   assert.match(page, /DRAWER_GESTURE_IGNORE_SELECTOR/);
+  assert.match(page, /pointerEvents: sidebarOpen \? "auto" : "none"/);
+  assert.doesNotMatch(page, /pointerEvents: drawerProgress > 0 \? "auto" : "none"/);
   assert.match(styles, /var\(--drawer-progress, 0\) \* 100%/);
   assert.match(styles, /\.sidebar\.sidebar-dragging[\s\S]*?transition: none;/);
   assert.match(styles, /\.sidebar-scrim[\s\S]*?opacity: var\(--drawer-progress, 0\)/);
