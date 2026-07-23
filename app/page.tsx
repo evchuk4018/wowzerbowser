@@ -440,8 +440,9 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   const beginDrawerGesture = (event: ReactPointerEvent<HTMLElement>) => {
     if (event.pointerType !== "touch" || window.matchMedia("(min-width: 761px)").matches) return;
     const target = event.target as Element;
-    if (!event.currentTarget.classList.contains("sidebar-scrim") && target.closest(DRAWER_GESTURE_IGNORE_SELECTOR)) return;
-    if (event.currentTarget.classList.contains("sidebar-scrim")) {
+    const isScrim = event.currentTarget.classList.contains("sidebar-scrim");
+    if (!isScrim && target.closest(DRAWER_GESTURE_IGNORE_SELECTOR)) return;
+    if (isScrim) {
       suppressScrimClickRef.current = false;
     }
 

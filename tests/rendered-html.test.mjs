@@ -363,6 +363,9 @@ test("keeps mobile history drawer movement progressive and chat centered", async
   assert.match(styles, /var\(--drawer-progress, 0\) \* 100%/);
   assert.match(styles, /\.sidebar\.sidebar-dragging[\s\S]*?transition: none;/);
   assert.match(styles, /\.sidebar-scrim[\s\S]*?opacity: var\(--drawer-progress, 0\)/);
+  assert.match(styles, /\.app-shell[\s\S]*?overflow-x: clip;/);
+  assert.match(styles, /\.chat-area[\s\S]*?overscroll-behavior-x: none;/);
+  assert.match(styles, /\.sidebar-scrim[\s\S]*?touch-action: pan-y;/);
   assert.match(styles, /\.chat-area \{[\s\S]*?touch-action: pan-y;/);
 });
 
