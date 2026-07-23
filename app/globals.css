@@ -1143,6 +1143,10 @@ button {
 }
 
 @media (max-width: 760px) {
+  .helper-text {
+    display: none;
+  }
+
   .message.user .message-bubble {
     user-select: none;
     -webkit-user-select: none;
