@@ -1255,12 +1255,12 @@ button {
     bottom: 0;
     left: 0;
     width: min(86vw, 310px);
-    transform: translateX(calc(-100% + (var(--drawer-progress, 0) * 100%)));
+    transform: translateX(-102%);
     transition: transform 220ms ease;
   }
 
-  .sidebar.sidebar-dragging {
-    transition: none;
+  .sidebar.sidebar-open {
+    transform: translateX(0);
   }
 
   .sidebar-scrim {
@@ -1271,12 +1271,6 @@ button {
     height: 100%;
     border: 0;
     background: rgba(0, 0, 0, .48);
-    opacity: var(--drawer-progress, 0);
-    transition: opacity 220ms ease;
-  }
-
-  .sidebar-scrim-dragging {
-    transition: none;
   }
 
   .mobile-menu {
@@ -1320,10 +1314,6 @@ button {
     transform: scale(1.06);
     transform-origin: bottom right;
     transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
-  }
-
-  .chat-area {
-    touch-action: pan-y;
   }
 
   .message-action-popover {
