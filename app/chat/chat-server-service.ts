@@ -1,6 +1,6 @@
 import "server-only";
 
-import { randomUUID, createHash } from "node:crypto";
+import { createHash } from "node:crypto";
 import type { ChatAssistantRound, ChatRequest, ChatStreamEvent, ChatToolCall, ChatToolResult } from "../../lib/chat-protocol";
 import { streamDeepSeekChatRound } from "../providers/deepseek/deepseek-adapter";
 import { availableChatTools, executePythonTool } from "../server/agent/python-tool";
@@ -13,10 +13,6 @@ import { latestNonNullUsage, sumRoundUsage } from "./chat-usage";
 const MAX_RESPONSE_MS = 240_000;
 const MAX_TOOL_CALLS = 6;
 
-function encodeEvent(encoder: TextEncoder, event: ChatStreamEvent): Uint8Array {
-  return encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
-}
-
 function stableConversationId(request: ChatRequest): string {
   if (request.conversationId) return request.conversationId;
   return createHash("sha256")
@@ -25,25 +21,23 @@ function stableConversationId(request: ChatRequest): string {
     .slice(0, 32);
 }
 
-export function createChatEventStream(
+export async function generateChatResponse(
   chatRequest: ChatRequest,
   ownerId: string,
   signal: AbortSignal,
-): ReadableStream<Uint8Array> {
+  persistEvent: (event: ChatStreamEvent) => Promise<void>,
+): Promise<void> {
   const responseDeadlineAt = Date.now() + MAX_RESPONSE_MS;
-  const encoder = new TextEncoder();
-  const responseId = randomUUID();
+  const responseId = chatRequest.jobId;
   const conversationId = stableConversationId(chatRequest);
   const pythonTools = availableChatTools();
   const webTools = availableWebTools();
   const toolDefinitions = [...pythonTools, ...webTools];
 
-  return new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const enqueue = (event: ChatStreamEvent) => {
-        if (!signal.aborted) controller.enqueue(encodeEvent(encoder, event));
-      };
-      enqueue({
+  const enqueue = async (event: ChatStreamEvent) => {
+    if (!signal.aborted) await persistEvent(event);
+  };
+      await enqueue({
         type: "meta",
         model: chatRequest.model,
         thinking: chatRequest.thinking,
@@ -61,7 +55,7 @@ export function createChatEventStream(
 
       try {
         for (let round = 1; round <= MAX_TOOL_CALLS + 1; round += 1) {
-          enqueue({ type: "round", round });
+          await enqueue({ type: "round", round });
           const canCallTools = totalToolCalls < MAX_TOOL_CALLS && round <= MAX_TOOL_CALLS;
           const systemInstructions = [
             ...runPythonInstructionsFor(Boolean(pythonTools.length && canCallTools)),
@@ -82,33 +76,33 @@ export function createChatEventStream(
           )) {
             if (event.type === "reasoning") {
               reasoningParts.push(event.delta);
-              enqueue(event);
+              await enqueue(event);
             } else if (event.type === "content") {
               contentParts.push(event.delta);
+              await enqueue(event);
             } else if (event.type === "tool_call") {
               calls.push(event.call);
             } else if (event.type === "done") {
               roundUsages[roundUsageIndex] = latestNonNullUsage(roundUsages[roundUsageIndex], event.usage);
             } else if (event.type === "error") {
-              enqueue(event);
+              await enqueue(event);
             }
           }
 
           if (!calls.length) {
-            if (contentParts.length) enqueue({ type: "content", delta: contentParts.join("") });
             break;
           }
           if (!toolDefinitions.length) {
-            enqueue({ type: "error", message: "Tool execution is not configured." });
+            await enqueue({ type: "error", message: "Tool execution is not configured." });
             break;
           }
           if (totalToolCalls + calls.length > MAX_TOOL_CALLS) {
-            enqueue({ type: "error", message: "The response reached the 6-call tool limit." });
+            await enqueue({ type: "error", message: "The response reached the 6-call tool limit." });
             break;
           }
           for (const call of calls) {
             totalToolCalls += 1;
-            enqueue({ type: "tool_call", call });
+            await enqueue({ type: "tool_call", call });
             let result: ChatToolResult;
             if (call.name === "run_python") {
               if (!isModalConfigured()) throw new Error("Python execution is not configured.");
@@ -118,8 +112,8 @@ export function createChatEventStream(
               result = await executeWebTool(call);
             }
             call.result = result;
-            enqueue({ type: "tool_result", result });
-            for (const artifact of result.artifacts ?? []) enqueue({ type: "artifact", artifact });
+            await enqueue({ type: "tool_result", result });
+            for (const artifact of result.artifacts ?? []) await enqueue({ type: "artifact", artifact });
           }
           replayRounds.push({
             content: contentParts.join(""),
@@ -130,17 +124,12 @@ export function createChatEventStream(
       } catch (error: unknown) {
         if (!signal.aborted) {
           const message = deadline.aborted ? "The response exceeded its 240-second limit." : error instanceof Error ? error.message : "DeepSeek is unavailable.";
-          enqueue({ type: "error", message });
+          await enqueue({ type: "error", message });
         }
       } finally {
         await executor?.close().catch(() => undefined);
         if (!signal.aborted) {
-          enqueue({ type: "done", usage: sumRoundUsage(roundUsages) });
-          controller.close();
-        } else {
-          controller.close();
+          await enqueue({ type: "done", usage: sumRoundUsage(roundUsages) });
         }
       }
-    },
-  });
 }

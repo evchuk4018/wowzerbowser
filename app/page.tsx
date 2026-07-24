@@ -13,7 +13,7 @@ import {
 import { MagicLinkForm } from "./auth/magic-link-form";
 import type { AuthUser } from "./auth/types";
 import { useAuthSession } from "./auth/use-auth-session";
-import { fetchChatModels, streamChatResponse } from "./chat/chat-service";
+import { cancelChatJob, fetchChatJob, fetchChatModels, streamChatResponse } from "./chat/chat-service";
 import { ChatComposer } from "./chat/chat-composer";
 import { AssistantResponse } from "./chat/assistant-response";
 import { AssistantActivityTimeline } from "./chat/assistant-activity";
@@ -42,6 +42,8 @@ type Message = {
   thinkingDurationMs?: number;
   status?: "streaming" | "complete" | "error" | "cancelled";
   error?: string;
+  jobId?: string;
+  lastSequence?: number;
 };
 
 type TurnVersion = {
@@ -129,7 +131,7 @@ function normalizeStoredMessage(message: Message): Message {
 
   return {
     ...message,
-    status: message.status === "streaming" ? "cancelled" : message.status,
+    status: message.status,
     activities: message.activities?.map((activity) => {
       if (activity.kind === "reasoning" && activity.status === "running") {
         return {
@@ -448,6 +450,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
 
   useEffect(() => {
     return () => {
+      // Abort only this tab's delivery. Server-owned jobs continue durably.
       Object.values(activeRequestsRef.current).forEach(({ controller }) => controller.abort());
       activeRequestsRef.current = {};
     };
@@ -577,9 +580,56 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
     );
   };
 
-  const stopStreaming = () => {
+  useEffect(() => {
+    if (!ready) return;
+    let disposed = false;
+    const resumePersistedJobs = async () => {
+      const token = await getAccessToken();
+      if (!token || disposed) return;
+      const pending = conversations.flatMap((conversation) =>
+        conversation.turns.flatMap((turn) => turn.versions.map((version) => ({ conversationId: conversation.id, message: version.assistant }))),
+      ).filter(({ message }) => message.status === "streaming" && message.jobId);
+      await Promise.all(pending.map(async ({ conversationId, message }) => {
+        let after = message.lastSequence ?? 0;
+        while (!disposed) {
+          const snapshot = await fetchChatJob(conversationId, message.jobId!, after, token).catch(() => null);
+          if (!snapshot) return;
+          for (const event of snapshot.events) {
+            if (event.sequence <= after) continue;
+            after = event.sequence;
+            updateMessage(conversationId, message.id, (current) => ({
+              ...current,
+              lastSequence: event.sequence,
+              content: event.type === "content" ? `${current.content}${event.delta}` : current.content,
+              error: event.type === "error" ? event.message : current.error,
+            }));
+          }
+          if (snapshot.status !== "queued" && snapshot.status !== "running") {
+            updateMessage(conversationId, message.id, (current) => ({
+              ...current,
+              content: snapshot.finalOutput ?? current.content,
+              status: snapshot.status === "completed" ? "complete" : snapshot.status === "cancelled" ? "cancelled" : "error",
+              error: snapshot.error ?? current.error,
+            }));
+            return;
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 750));
+        }
+      }));
+    };
+    void resumePersistedJobs();
+    const onVisibility = () => { if (document.visibilityState === "visible") void resumePersistedJobs(); };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => { disposed = true; document.removeEventListener("visibilitychange", onVisibility); };
+    // A visibility transition explicitly re-scans persisted streaming messages.
+  }, [ready, user.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const stopStreaming = async () => {
     const activeRequest = activeRequestsRef.current[activeId];
     if (!activeRequest) return;
+    const token = await getAccessToken();
+    const message = conversations.flatMap((conversation) => conversation.turns).flatMap((turn) => turn.versions).map((version) => version.assistant).find((item) => item.id === activeRequest.messageId);
+    if (token && message?.jobId) await cancelChatJob(activeRequest.conversationId, message.jobId, token).catch(() => undefined);
     activeRequest.controller.abort();
     updateMessage(activeRequest.conversationId, activeRequest.messageId, (message) => ({
       ...message,
@@ -689,6 +739,8 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
       artifacts: [],
       thinkingEnabled: effectiveThinking,
       status: "streaming",
+      jobId: makeId(),
+      lastSequence: 0,
     };
     const conversationId = active.id;
     const editingTurnIndex = editingTurnId
@@ -810,10 +862,13 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
         thinking: effectiveThinking,
         reasoningEffort: effectiveEffort,
         conversationId,
+        jobId: assistantMessage.jobId,
+        idempotencyKey: assistantMessage.jobId,
       };
 
       setWaitingByMessage((current) => ({ ...current, [assistantMessage.id]: true }));
       for await (const event of streamChatResponse(request, accessToken, controller.signal)) {
+        updateMessage(conversationId, assistantMessage.id, (message) => ({ ...message, lastSequence: "sequence" in event ? event.sequence : message.lastSequence }));
         if (event.type === "round") {
           updateMessage(conversationId, assistantMessage.id, (message) =>
             finishRunningActivities(message),
@@ -960,12 +1015,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
         }
       }
     } catch (error: unknown) {
-      if (controller.signal.aborted) {
-        updateMessage(conversationId, assistantMessage.id, (message) => ({
-          ...finishRunningActivities(message, true),
-          status: "cancelled",
-        }));
-      } else {
+      if (!controller.signal.aborted) {
         updateMessage(conversationId, assistantMessage.id, (message) => ({
           ...finishRunningActivities(message, true),
           status: "error",

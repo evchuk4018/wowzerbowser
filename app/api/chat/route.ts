@@ -1,52 +1,32 @@
+import { after } from "next/server";
 import { NextResponse } from "next/server";
 import { authorizeOwnerSession } from "../../auth/owner-auth-service";
 import { parseChatRequest, ChatRequestValidationError } from "../../../lib/chat-protocol";
-import { createChatEventStream } from "../../chat/chat-server-service";
 import { assertDeepSeekConfigured, DeepSeekError } from "../../providers/deepseek/deepseek-adapter";
+import { createOrGetChatJob } from "../../server/chat/chat-job-store";
+import { runChatJob } from "../../server/chat/chat-job-runner";
 
 export const maxDuration = 300;
-
-function unauthorizedResponse() {
-  return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-}
+const unauthorized = () => NextResponse.json({ error: "Unauthorized." }, { status: 401 });
 
 export async function POST(request: Request) {
   const authorization = request.headers.get("authorization");
-  if (!authorization?.startsWith("Bearer ")) return unauthorizedResponse();
-  const contentLength = Number(request.headers.get("content-length") ?? "0");
-  if (Number.isFinite(contentLength) && contentLength > 1_250_000) {
-    return NextResponse.json({ error: "Request is too large." }, { status: 413 });
-  }
-
+  if (!authorization?.startsWith("Bearer ")) return unauthorized();
+  if (Number(request.headers.get("content-length") ?? "0") > 1_250_000) return NextResponse.json({ error: "Request is too large." }, { status: 413 });
   const user = await authorizeOwnerSession(authorization.slice(7));
-  if (!user) return unauthorizedResponse();
-
-  let body: unknown;
+  if (!user) return unauthorized();
   try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
-  }
-
-  let chatRequest;
-  try {
-    chatRequest = parseChatRequest(body);
-    assertDeepSeekConfigured();
-  } catch (error: unknown) {
-    if (error instanceof ChatRequestValidationError) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    const chatRequest = parseChatRequest(await request.json());
+    if (!chatRequest.conversationId || !chatRequest.jobId || !chatRequest.idempotencyKey) {
+      return NextResponse.json({ error: "conversationId, jobId, and idempotencyKey are required." }, { status: 400 });
     }
+    assertDeepSeekConfigured();
+    const submission = await createOrGetChatJob(user.id, chatRequest);
+    if (submission.status === "queued") after(() => runChatJob(user.id, chatRequest.conversationId!, submission.jobId));
+    return NextResponse.json(submission, { status: submission.resumed ? 200 : 202 });
+  } catch (error) {
+    if (error instanceof ChatRequestValidationError || error instanceof SyntaxError) return NextResponse.json({ error: error.message }, { status: 400 });
     const status = error instanceof DeepSeekError ? error.status : 503;
-    const message = error instanceof Error ? error.message : "DeepSeek is unavailable.";
-    return NextResponse.json({ error: message }, { status });
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Chat storage is unavailable." }, { status });
   }
-
-  return new Response(createChatEventStream(chatRequest, user.id, request.signal), {
-    headers: {
-      "cache-control": "no-cache, no-transform",
-      connection: "keep-alive",
-      "content-type": "text/event-stream; charset=utf-8",
-      "x-accel-buffering": "no",
-    },
-  });
 }
