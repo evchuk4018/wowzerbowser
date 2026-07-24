@@ -1158,6 +1158,7 @@ button {
 
   .app-shell {
     display: block;
+    touch-action: pan-y;
   }
 
   .sidebar {

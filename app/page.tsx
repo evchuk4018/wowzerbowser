@@ -1,12 +1,22 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  FormEvent,
+  KeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { MagicLinkForm } from "./auth/magic-link-form";
 import type { AuthUser } from "./auth/types";
 import { useAuthSession } from "./auth/use-auth-session";
 import { fetchChatModels, streamChatResponse } from "./chat/chat-service";
 import { ChatComposer } from "./chat/chat-composer";
 import { AssistantResponse } from "./chat/assistant-response";
+import { MobileHistorySwipeGesture } from "./chat/mobile-history-swipe";
 import type {
   ChatModelId,
   ChatReasoningEffort,
@@ -193,6 +203,8 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   const endRef = useRef<HTMLDivElement>(null);
   const thinkingStartedAtRef = useRef<number | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
+  const mobileHistorySwipeRef = useRef(new MobileHistorySwipeGesture());
+  const swipeClickResetTimerRef = useRef<number | null>(null);
   const activeRequestRef = useRef<{
     conversationId: string;
     messageId: string;
@@ -360,6 +372,86 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   useEffect(() => {
     return () => activeRequestRef.current?.controller.abort();
   }, []);
+
+  useEffect(() => {
+    const resetMobileHistorySwipe = () => {
+      mobileHistorySwipeRef.current.cancel();
+      if (swipeClickResetTimerRef.current !== null) {
+        window.clearTimeout(swipeClickResetTimerRef.current);
+        swipeClickResetTimerRef.current = null;
+      }
+    };
+    window.addEventListener("blur", resetMobileHistorySwipe);
+    window.addEventListener("resize", resetMobileHistorySwipe);
+    return () => {
+      window.removeEventListener("blur", resetMobileHistorySwipe);
+      window.removeEventListener("resize", resetMobileHistorySwipe);
+      resetMobileHistorySwipe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (settingsOpen) mobileHistorySwipeRef.current.cancel();
+  }, [settingsOpen]);
+
+  const handleMobileHistoryPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
+    mobileHistorySwipeRef.current.begin({
+      clientX: event.clientX,
+      clientY: event.clientY,
+      disabled: settingsOpen,
+      isPrimary: event.isPrimary,
+      pointerId: event.pointerId,
+      pointerType: event.pointerType,
+      sidebarOpen,
+      viewportWidth: window.innerWidth,
+    });
+  };
+
+  const handleMobileHistoryPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
+    const hasHorizontalIntent = mobileHistorySwipeRef.current.move({
+      clientX: event.clientX,
+      clientY: event.clientY,
+      pointerId: event.pointerId,
+    });
+    if (hasHorizontalIntent && event.cancelable) event.preventDefault();
+  };
+
+  const scheduleSwipeClickReset = () => {
+    if (!mobileHistorySwipeRef.current.hasClickSuppression()) return;
+    if (swipeClickResetTimerRef.current !== null) {
+      window.clearTimeout(swipeClickResetTimerRef.current);
+    }
+    swipeClickResetTimerRef.current = window.setTimeout(() => {
+      mobileHistorySwipeRef.current.clearClickSuppression();
+      swipeClickResetTimerRef.current = null;
+    }, 0);
+  };
+
+  const handleMobileHistoryPointerUp = (event: ReactPointerEvent<HTMLElement>) => {
+    const action = mobileHistorySwipeRef.current.end({
+      clientX: event.clientX,
+      clientY: event.clientY,
+      pointerId: event.pointerId,
+    });
+    if (action === "open") {
+      setOpenMenu(null);
+      setOpenMessageActions(null);
+      setSidebarOpen(true);
+    } else if (action === "close") {
+      setSidebarOpen(false);
+    }
+    scheduleSwipeClickReset();
+  };
+
+  const handleMobileHistoryPointerCancel = () => {
+    mobileHistorySwipeRef.current.cancel();
+  };
+
+  const handleMobileHistoryClickCapture = (event: ReactMouseEvent<HTMLElement>) => {
+    if (!mobileHistorySwipeRef.current.consumeClickSuppression()) return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
 
   const startNewChat = () => {
     const existingBlank = conversations.find((item) => item.turns.length === 0);
@@ -689,7 +781,14 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   };
 
   return (
-    <main className="app-shell">
+    <main
+      className="app-shell"
+      onClickCapture={handleMobileHistoryClickCapture}
+      onPointerCancel={handleMobileHistoryPointerCancel}
+      onPointerDown={handleMobileHistoryPointerDown}
+      onPointerMove={handleMobileHistoryPointerMove}
+      onPointerUp={handleMobileHistoryPointerUp}
+    >
       <button
         className="mobile-menu"
         type="button"
@@ -713,7 +812,12 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
       <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
         <div className="sidebar-top">
           <div className="product-name">Chat</div>
-          <button type="button" className="square-button" aria-label="Collapse sidebar">
+          <button
+            type="button"
+            className="square-button"
+            aria-label="Collapse sidebar"
+            onClick={() => setSidebarOpen(false)}
+          >
             <span className="panel-icon" />
           </button>
         </div>

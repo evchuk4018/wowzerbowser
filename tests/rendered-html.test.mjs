@@ -3,6 +3,11 @@ import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import {
+  MOBILE_HISTORY_HORIZONTAL_INTENT_PX,
+  MobileHistorySwipeGesture,
+  getMobileHistorySwipeAction,
+} from "../app/chat/mobile-history-swipe.ts";
 
 const nextCli = fileURLToPath(new URL("../node_modules/next/dist/bin/next", import.meta.url));
 
@@ -302,6 +307,95 @@ test("keeps mobile prompt actions prominent and ephemeral", async () => {
   assert.match(styles, /\.message-actions-open \.message\.user \.message-bubble[\s\S]*?transform: scale\(1\.06\)/);
   assert.match(styles, /\.message-action-popover[\s\S]*?top: calc\(100% - 1px\)/);
   assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.message\.user \.message-bubble \{[\s\S]*?user-select: none;[\s\S]*?-webkit-user-select: none;/);
+});
+
+test("classifies mobile history swipes by viewport threshold and direction", () => {
+  const decide = (deltaX, deltaY, sidebarOpen, viewportWidth = 400) =>
+    getMobileHistorySwipeAction({ deltaX, deltaY, sidebarOpen, viewportWidth });
+
+  assert.equal(decide(99, 0, false), null);
+  assert.equal(decide(100, 0, false), "open");
+  assert.equal(decide(-100, 0, true), "close");
+  assert.equal(decide(100, 0, true), null);
+  assert.equal(decide(-100, 0, false), null);
+  assert.equal(decide(120, 121, false), null);
+  assert.equal(decide(120, 119, false), "open");
+  assert.equal(decide(200, 0, false, 761), null);
+});
+
+test("keeps mobile history gesture tracking touch-safe and click-safe", () => {
+  const gesture = new MobileHistorySwipeGesture();
+  const begin = (overrides = {}) =>
+    gesture.begin({
+      clientX: 0,
+      clientY: 0,
+      disabled: false,
+      isPrimary: true,
+      pointerId: 1,
+      pointerType: "touch",
+      sidebarOpen: false,
+      viewportWidth: 400,
+      ...overrides,
+    });
+
+  assert.equal(begin({ pointerType: "mouse" }), false);
+  assert.equal(begin({ isPrimary: false }), false);
+  assert.equal(begin({ disabled: true }), false);
+  assert.equal(begin({ viewportWidth: 761 }), false);
+
+  assert.equal(begin(), true);
+  assert.equal(
+    gesture.move({
+      clientX: MOBILE_HISTORY_HORIZONTAL_INTENT_PX - 1,
+      clientY: 0,
+      pointerId: 1,
+    }),
+    false,
+  );
+  assert.equal(
+    gesture.move({
+      clientX: MOBILE_HISTORY_HORIZONTAL_INTENT_PX,
+      clientY: 0,
+      pointerId: 1,
+    }),
+    true,
+  );
+  assert.equal(gesture.hasClickSuppression(), true);
+  assert.equal(gesture.end({ clientX: 100, clientY: 0, pointerId: 1 }), "open");
+  assert.equal(gesture.end({ clientX: 100, clientY: 0, pointerId: 1 }), null);
+  assert.equal(gesture.consumeClickSuppression(), true);
+  assert.equal(gesture.consumeClickSuppression(), false);
+
+  assert.equal(begin(), true);
+  assert.equal(gesture.move({ clientX: 120, clientY: 121, pointerId: 1 }), false);
+  gesture.cancel();
+  assert.equal(gesture.end({ clientX: 120, clientY: 0, pointerId: 1 }), null);
+  assert.equal(gesture.hasClickSuppression(), false);
+});
+
+test("wires mobile history swipes without pointer capture", async () => {
+  const [page, styles, gestureSource] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/mobile-history-swipe.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /onPointerDown=\{handleMobileHistoryPointerDown\}/);
+  assert.match(page, /onPointerMove=\{handleMobileHistoryPointerMove\}/);
+  assert.match(page, /onPointerUp=\{handleMobileHistoryPointerUp\}/);
+  assert.match(page, /onPointerCancel=\{handleMobileHistoryPointerCancel\}/);
+  assert.match(page, /onClickCapture=\{handleMobileHistoryClickCapture\}/);
+  assert.match(page, /window\.addEventListener\("blur", resetMobileHistorySwipe\)/);
+  assert.match(page, /window\.addEventListener\("resize", resetMobileHistorySwipe\)/);
+  assert.match(page, /disabled: settingsOpen/);
+  assert.match(page, /action === "open"[\s\S]*?setOpenMenu\(null\)[\s\S]*?setOpenMessageActions\(null\)[\s\S]*?setSidebarOpen\(true\)/);
+  assert.match(page, /aria-label="Collapse sidebar"[\s\S]*?onClick=\{\(\) => setSidebarOpen\(false\)\}/);
+  assert.doesNotMatch(page, /setPointerCapture|releasePointerCapture/);
+  assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.app-shell \{[\s\S]*?touch-action: pan-y;/);
+  assert.match(gestureSource, /MOBILE_HISTORY_MAX_WIDTH = 760/);
+  assert.match(gestureSource, /MOBILE_HISTORY_SWIPE_THRESHOLD = 0\.25/);
+  assert.match(gestureSource, /pointerType !== "touch"/);
+  assert.match(gestureSource, /!isPrimary/);
 });
 
 test("renders assistant Markdown and LaTeX with the bobert default prompt", async () => {
