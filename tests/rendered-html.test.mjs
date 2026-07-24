@@ -571,3 +571,18 @@ test("does not retain removed hosting integrations", async () => {
   const source = contents.join("\n");
   assert.doesNotMatch(source, /openai|\.openai|sites-vite|cloudflare|vinext|wrangler|D1Database/i);
 });
+
+test("renders web activities inside thought-process disclosures", async () => {
+  const [activity, styles, page] = await Promise.all([
+    readFile(new URL("../app/chat/assistant-activity.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.match(activity, /WebDisclosure/);
+  assert.match(activity, /webActivities\.map/);
+  assert.match(activity, /Thought process/);
+  assert.match(activity, /web\.results/);
+  assert.match(activity, /web\.markdown/);
+  assert.match(page, /kind: event\.call\.name === "run_python" \? "python" : "web"/);
+  assert.match(styles, /\.web-nested/);
+});

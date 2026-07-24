@@ -17,6 +17,8 @@ import {
   RUN_PYTHON_INSTRUCTIONS,
   runPythonInstructionsFor,
 } from "../app/server/agent/python-tool-instructions.ts";
+import { configuredKeys, withProviderKeys } from "../app/server/agent/web-api-key-pool.ts";
+import { WEB_TOOL_DEFINITIONS } from "../app/server/agent/web-tools.ts";
 
 function request(overrides = {}) {
   return {
@@ -102,6 +104,27 @@ test("run_python manifest uses the shared input limits", async () => {
   assert.match(source, /maxItems:\s*PYTHON_TOOL_INPUT_LIMITS\.maxArgs/);
   assert.match(source, /maxItems:\s*PYTHON_TOOL_INPUT_LIMITS\.maxArtifacts/);
   assert.match(source, /PYTHON_TOOL_INPUT_LIMITS/);
+});
+
+test("web tools have bounded manifests, configuration gates, and opaque key rotation", async () => {
+  assert.deepEqual(WEB_TOOL_DEFINITIONS.map((tool) => tool.function.name), ["web_search", "fetch_page"]);
+  assert.equal(WEB_TOOL_DEFINITIONS[0].function.parameters.properties.count.maximum, 5);
+  assert.equal(WEB_TOOL_DEFINITIONS[1].function.parameters.properties.url.maxLength, 2_000);
+  const original = process.env.BRAVE_API_KEYS;
+  process.env.BRAVE_API_KEYS = " first,\nsecond ";
+  assert.deepEqual(configuredKeys("brave"), ["first", "second"]);
+  const used = [];
+  const result = await withProviderKeys(configuredKeys("brave"), async (key) => { used.push(key); if (key === "first") throw new Response("no", { status: 429 }); return { content: "safe" }; });
+  assert.deepEqual(used, ["first", "second"]);
+  assert.deepEqual(result, { content: "safe" });
+  assert.doesNotMatch(JSON.stringify(result), /first|second|retry|failover/i);
+  if (original === undefined) delete process.env.BRAVE_API_KEYS; else process.env.BRAVE_API_KEYS = original;
+});
+
+test("web tool results replay in the provider transcript", () => {
+  const messages = buildDeepSeekMessages(request(), { replayRounds: [{ content: "", toolCalls: [{ id: "web-1", name: "web_search", arguments: '{"query":"today"}', result: { id: "web-1", name: "web_search", ok: true, stdout: "", stderr: "", web: { kind: "search", query: "today", results: [{ title: "Result", url: "https://example.com", snippet: "Snippet" }] } } }] }] });
+  assert.equal(messages.at(-2)?.role, "assistant");
+  assert.match(messages.at(-1)?.content ?? "", /"query":"today"/);
 });
 
 test("Python policy accepts shared maxima and rejects the next value", () => {

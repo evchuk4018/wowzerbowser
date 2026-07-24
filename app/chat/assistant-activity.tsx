@@ -9,6 +9,7 @@ import type {
   AssistantActivity,
   PythonActivity,
   ReasoningActivity,
+  WebActivity,
 } from "./assistant-activity-types";
 import { fetchChatArtifact } from "./chat-service";
 
@@ -16,6 +17,7 @@ export type {
   AssistantActivity,
   PythonActivity,
   ReasoningActivity,
+  WebActivity,
 } from "./assistant-activity-types";
 
 function formatDuration(milliseconds: number): string {
@@ -122,7 +124,13 @@ function PythonDisclosure({ activity }: { activity: PythonActivity }) {
   );
 }
 
-function ReasoningCard({ activity, pythonActivities }: { activity: ReasoningActivity; pythonActivities: PythonActivity[] }) {
+function WebDisclosure({ activity }: { activity: WebActivity }) {
+  const [open, setOpen] = useState(false); const liveDuration = useLiveDuration(activity.startedAt, activity.status === "running"); const duration = activity.durationMs ?? liveDuration;
+  const web = activity.result?.web; const label = web?.kind === "search" ? `Search: ${web.query}` : web?.kind === "page" ? `Page: ${web.url}` : activity.call.name === "web_search" ? "Web search" : "Fetch page";
+  const output = web?.kind === "search" ? web.results.map((item) => `${item.title}\n${item.url}\n${item.snippet}`).join("\n\n") : web?.kind === "page" ? web.markdown : activity.result?.stderr ?? "Waiting for result…";
+  return <div className={`web-nested web-nested-${activity.status}`}><button type="button" className="web-nested-summary" aria-expanded={open} onClick={() => setOpen((value) => !value)}><span className="python-nested-chevron">{open ? "⌄" : "›"}</span><span className="web-activity-label">{label}</span><span className="python-activity-status">{activity.status === "running" ? "Running" : activity.status === "completed" ? "Completed" : "Failed"}</span>{duration !== undefined && <span className="python-activity-duration">{formatDuration(duration)}</span>}</button>{open && <pre className="web-output">{output}</pre>}</div>;
+}
+function ReasoningCard({ activity, pythonActivities, webActivities }: { activity: ReasoningActivity; pythonActivities: PythonActivity[]; webActivities: WebActivity[] }) {
   const [open, setOpen] = useState(false);
   const liveDuration = useLiveDuration(activity.startedAt, activity.status === "running");
   const duration = activity.durationMs ?? liveDuration;
@@ -150,6 +158,7 @@ function ReasoningCard({ activity, pythonActivities }: { activity: ReasoningActi
               {pythonActivities.map((python) => <PythonDisclosure key={python.id} activity={python} />)}
             </div>
           )}
+          {webActivities.map((web) => <WebDisclosure key={web.id} activity={web} />)}
         </div>
       )}
     </section>
@@ -209,12 +218,12 @@ export function AssistantActivityTimeline({
   artifacts: ChatArtifact[];
   getAccessToken: () => Promise<string | null>;
 }) {
-  const rounds = activities.reduce<Map<number, { reasoning?: ReasoningActivity; python: PythonActivity[] }>>((grouped, activity) => {
-    const round = grouped.get(activity.round) ?? { python: [] };
+  const rounds = activities.reduce<Map<number, { reasoning?: ReasoningActivity; python: PythonActivity[]; web: WebActivity[] }>>((grouped, activity) => {
+    const round = grouped.get(activity.round) ?? { python: [], web: [] };
     if (activity.kind === "reasoning") round.reasoning = round.reasoning
       ? { ...round.reasoning, content: `${round.reasoning.content}${activity.content}`, status: activity.status }
       : activity;
-    else round.python.push(activity);
+    else if (activity.kind === "python") round.python.push(activity); else round.web.push(activity);
     grouped.set(activity.round, round);
     return grouped;
   }, new Map());
@@ -230,7 +239,7 @@ export function AssistantActivityTimeline({
             content: "",
             status: "complete" as const,
           };
-          return <ReasoningCard key={reasoning.id} activity={reasoning} pythonActivities={group.python} />;
+          return <ReasoningCard key={reasoning.id} activity={reasoning} pythonActivities={group.python} webActivities={group.web} />;
         })}
       </div>
       {content && (

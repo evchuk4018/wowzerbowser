@@ -1,10 +1,12 @@
 import "server-only";
 
 import { randomUUID, createHash } from "node:crypto";
-import type { ChatAssistantRound, ChatRequest, ChatStreamEvent, ChatToolCall } from "../../lib/chat-protocol";
+import type { ChatAssistantRound, ChatRequest, ChatStreamEvent, ChatToolCall, ChatToolResult } from "../../lib/chat-protocol";
 import { streamDeepSeekChatRound } from "../providers/deepseek/deepseek-adapter";
-import { availableChatTools, executePythonTool, PYTHON_TOOL_NAME } from "../server/agent/python-tool";
+import { availableChatTools, executePythonTool } from "../server/agent/python-tool";
 import { runPythonInstructionsFor } from "../server/agent/python-tool-instructions";
+import { availableWebTools, executeWebTool } from "../server/agent/web-tools";
+import { webToolInstructionsFor } from "../server/agent/web-tool-instructions";
 import { isModalConfigured, ModalPythonExecutor } from "../server/modal/modal-python-executor";
 import { latestNonNullUsage, sumRoundUsage } from "./chat-usage";
 
@@ -32,7 +34,9 @@ export function createChatEventStream(
   const encoder = new TextEncoder();
   const responseId = randomUUID();
   const conversationId = stableConversationId(chatRequest);
-  const toolDefinitions = availableChatTools();
+  const pythonTools = availableChatTools();
+  const webTools = availableWebTools();
+  const toolDefinitions = [...pythonTools, ...webTools];
 
   return new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -45,7 +49,7 @@ export function createChatEventStream(
         thinking: chatRequest.thinking,
         reasoningEffort: chatRequest.reasoningEffort,
         responseId,
-        ...(toolDefinitions.length ? { tools: [PYTHON_TOOL_NAME] } : {}),
+        ...(toolDefinitions.length ? { tools: toolDefinitions.map((tool) => tool.function.name) } : {}),
       });
 
       const deadline = AbortSignal.timeout(Math.max(0, responseDeadlineAt - Date.now()));
@@ -59,7 +63,10 @@ export function createChatEventStream(
         for (let round = 1; round <= MAX_TOOL_CALLS + 1; round += 1) {
           enqueue({ type: "round", round });
           const canCallTools = totalToolCalls < MAX_TOOL_CALLS && round <= MAX_TOOL_CALLS;
-          const systemInstructions = runPythonInstructionsFor(Boolean(toolDefinitions.length && canCallTools));
+          const systemInstructions = [
+            ...runPythonInstructionsFor(Boolean(pythonTools.length && canCallTools)),
+            ...webToolInstructionsFor(Boolean(webTools.length && canCallTools)),
+          ];
           const reasoningParts: string[] = [];
           const contentParts: string[] = [];
           const calls: ChatToolCall[] = [];
@@ -91,22 +98,25 @@ export function createChatEventStream(
             if (contentParts.length) enqueue({ type: "content", delta: contentParts.join("") });
             break;
           }
-          if (!isModalConfigured() || !toolDefinitions.length) {
-            // The tool is never advertised in this mode, but fail closed if a
-            // provider nevertheless emits one.
-            enqueue({ type: "error", message: "Python execution is not configured." });
+          if (!toolDefinitions.length) {
+            enqueue({ type: "error", message: "Tool execution is not configured." });
             break;
           }
           if (totalToolCalls + calls.length > MAX_TOOL_CALLS) {
-            enqueue({ type: "error", message: "The response reached the 6-call Python limit." });
+            enqueue({ type: "error", message: "The response reached the 6-call tool limit." });
             break;
           }
-          if (!executor) executor = new ModalPythonExecutor(ownerId, conversationId, responseDeadlineAt);
-
           for (const call of calls) {
             totalToolCalls += 1;
             enqueue({ type: "tool_call", call });
-            const result = await executePythonTool(call, executor, ownerId, conversationId);
+            let result: ChatToolResult;
+            if (call.name === "run_python") {
+              if (!isModalConfigured()) throw new Error("Python execution is not configured.");
+              if (!executor) executor = new ModalPythonExecutor(ownerId, conversationId, responseDeadlineAt);
+              result = await executePythonTool(call, executor, ownerId, conversationId);
+            } else {
+              result = await executeWebTool(call);
+            }
             call.result = result;
             enqueue({ type: "tool_result", result });
             for (const artifact of result.artifacts ?? []) enqueue({ type: "artifact", artifact });
