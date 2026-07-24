@@ -71,6 +71,15 @@ specific URL; results are bounded and retained in the tool replay transcript.
 When a provider rejects, limits, or temporarily fails a request, key failover
 is handled internally and is never exposed to the assistant or browser.
 
+`check_time` and `check_date` are always available and use the server's
+`Intl.DateTimeFormat` implementation, optionally with an IANA time zone.
+To enable `check_location`, set `DEPLOYMENT_LOCATION` to a deliberately chosen,
+coarse deployment label (for example, `Frankfurt, Germany`). This is explicit
+deployment metadata, not browser geolocation: the application does not infer a
+user's precise location, make a user-controlled location URL request, or expose
+location-provider credentials. Leave it unset to omit the tool; a direct call
+then returns a clear "not configured" result.
+
 ## Useful Commands
 
 - `npm run dev`: start local development at `http://localhost:3000`
