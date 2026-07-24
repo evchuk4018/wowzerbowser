@@ -70,6 +70,12 @@ export type ChatToolResult = {
   web?:
     | { kind: "search"; query: string; results: Array<{ title: string; url: string; snippet: string }> }
     | { kind: "page"; url: string; markdown: string };
+  /** Replayable results from server-local utilities, distinct from web-provider output. */
+  utility?:
+    | { kind: "time"; currentTime: string; timeZone: string }
+    | { kind: "date"; currentDate: string; timeZone: string }
+    | { kind: "location"; available: true; location: string; source: "deployment_metadata" }
+    | { kind: "location"; available: false; message: string };
 };
 
 export type ChatRequest = {
@@ -170,6 +176,11 @@ function readBoundedString(value: unknown, field: string, maximum: number): stri
   return result;
 }
 
+function readLocationSource(value: unknown, field: string): "deployment_metadata" {
+  if (value !== "deployment_metadata") throw new ChatRequestValidationError(`${field} is invalid.`);
+  return value;
+}
+
 function readToolCalls(value: unknown, field: string): ChatToolCall[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value) || value.length > 6) {
@@ -233,6 +244,15 @@ function readToolCalls(value: unknown, field: string): ChatToolCall[] | undefine
           : isRecord(call.result.web) && call.result.web.kind === "page"
             ? { web: { kind: "page" as const, url: readBoundedString(call.result.web.url, `${field}[${index}].result.web.url`, 2_000), markdown: readBoundedString(call.result.web.markdown, `${field}[${index}].result.web.markdown`, 24_000) } }
             : {}),
+        ...(isRecord(call.result.utility) && call.result.utility.kind === "time"
+          ? { utility: { kind: "time" as const, currentTime: readBoundedString(call.result.utility.currentTime, `${field}[${index}].result.utility.currentTime`, 64), timeZone: readBoundedString(call.result.utility.timeZone, `${field}[${index}].result.utility.timeZone`, 100) } }
+          : isRecord(call.result.utility) && call.result.utility.kind === "date"
+            ? { utility: { kind: "date" as const, currentDate: readBoundedString(call.result.utility.currentDate, `${field}[${index}].result.utility.currentDate`, 32), timeZone: readBoundedString(call.result.utility.timeZone, `${field}[${index}].result.utility.timeZone`, 100) } }
+            : isRecord(call.result.utility) && call.result.utility.kind === "location" && call.result.utility.available === true
+              ? { utility: { kind: "location" as const, available: true as const, location: readBoundedString(call.result.utility.location, `${field}[${index}].result.utility.location`, 300), source: readLocationSource(call.result.utility.source, `${field}[${index}].result.utility.source`) } }
+              : isRecord(call.result.utility) && call.result.utility.kind === "location" && call.result.utility.available === false
+                ? { utility: { kind: "location" as const, available: false as const, message: readBoundedString(call.result.utility.message, `${field}[${index}].result.utility.message`, 300) } }
+                : {}),
       };
     }
     return {

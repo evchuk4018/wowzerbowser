@@ -18,7 +18,15 @@ import {
   runPythonInstructionsFor,
 } from "../app/server/agent/python-tool-instructions.ts";
 import { configuredKeys, withProviderKeys } from "../app/server/agent/web-api-key-pool.ts";
-import { WEB_TOOL_DEFINITIONS } from "../app/server/agent/web-tools.ts";
+import {
+  availableWebTools,
+  CHECK_DATE_TOOL_NAME,
+  CHECK_LOCATION_TOOL_NAME,
+  CHECK_TIME_TOOL_NAME,
+  executeWebTool,
+  WEB_TOOL_DEFINITIONS,
+} from "../app/server/agent/web-tools.ts";
+import { parseChatRequest } from "../lib/chat-protocol.ts";
 
 function request(overrides = {}) {
   return {
@@ -107,10 +115,16 @@ test("run_python manifest uses the shared input limits", async () => {
 });
 
 test("web tools have bounded manifests, configuration gates, and opaque key rotation", async () => {
-  assert.deepEqual(WEB_TOOL_DEFINITIONS.map((tool) => tool.function.name), ["web_search", "fetch_page"]);
+  assert.deepEqual(WEB_TOOL_DEFINITIONS.map((tool) => tool.function.name), ["web_search", "fetch_page", "check_time", "check_date", "check_location"]);
   assert.equal(WEB_TOOL_DEFINITIONS[0].function.parameters.properties.count.maximum, 5);
   assert.equal(WEB_TOOL_DEFINITIONS[1].function.parameters.properties.url.maxLength, 2_000);
-  const original = process.env.BRAVE_API_KEYS;
+  assert.equal(WEB_TOOL_DEFINITIONS[2].function.parameters.properties.timeZone.maxLength, 100);
+  assert.deepEqual(WEB_TOOL_DEFINITIONS[4].function.parameters.properties, {});
+  const original = { brave: process.env.BRAVE_API_KEYS, exa: process.env.EXA_API_KEYS, location: process.env.DEPLOYMENT_LOCATION };
+  delete process.env.BRAVE_API_KEYS; delete process.env.EXA_API_KEYS; delete process.env.DEPLOYMENT_LOCATION;
+  assert.deepEqual(availableWebTools().map((tool) => tool.function.name), [CHECK_TIME_TOOL_NAME, CHECK_DATE_TOOL_NAME]);
+  process.env.DEPLOYMENT_LOCATION = "Amsterdam, Netherlands";
+  assert.deepEqual(availableWebTools().map((tool) => tool.function.name), [CHECK_TIME_TOOL_NAME, CHECK_DATE_TOOL_NAME, CHECK_LOCATION_TOOL_NAME]);
   process.env.BRAVE_API_KEYS = " first,\nsecond ";
   assert.deepEqual(configuredKeys("brave"), ["first", "second"]);
   const used = [];
@@ -118,13 +132,42 @@ test("web tools have bounded manifests, configuration gates, and opaque key rota
   assert.deepEqual(used, ["first", "second"]);
   assert.deepEqual(result, { content: "safe" });
   assert.doesNotMatch(JSON.stringify(result), /first|second|retry|failover/i);
-  if (original === undefined) delete process.env.BRAVE_API_KEYS; else process.env.BRAVE_API_KEYS = original;
+  for (const [name, value] of Object.entries({ BRAVE_API_KEYS: original.brave, EXA_API_KEYS: original.exa, DEPLOYMENT_LOCATION: original.location })) {
+    if (value === undefined) delete process.env[name]; else process.env[name] = value;
+  }
 });
 
-test("web tool results replay in the provider transcript", () => {
-  const messages = buildDeepSeekMessages(request(), { replayRounds: [{ content: "", toolCalls: [{ id: "web-1", name: "web_search", arguments: '{"query":"today"}', result: { id: "web-1", name: "web_search", ok: true, stdout: "", stderr: "", web: { kind: "search", query: "today", results: [{ title: "Result", url: "https://example.com", snippet: "Snippet" }] } } }] }] });
+test("time, date, and location tools validate inputs and produce bounded structured results", async () => {
+  const time = await executeWebTool({ id: "time-1", name: CHECK_TIME_TOOL_NAME, arguments: '{"timeZone":"America/New_York"}' });
+  assert.equal(time.ok, true);
+  assert.equal(time.utility?.kind, "time");
+  assert.equal(time.utility?.timeZone, "America/New_York");
+  assert.match(time.utility?.currentTime ?? "", /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  const date = await executeWebTool({ id: "date-1", name: CHECK_DATE_TOOL_NAME, arguments: '{"timeZone":"Etc/UTC"}' });
+  assert.deepEqual(date.utility, { kind: "date", currentDate: new Date().toISOString().slice(0, 10), timeZone: "UTC" });
+  const invalid = await executeWebTool({ id: "time-2", name: CHECK_TIME_TOOL_NAME, arguments: '{"timeZone":"Not/A_Zone"}' });
+  assert.equal(invalid.ok, false);
+  assert.match(invalid.stderr, /invalid iana time zone/i);
+  const original = process.env.DEPLOYMENT_LOCATION;
+  delete process.env.DEPLOYMENT_LOCATION;
+  const unavailable = await executeWebTool({ id: "location-1", name: CHECK_LOCATION_TOOL_NAME, arguments: "{}" });
+  assert.deepEqual(unavailable.utility, { kind: "location", available: false, message: "Deployment location is not configured." });
+  process.env.DEPLOYMENT_LOCATION = "Paris, France";
+  const location = await executeWebTool({ id: "location-2", name: CHECK_LOCATION_TOOL_NAME, arguments: "{}" });
+  assert.deepEqual(location.utility, { kind: "location", available: true, location: "Paris, France", source: "deployment_metadata" });
+  const rejected = await executeWebTool({ id: "location-3", name: CHECK_LOCATION_TOOL_NAME, arguments: '{"url":"https://example.com"}' });
+  assert.equal(rejected.ok, false);
+  if (original === undefined) delete process.env.DEPLOYMENT_LOCATION; else process.env.DEPLOYMENT_LOCATION = original;
+});
+
+test("web and utility tool results replay in the provider transcript", () => {
+  const messages = buildDeepSeekMessages(request(), { replayRounds: [{ content: "", toolCalls: [{ id: "web-1", name: "web_search", arguments: '{"query":"today"}', result: { id: "web-1", name: "web_search", ok: true, stdout: "", stderr: "", web: { kind: "search", query: "today", results: [{ title: "Result", url: "https://example.com", snippet: "Snippet" }] } } }, { id: "date-1", name: CHECK_DATE_TOOL_NAME, arguments: "{}", result: { id: "date-1", name: CHECK_DATE_TOOL_NAME, ok: true, stdout: "", stderr: "", utility: { kind: "date", currentDate: "2026-07-24", timeZone: "UTC" } } }] }] });
   assert.equal(messages.at(-2)?.role, "assistant");
+  assert.match(messages.at(-2)?.tool_calls?.[1]?.function.name ?? "", /check_date/);
   assert.match(messages.at(-1)?.content ?? "", /"query":"today"/);
+  assert.match(messages.at(-1)?.content ?? "", /"currentDate":"2026-07-24"/);
+  const replay = parseChatRequest(request({ messages: [{ role: "assistant", content: "", rounds: [{ content: "", toolCalls: [{ id: "date-1", name: CHECK_DATE_TOOL_NAME, arguments: "{}", result: { id: "date-1", name: CHECK_DATE_TOOL_NAME, ok: true, stdout: "", stderr: "", utility: { kind: "date", currentDate: "2026-07-24", timeZone: "UTC" } } }] }] }] }));
+  assert.deepEqual(replay.messages[0].rounds?.[0]?.toolCalls?.[0]?.result?.utility, { kind: "date", currentDate: "2026-07-24", timeZone: "UTC" });
 });
 
 test("Python policy accepts shared maxima and rejects the next value", () => {
