@@ -61,6 +61,16 @@ compute is created only while the assistant is running Python. Python code has
 outbound TLS access so it can install packages and download data; do not place
 credentials or other sensitive files in its conversation workspace.
 
+## Web tools
+
+Configure `BRAVE_API_KEYS` and `EXA_API_KEYS` with comma- or newline-separated
+server-only keys to enable web search and page reading respectively. Singular
+`BRAVE_API_KEY` and `EXA_API_KEY` remain supported for compatibility. The
+assistant uses search for current result snippets and page reading for a
+specific URL; results are bounded and retained in the tool replay transcript.
+When a provider rejects, limits, or temporarily fails a request, key failover
+is handled internally and is never exposed to the assistant or browser.
+
 ## Useful Commands
 
 - `npm run dev`: start local development at `http://localhost:3000`

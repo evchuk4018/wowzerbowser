@@ -833,7 +833,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
                 ...(finished.activities ?? []),
                 {
                   id: event.call.id,
-                  kind: "python",
+                  kind: event.call.name === "run_python" ? "python" : "web",
                   round: currentRound,
                   call: event.call,
                   status: "running",
@@ -846,7 +846,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
           updateMessage(conversationId, assistantMessage.id, (message) => ({
             ...message,
             activities: message.activities?.map((activity) =>
-              activity.kind === "python" && activity.call.id === event.result.id
+              (activity.kind === "python" || activity.kind === "web") && activity.call.id === event.result.id
                 ? {
                     ...activity,
                     result: event.result,

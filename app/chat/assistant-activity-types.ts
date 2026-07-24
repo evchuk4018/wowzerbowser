@@ -23,5 +23,6 @@ export type PythonActivity = {
   startedAt?: number;
   durationMs?: number;
 };
+export type WebActivity = Omit<PythonActivity, "kind"> & { kind: "web" };
 
-export type AssistantActivity = ReasoningActivity | PythonActivity;
+export type AssistantActivity = ReasoningActivity | PythonActivity | WebActivity;

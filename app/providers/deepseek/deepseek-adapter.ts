@@ -38,7 +38,7 @@ export type DeepSeekRoundOptions = {
   messages?: DeepSeekMessage[];
   replayRounds?: DeepSeekMessageBuildOptions["replayRounds"];
   systemInstructions?: DeepSeekMessageBuildOptions["systemInstructions"];
-  tools?: DeepSeekToolDefinition[];
+  tools?: readonly DeepSeekToolDefinition[];
 };
 
 type DeepSeekModelResponse = { data?: Array<{ id?: unknown }> };

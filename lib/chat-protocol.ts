@@ -67,6 +67,9 @@ export type ChatToolResult = {
   stdoutTruncated?: boolean;
   stderrTruncated?: boolean;
   artifacts?: ChatArtifact[];
+  web?:
+    | { kind: "search"; query: string; results: Array<{ title: string; url: string; snippet: string }> }
+    | { kind: "page"; url: string; markdown: string };
 };
 
 export type ChatRequest = {
@@ -161,6 +164,12 @@ function readTraceString(value: unknown, field: string): string {
   return value;
 }
 
+function readBoundedString(value: unknown, field: string, maximum: number): string {
+  const result = readTraceString(value, field);
+  if (result.length > maximum) throw new ChatRequestValidationError(`${field} is too long.`);
+  return result;
+}
+
 function readToolCalls(value: unknown, field: string): ChatToolCall[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value) || value.length > 6) {
@@ -219,6 +228,11 @@ function readToolCalls(value: unknown, field: string): ChatToolCall[] | undefine
               }),
             }
           : {}),
+        ...(isRecord(call.result.web) && call.result.web.kind === "search" && Array.isArray(call.result.web.results)
+          ? { web: { kind: "search" as const, query: readBoundedString(call.result.web.query, `${field}[${index}].result.web.query`, 400), results: call.result.web.results.slice(0, 5).map((item, itemIndex) => { if (!isRecord(item)) throw new ChatRequestValidationError(`${field}[${index}].result.web.results[${itemIndex}] is invalid.`); return { title: readBoundedString(item.title, "web title", 300), url: readBoundedString(item.url, "web url", 2_000), snippet: readBoundedString(item.snippet, "web snippet", 1_200) }; }) } }
+          : isRecord(call.result.web) && call.result.web.kind === "page"
+            ? { web: { kind: "page" as const, url: readBoundedString(call.result.web.url, `${field}[${index}].result.web.url`, 2_000), markdown: readBoundedString(call.result.web.markdown, `${field}[${index}].result.web.markdown`, 24_000) } }
+            : {}),
       };
     }
     return {

@@ -953,6 +953,12 @@ button {
   border-radius: 12px;
   background: #20211f;
 }
+.web-nested { overflow: hidden; border: 1px solid #3d3f39; border-radius: 12px; background: #20211f; }
+.web-nested-running { border-color: #5a604b; }
+.web-nested-failed { border-color: rgba(255, 156, 145, .45); }
+.web-nested-summary { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; width: 100%; min-height: 44px; border: 0; background: transparent; padding: 8px 12px; color: var(--text); cursor: pointer; text-align: left; }
+.web-activity-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 650; }
+.web-output { max-height: 280px; overflow: auto; margin: 0; padding: 10px; background: #181918; color: #c9cac2; font-family: var(--font-geist-mono), monospace; font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
 
 .python-nested-running {
   border-color: #5a604b;
