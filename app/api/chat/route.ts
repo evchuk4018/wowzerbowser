@@ -4,6 +4,8 @@ import { parseChatRequest, ChatRequestValidationError } from "../../../lib/chat-
 import { createChatEventStream } from "../../chat/chat-server-service";
 import { assertDeepSeekConfigured, DeepSeekError } from "../../providers/deepseek/deepseek-adapter";
 
+export const maxDuration = 300;
+
 function unauthorizedResponse() {
   return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
 }
@@ -11,6 +13,10 @@ function unauthorizedResponse() {
 export async function POST(request: Request) {
   const authorization = request.headers.get("authorization");
   if (!authorization?.startsWith("Bearer ")) return unauthorizedResponse();
+  const contentLength = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(contentLength) && contentLength > 1_250_000) {
+    return NextResponse.json({ error: "Request is too large." }, { status: 413 });
+  }
 
   const user = await authorizeOwnerSession(authorization.slice(7));
   if (!user) return unauthorizedResponse();
@@ -35,7 +41,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status });
   }
 
-  return new Response(createChatEventStream(chatRequest, request.signal), {
+  return new Response(createChatEventStream(chatRequest, user.id, request.signal), {
     headers: {
       "cache-control": "no-cache, no-transform",
       connection: "keep-alive",

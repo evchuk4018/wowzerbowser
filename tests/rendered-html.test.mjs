@@ -8,6 +8,7 @@ import {
   MobileHistorySwipeGesture,
   getMobileHistorySwipeAction,
 } from "../app/chat/mobile-history-swipe.ts";
+import { parseChatRequest } from "../lib/chat-protocol.ts";
 
 const nextCli = fileURLToPath(new URL("../node_modules/next/dist/bin/next", import.meta.url));
 
@@ -307,6 +308,112 @@ test("keeps mobile prompt actions prominent and ephemeral", async () => {
   assert.match(styles, /\.message-actions-open \.message\.user \.message-bubble[\s\S]*?transform: scale\(1\.06\)/);
   assert.match(styles, /\.message-action-popover[\s\S]*?top: calc\(100% - 1px\)/);
   assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.message\.user \.message-bubble \{[\s\S]*?user-select: none;[\s\S]*?-webkit-user-select: none;/);
+});
+
+test("validates and preserves ordered assistant tool rounds", () => {
+  const artifact = {
+    id: "signed-artifact-token",
+    name: "report.csv",
+    contentType: "text/csv",
+    size: 42,
+  };
+  const request = parseChatRequest({
+    systemPrompt: "System",
+    userPresence: "",
+    model: "deepseek-v4-flash",
+    thinking: true,
+    reasoningEffort: "high",
+    conversationId: "conversation_123",
+    messages: [
+      { role: "user", content: "Calculate it" },
+      {
+        role: "assistant",
+        content: "The answer is 42.",
+        rounds: [
+          {
+            reasoning: "I should calculate this.",
+            content: "",
+            toolCalls: [
+              {
+                id: "call_1",
+                name: "run_python",
+                arguments: "{\"code\":\"print(42)\"}",
+                result: {
+                  id: "call_1",
+                  name: "run_python",
+                  ok: true,
+                  stdout: "42\n",
+                  stderr: "",
+                  exitCode: 0,
+                  artifacts: [artifact],
+                },
+              },
+            ],
+          },
+          { reasoning: "The result is ready.", content: "The answer is 42." },
+        ],
+      },
+      { role: "user", content: "What did Python return?" },
+    ],
+  });
+
+  assert.equal(request.messages[1].rounds?.length, 2);
+  assert.equal(request.messages[1].rounds?.[0].toolCalls?.[0].result?.stdout, "42\n");
+  assert.deepEqual(
+    request.messages[1].rounds?.[0].toolCalls?.[0].result?.artifacts?.[0],
+    artifact,
+  );
+});
+
+test("keeps Python execution isolated, persistent, bounded, and server-only", async () => {
+  const [executor, tool, streamService, artifactStore, artifactRoute, client, activity, envExample, packageJson] =
+    await Promise.all([
+      readFile(new URL("../app/server/modal/modal-python-executor.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/server/agent/python-tool.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/chat/chat-server-service.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/server/artifacts/artifact-store.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/chat/artifacts/[artifactId]/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/chat/chat-service.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/chat/assistant-activity.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../.env.example", import.meta.url), "utf8"),
+      readFile(new URL("../package.json", import.meta.url), "utf8"),
+    ]);
+
+  assert.match(executor, /ModalClient/);
+  assert.match(executor, /volumes\.fromName/);
+  assert.match(executor, /sandboxes\.create/);
+  assert.match(executor, /outboundDomainAllowlist: \["\*"\]/);
+  assert.match(executor, /outboundCidrAllowlist: \[\]/);
+  assert.match(executor, /memoryMiB: PYTHON_TOOL_LIMITS\.memoryMb/);
+  assert.match(executor, /callTimeoutMs: 60_000/);
+  assert.match(executor, /maxCalls: 6/);
+  assert.match(executor, /responseTimeoutMs: 240_000/);
+  assert.match(executor, /drainBounded/);
+  assert.match(executor, /stream\.getReader\(\)/);
+  assert.doesNotMatch(executor, /stdout\.readText\(\)|stderr\.readText\(\)/);
+  assert.match(executor, /relativeWorkspacePath/);
+  assert.match(executor, /readConversationArtifact/);
+  assert.doesNotMatch(executor, /process\.env\.DEEPSEEK_API_KEY|SUPABASE_SECRET_KEY/);
+  assert.match(tool, /PYTHON_TOOL_NAME = "run_python"/);
+  assert.match(streamService, /message\.rounds/);
+  assert.match(streamService, /role: "tool"/);
+  assert.match(streamService, /new ModalPythonExecutor\(ownerId, conversationId\)/);
+  assert.doesNotMatch(artifactStore, /new Map/);
+  assert.match(artifactStore, /createHmac/);
+  assert.match(artifactStore, /ARTIFACT_SIGNING_SECRET/);
+  assert.match(artifactStore, /sha256/);
+  assert.match(artifactRoute, /authorizeOwnerSession/);
+  assert.match(artifactRoute, /readConversationArtifact/);
+  assert.match(artifactRoute, /Artifact has changed since it was created/);
+  assert.match(client, /\/api\/chat\/artifacts\/\$\{encodeURIComponent\(artifact\.id\)\}/);
+  assert.doesNotMatch(client, /artifact\.downloadUrl/);
+  assert.match(activity, /aria-expanded=\{open\}/);
+  assert.match(activity, /Created \{artifact\.name\}/);
+  assert.match(activity, /JSON\.stringify\(activity\.call, null, 2\)/);
+  assert.match(envExample, /^MODAL_TOKEN_ID=$/m);
+  assert.match(envExample, /^MODAL_TOKEN_SECRET=$/m);
+  assert.match(envExample, /^ARTIFACT_SIGNING_SECRET=$/m);
+  assert.equal(JSON.parse(packageJson).dependencies.modal, "^0.9.0");
 });
 
 test("classifies mobile history swipes by viewport threshold and direction", () => {

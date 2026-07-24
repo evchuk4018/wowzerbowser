@@ -17,10 +17,17 @@ import { fetchChatModels, streamChatResponse } from "./chat/chat-service";
 import { ChatComposer } from "./chat/chat-composer";
 import { AssistantResponse } from "./chat/assistant-response";
 import {
+  AssistantActivityTimeline,
+  type AssistantActivity,
+} from "./chat/assistant-activity";
+import {
   MOBILE_HISTORY_CLICK_SUPPRESSION_MS,
   MobileHistorySwipeGesture,
 } from "./chat/mobile-history-swipe";
 import type {
+  ChatAssistantRound,
+  ChatArtifact,
+  ChatMessageInput,
   ChatModelId,
   ChatReasoningEffort,
 } from "../lib/chat-protocol";
@@ -31,6 +38,8 @@ type Message = {
   role: "user" | "assistant";
   content: string;
   reasoning?: string;
+  activities?: AssistantActivity[];
+  artifacts?: ChatArtifact[];
   thinkingEnabled?: boolean;
   thinkingDurationMs?: number;
   status?: "streaming" | "complete" | "error" | "cancelled";
@@ -111,11 +120,103 @@ const createConversation = (): Conversation => ({
   turns: [],
 });
 
+function normalizeStoredMessage(message: Message): Message {
+  if (message.role !== "assistant") return message;
+  const loadedAt = Date.now();
+  const freezeDuration = (startedAt?: number, durationMs?: number) =>
+    durationMs ??
+    (typeof startedAt === "number" && Number.isFinite(startedAt)
+      ? Math.max(0, loadedAt - startedAt)
+      : undefined);
+
+  return {
+    ...message,
+    status: message.status === "streaming" ? "cancelled" : message.status,
+    activities: message.activities?.map((activity) => {
+      if (activity.kind === "reasoning" && activity.status === "running") {
+        return {
+          ...activity,
+          status: "complete",
+          durationMs: freezeDuration(activity.startedAt, activity.durationMs),
+        };
+      }
+      if (activity.kind === "python" && activity.status === "running") {
+        return {
+          ...activity,
+          status: "failed",
+          durationMs: freezeDuration(activity.startedAt, activity.durationMs),
+        };
+      }
+      return activity;
+    }),
+  };
+}
+
+function toChatMessageInput(message: Message): ChatMessageInput | null {
+  const content = message.content.trim();
+  if (!content) return null;
+  if (message.role === "user" || !message.activities?.length) {
+    return { role: message.role, content };
+  }
+
+  const rounds: ChatAssistantRound[] = [];
+  const roundIndexes = new Map<number, number>();
+  for (const activity of message.activities) {
+    let roundIndex = roundIndexes.get(activity.round);
+    if (roundIndex === undefined) {
+      roundIndex = rounds.length;
+      roundIndexes.set(activity.round, roundIndex);
+      rounds.push({ content: "" });
+    }
+    const round = rounds[roundIndex];
+    if (activity.kind === "reasoning") {
+      round.reasoning = `${round.reasoning ?? ""}${activity.content}`;
+    } else {
+      const result =
+        activity.result ??
+        {
+          id: activity.call.id,
+          name: activity.call.name,
+          ok: false,
+          stdout: "",
+          stderr: "Python execution was interrupted before a result was returned.",
+        };
+      round.toolCalls = [
+        ...(round.toolCalls ?? []),
+        {
+          ...activity.call,
+          result,
+        },
+      ];
+    }
+  }
+
+  if (!rounds.length) return { role: "assistant", content };
+  rounds[rounds.length - 1] = {
+    ...rounds[rounds.length - 1],
+    content,
+  };
+  return { role: "assistant", content, rounds };
+}
+
 function migrateConversation(value: unknown): Conversation | null {
   if (!value || typeof value !== "object") return null;
   const candidate = value as Partial<Conversation> & { messages?: Message[] };
   if (typeof candidate.id !== "string" || typeof candidate.title !== "string") return null;
-  if (Array.isArray(candidate.turns)) return candidate as Conversation;
+  if (Array.isArray(candidate.turns)) {
+    return {
+      id: candidate.id,
+      title: candidate.title,
+      turns: candidate.turns.map((turn) => ({
+        ...turn,
+        versions: turn.versions.map((version) => ({
+          ...version,
+          user: normalizeStoredMessage(version.user),
+          assistant: normalizeStoredMessage(version.assistant),
+        })),
+      })),
+    };
+  }
   if (!Array.isArray(candidate.messages)) return null;
 
   const turns: ConversationTurn[] = [];
@@ -125,7 +226,11 @@ function migrateConversation(value: unknown): Conversation | null {
     if (!user || user.role !== "user" || !assistant || assistant.role !== "assistant") continue;
     turns.push({
       id: makeId(),
-      versions: [{ id: makeId(), user, assistant }],
+      versions: [{
+        id: makeId(),
+        user: normalizeStoredMessage(user),
+        assistant: normalizeStoredMessage(assistant),
+      }],
       activeVersion: 0,
     });
   }
@@ -280,6 +385,9 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   const latestTurn = active?.turns[active.turns.length - 1];
   const latestVersion = latestTurn?.versions[latestTurn.activeVersion];
   const latestMessage = latestVersion?.assistant;
+  const latestActivity = latestMessage?.activities?.[latestMessage.activities.length - 1];
+  const latestActivityContentLength =
+    latestActivity?.kind === "reasoning" ? latestActivity.content.length : 0;
   const isStreaming = streamingMessageId !== null;
   const selectedModel = models.find((availableModel) => availableModel.id === model) ?? models[0];
   const supportedEfforts = useMemo(
@@ -359,7 +467,16 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [active?.turns.length, latestMessage?.content.length, latestMessage?.reasoning?.length]);
+  }, [
+    active?.turns.length,
+    latestActivity?.kind,
+    latestActivity?.status,
+    latestActivityContentLength,
+    latestMessage?.activities?.length,
+    latestMessage?.artifacts?.length,
+    latestMessage?.content.length,
+    latestMessage?.reasoning?.length,
+  ]);
 
   useEffect(() => {
     const handleShortcut = (event: globalThis.KeyboardEvent) => {
@@ -597,6 +714,8 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
       role: "assistant",
       content: "",
       reasoning: "",
+      activities: [],
+      artifacts: [],
       thinkingEnabled: effectiveThinking,
       status: "streaming",
     };
@@ -611,8 +730,8 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
         return [version.user, version.assistant];
       })
       .concat(userMessage)
-      .filter((message) => message.content.trim())
-      .map(({ role, content: messageContent }) => ({ role, content: messageContent }));
+      .map(toChatMessageInput)
+      .filter((message): message is ChatMessageInput => message !== null);
 
     setConversations((current) =>
       current.map((conversation) =>
@@ -667,6 +786,34 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
     }
 
     let streamError = false;
+    let currentRound = 1;
+    const finishRunningActivities = (
+      message: Message,
+      failed = false,
+    ): Message => ({
+      ...message,
+      activities: message.activities?.map((activity) => {
+        if (activity.kind === "reasoning" && activity.status === "running") {
+          return {
+            ...activity,
+            status: "complete" as const,
+            durationMs:
+              activity.durationMs ??
+              (activity.startedAt === undefined ? undefined : Date.now() - activity.startedAt),
+          };
+        }
+        if (activity.kind === "python" && activity.status === "running" && failed) {
+          return {
+            ...activity,
+            status: "failed" as const,
+            durationMs:
+              activity.durationMs ??
+              (activity.startedAt === undefined ? undefined : Date.now() - activity.startedAt),
+          };
+        }
+        return activity;
+      }),
+    });
     try {
       const accessToken = await getAccessToken();
       if (!accessToken) throw new Error("Your session expired. Please sign in again.");
@@ -681,17 +828,102 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
         model,
         thinking: effectiveThinking,
         reasoningEffort: effectiveEffort,
+        conversationId,
       };
 
       setWaitingMessageId(assistantMessage.id);
       for await (const event of streamChatResponse(request, accessToken, controller.signal)) {
-        if (event.type === "reasoning") {
+        if (event.type === "round") {
+          updateMessage(conversationId, assistantMessage.id, (message) =>
+            finishRunningActivities(message),
+          );
+          currentRound = event.round;
+        } else if (event.type === "reasoning") {
           setWaitingMessageId((current) =>
             current === assistantMessage.id ? null : current,
           );
+          updateMessage(conversationId, assistantMessage.id, (message) => {
+            const activities = [...(message.activities ?? [])];
+            const latest = activities[activities.length - 1];
+            if (
+              latest?.kind === "reasoning" &&
+              latest.round === currentRound &&
+              latest.status === "running"
+            ) {
+              activities[activities.length - 1] = {
+                ...latest,
+                content: `${latest.content}${event.delta}`,
+              };
+            } else {
+              activities.push({
+                id: makeId(),
+                kind: "reasoning",
+                round: currentRound,
+                content: event.delta,
+                status: "running",
+                startedAt: Date.now(),
+              });
+            }
+            return {
+              ...message,
+              reasoning: `${message.reasoning ?? ""}${event.delta}`,
+              activities,
+            };
+          });
+        } else if (event.type === "tool_call") {
+          setWaitingMessageId((current) =>
+            current === assistantMessage.id ? null : current,
+          );
+          updateMessage(conversationId, assistantMessage.id, (message) => {
+            const finished = finishRunningActivities(message);
+            return {
+              ...finished,
+              activities: [
+                ...(finished.activities ?? []),
+                {
+                  id: event.call.id,
+                  kind: "python",
+                  round: currentRound,
+                  call: event.call,
+                  status: "running",
+                  startedAt: Date.now(),
+                },
+              ],
+            };
+          });
+        } else if (event.type === "tool_result") {
           updateMessage(conversationId, assistantMessage.id, (message) => ({
             ...message,
-            reasoning: `${message.reasoning ?? ""}${event.delta}`,
+            activities: message.activities?.map((activity) =>
+              activity.kind === "python" && activity.call.id === event.result.id
+                ? {
+                    ...activity,
+                    result: event.result,
+                    status: event.result.ok ? "completed" : "failed",
+                    durationMs:
+                      event.result.durationMs ??
+                      (activity.startedAt === undefined
+                        ? undefined
+                        : Date.now() - activity.startedAt),
+                  }
+                : activity,
+            ),
+            artifacts: [
+              ...(message.artifacts ?? []),
+              ...(event.result.artifacts ?? []).filter(
+                (artifact) =>
+                  !(message.artifacts ?? []).some((existing) => existing.id === artifact.id),
+              ),
+            ],
+          }));
+        } else if (event.type === "artifact") {
+          updateMessage(conversationId, assistantMessage.id, (message) => ({
+            ...message,
+            artifacts: (message.artifacts ?? []).some(
+              (artifact) => artifact.id === event.artifact.id,
+            )
+              ? message.artifacts
+              : [...(message.artifacts ?? []), event.artifact],
           }));
         } else if (event.type === "content") {
           setWaitingMessageId((current) =>
@@ -705,13 +937,13 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
               setThinkingMessageId(null);
             }
             updateMessage(conversationId, assistantMessage.id, (message) => ({
-              ...message,
+              ...finishRunningActivities(message, true),
               thinkingDurationMs: duration,
               content: `${message.content}${event.delta}`,
             }));
           } else {
             updateMessage(conversationId, assistantMessage.id, (message) => ({
-              ...message,
+              ...finishRunningActivities(message, true),
               content: `${message.content}${event.delta}`,
             }));
           }
@@ -721,7 +953,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
           );
           streamError = true;
           updateMessage(conversationId, assistantMessage.id, (message) => ({
-            ...message,
+            ...finishRunningActivities(message, true),
             status: "error",
             error: event.message,
           }));
@@ -730,7 +962,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
             current === assistantMessage.id ? null : current,
           );
           updateMessage(conversationId, assistantMessage.id, (message) => ({
-            ...message,
+            ...finishRunningActivities(message, true),
             status: streamError ? "error" : "complete",
           }));
         }
@@ -738,12 +970,12 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
     } catch (error: unknown) {
       if (controller.signal.aborted) {
         updateMessage(conversationId, assistantMessage.id, (message) => ({
-          ...message,
+          ...finishRunningActivities(message, true),
           status: "cancelled",
         }));
       } else {
         updateMessage(conversationId, assistantMessage.id, (message) => ({
-          ...message,
+          ...finishRunningActivities(message, true),
           status: "error",
           error: error instanceof Error ? error.message : "The response failed.",
         }));
@@ -986,19 +1218,31 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
                   </div>
                   <article className="message assistant">
                     <div className="message-label">Response</div>
-                    {Boolean(assistantMessage.reasoning) && (
-                      <ReasoningBlock
-                        message={assistantMessage}
-                        liveDurationMs={thinkingMessageId === assistantMessage.id ? Math.max(0, thinkingNow) : undefined}
+                    {(assistantMessage.activities?.length ?? 0) > 0 ||
+                    (assistantMessage.artifacts?.length ?? 0) > 0 ? (
+                      <AssistantActivityTimeline
+                        activities={assistantMessage.activities ?? []}
+                        content={assistantMessage.content}
+                        artifacts={assistantMessage.artifacts ?? []}
+                        getAccessToken={getAccessToken}
                       />
+                    ) : (
+                      <>
+                        {Boolean(assistantMessage.reasoning) && (
+                          <ReasoningBlock
+                            message={assistantMessage}
+                            liveDurationMs={thinkingMessageId === assistantMessage.id ? Math.max(0, thinkingNow) : undefined}
+                          />
+                        )}
+                        <div className="message-bubble">
+                          {assistantMessage.content ? (
+                            <AssistantResponse content={assistantMessage.content} />
+                          ) : !assistantMessage.thinkingEnabled && waitingMessageId === assistantMessage.id ? (
+                            <CallActivityIndicator />
+                          ) : null}
+                        </div>
+                      </>
                     )}
-                    <div className="message-bubble">
-                      {assistantMessage.content ? (
-                        <AssistantResponse content={assistantMessage.content} />
-                      ) : !assistantMessage.thinkingEnabled && waitingMessageId === assistantMessage.id ? (
-                        <CallActivityIndicator />
-                      ) : null}
-                    </div>
                     {assistantMessage.error && <div className="message-error">{assistantMessage.error}</div>}
                     {assistantMessage.status === "cancelled" && <div className="message-note">Response stopped.</div>}
                   </article>

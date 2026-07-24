@@ -48,6 +48,19 @@ hook instead. Password account creation uses Supabase browser signup and
 requires email confirmation to be disabled in the Supabase Auth settings so the
 new account receives a session immediately without email verification.
 
+## Python tool
+
+The assistant can run Python in isolated Modal Sandboxes when
+`MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`, and a separate random
+`ARTIFACT_SIGNING_SECRET` are configured. Create a Modal API token in the Modal
+dashboard, generate a long random signing secret, and add all three values to
+the deployment. The optional `MODAL_APP_NAME` defaults to
+`wowzerbowser-python`. Conversation
+workspaces and installed packages persist in per-conversation Modal Volumes;
+compute is created only while the assistant is running Python. Python code has
+outbound TLS access so it can install packages and download data; do not place
+credentials or other sensitive files in its conversation workspace.
+
 ## Useful Commands
 
 - `npm run dev`: start local development at `http://localhost:3000`

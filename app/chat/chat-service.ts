@@ -1,4 +1,5 @@
 import type {
+  ChatArtifact,
   ChatModelInfo,
   ChatRequest,
   ChatStreamEvent,
@@ -76,4 +77,18 @@ export async function* streamChatResponse(
     const event = parseStreamBlock(buffer);
     if (event) yield event;
   }
+}
+
+export async function fetchChatArtifact(
+  artifact: ChatArtifact,
+  accessToken: string,
+): Promise<Blob> {
+  const response = await fetch(
+    `/api/chat/artifacts/${encodeURIComponent(artifact.id)}`,
+    {
+      headers: { authorization: `Bearer ${accessToken}` },
+    },
+  );
+  if (!response.ok) throw new Error(await readError(response));
+  return response.blob();
 }

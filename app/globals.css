@@ -921,6 +921,182 @@ button {
   white-space: pre-wrap;
 }
 
+.assistant-activity-timeline {
+  display: grid;
+  width: min(100%, 680px);
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.assistant-activity-timeline .reasoning-block {
+  width: 100%;
+  margin-bottom: 0;
+}
+
+.activity-round {
+  color: var(--quiet);
+  font-size: 11px;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+
+.python-activity {
+  overflow: hidden;
+  border: 1px solid #3d3f39;
+  border-radius: 12px;
+  background: #20211f;
+}
+
+.python-activity-running {
+  border-color: #5a604b;
+}
+
+.python-activity-failed {
+  border-color: rgba(255, 156, 145, .45);
+}
+
+.python-activity-summary {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto auto;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  padding: 8px 12px;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.python-activity-summary:hover {
+  background: rgba(255, 255, 255, .035);
+}
+
+.python-activity-summary:focus-visible,
+.artifact-download button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.python-activity-icon {
+  margin-right: 9px;
+  color: var(--accent);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 12px;
+}
+
+.python-activity-title {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.python-activity-status {
+  justify-self: start;
+  margin-left: 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .055);
+  padding: 3px 7px;
+  color: #b9bab2;
+  font-size: 11px;
+}
+
+.python-activity-running .python-activity-status {
+  color: var(--accent);
+}
+
+.python-activity-failed .python-activity-status {
+  color: #ff9c91;
+}
+
+.python-activity-duration {
+  color: var(--quiet);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.python-activity-chevron {
+  width: 20px;
+  margin-left: 8px;
+  color: var(--quiet);
+  text-align: center;
+}
+
+.python-activity-details {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid #353631;
+  padding: 12px;
+}
+
+.python-activity-detail-label {
+  margin-bottom: 6px;
+  color: var(--quiet);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.python-activity-details pre {
+  max-height: 280px;
+  overflow: auto;
+  margin: 0;
+  border-radius: 8px;
+  background: #181918;
+  padding: 10px;
+  color: #c9cac2;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.artifact-downloads {
+  display: grid;
+  width: min(100%, 680px);
+  gap: 7px;
+  margin-top: 14px;
+}
+
+.artifact-download {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.artifact-download button {
+  max-width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 3px 0;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+
+.artifact-download button:hover {
+  color: var(--accent);
+}
+
+.artifact-download button:disabled {
+  cursor: progress;
+  opacity: .62;
+}
+
+.artifact-download-state {
+  color: var(--quiet);
+  font-size: 12px;
+}
+
 .composer-wrap {
   position: absolute;
   bottom: 24px;
@@ -1274,6 +1450,23 @@ button {
   .composer-menu-trigger {
     max-width: 126px;
     padding-inline: 7px;
+  }
+
+  .python-activity-summary {
+    grid-template-columns: auto 1fr auto;
+    padding-inline: 10px;
+  }
+
+  .python-activity-icon {
+    display: none;
+  }
+
+  .python-activity-status {
+    margin-left: 7px;
+  }
+
+  .python-activity-duration {
+    display: none;
   }
 }
 
