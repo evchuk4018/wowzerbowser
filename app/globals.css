@@ -1161,6 +1161,11 @@ button {
     touch-action: pan-y;
   }
 
+  .chat-area {
+    touch-action: pan-y;
+    overscroll-behavior-x: none;
+  }
+
   .sidebar {
     position: fixed;
     top: 0;

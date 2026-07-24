@@ -411,6 +411,7 @@ test("wires mobile history swipes without pointer capture", async () => {
   assert.match(page, /aria-label="Collapse sidebar"[\s\S]*?onClick=\{\(\) => setSidebarOpen\(false\)\}/);
   assert.doesNotMatch(page, /setPointerCapture|releasePointerCapture/);
   assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.app-shell \{[\s\S]*?touch-action: pan-y;/);
+  assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.chat-area \{[\s\S]*?touch-action: pan-y;[\s\S]*?overscroll-behavior-x: none;/);
   assert.match(gestureSource, /MOBILE_HISTORY_MAX_WIDTH = 760/);
   assert.match(gestureSource, /MOBILE_HISTORY_SWIPE_THRESHOLD = 0\.25/);
   assert.match(gestureSource, /pointerType !== "touch"/);
