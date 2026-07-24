@@ -255,7 +255,7 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(styles, /padding: 34px 0 220px/);
   assert.match(styles, /height: 100dvh;/);
   assert.match(styles, /\.chat-area[\s\S]*?overflow: hidden;/);
-  assert.match(styles, /\.transcript[\s\S]*?overflow-y: auto;/);
+  assert.match(styles, /\.transcript[\s\S]*?overflow-x: hidden;[\s\S]*?overflow-y: auto;/);
   assert.match(styles, /\.chat-active \.composer-wrap[\s\S]*?position: absolute;/);
 });
 

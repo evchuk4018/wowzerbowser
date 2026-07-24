@@ -602,6 +602,7 @@ button {
   flex: 1;
   margin: 0 auto;
   padding: 34px 0 220px;
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
