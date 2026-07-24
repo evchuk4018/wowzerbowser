@@ -13,11 +13,12 @@ import {
   type DeepSeekMessage,
   type DeepSeekMessageBuildOptions,
 } from "./deepseek-messages";
+import { assertDeepSeekConfigured, DEEPSEEK_BASE_URL, deepSeekHeaders } from "./deepseek-client-config";
+import { DeepSeekError } from "./deepseek-error";
 
 export { buildDeepSeekMessages } from "./deepseek-messages";
 export type { DeepSeekMessage } from "./deepseek-messages";
 
-const DEEPSEEK_BASE_URL = "https://api.deepseek.com";
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 
 export type DeepSeekToolDefinition = {
@@ -58,27 +59,9 @@ type DeepSeekChunk = {
   } | null;
 };
 
-export class DeepSeekError extends Error {
-  constructor(message: string, readonly status = 502) {
-    super(message);
-  }
-}
+export { DeepSeekError, assertDeepSeekConfigured };
 
 let cachedModels: { expiresAt: number; models: ChatModelInfo[] } | null = null;
-
-function getApiKey(): string {
-  const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
-  if (!apiKey) throw new DeepSeekError("DeepSeek is not configured.", 503);
-  return apiKey;
-}
-
-export function assertDeepSeekConfigured(): void {
-  getApiKey();
-}
-
-function headers(): HeadersInit {
-  return { authorization: `Bearer ${getApiKey()}`, "content-type": "application/json" };
-}
 
 function numberOrUndefined(candidate: unknown): number | undefined {
   return typeof candidate === "number" && Number.isFinite(candidate) ? candidate : undefined;
@@ -199,7 +182,7 @@ export async function* streamDeepSeekChatRound(
 ): AsyncGenerator<ChatStreamEvent> {
   const response = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
     method: "POST",
-    headers: headers(),
+    headers: deepSeekHeaders(),
     signal,
     body: JSON.stringify({
       model: request.model,
@@ -228,7 +211,7 @@ export async function* streamDeepSeekChat(request: ChatRequest, signal?: AbortSi
 export async function listDeepSeekModels(): Promise<ChatModelInfo[]> {
   if (cachedModels && cachedModels.expiresAt > Date.now()) return cachedModels.models;
   try {
-    const response = await fetch(`${DEEPSEEK_BASE_URL}/models`, { headers: headers() });
+    const response = await fetch(`${DEEPSEEK_BASE_URL}/models`, { headers: deepSeekHeaders() });
     if (!response.ok) throw new Error("Model discovery failed.");
     const body = (await response.json()) as DeepSeekModelResponse;
     const availableIds = new Set(

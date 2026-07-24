@@ -19,6 +19,7 @@ import { AssistantResponse } from "./chat/assistant-response";
 import { AssistantActivityTimeline } from "./chat/assistant-activity";
 import type { AssistantActivity } from "./chat/assistant-activity-types";
 import { finishRunningActivities } from "./chat/finish-running-activities";
+import { generateChatTitle } from "./chat/chat-title-service";
 import { toChatMessageInput } from "./chat/chat-message-input";
 import {
   MOBILE_HISTORY_CLICK_SUPPRESSION_MS,
@@ -810,8 +811,6 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
         conversation.id === conversationId
           ? {
               ...conversation,
-              title:
-                conversation.turns.length === 0 ? content.slice(0, 42) : conversation.title,
               turns:
                 editingTurnIndex >= 0
                   ? conversation.turns.map((turn, index) =>
@@ -873,6 +872,13 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
     try {
       const accessToken = await getAccessToken();
       if (!accessToken) throw new Error("Your session expired. Please sign in again.");
+      if (active.turns.length === 0) {
+        void generateChatTitle(content, accessToken)
+          .then((title) => setConversations((current) => current.map((conversation) =>
+            conversation.id === conversationId ? { ...conversation, title } : conversation,
+          )))
+          .catch(() => undefined);
+      }
       if (
         controller.signal.aborted ||
         activeRequestsRef.current[conversationId]?.messageId !== assistantMessage.id
