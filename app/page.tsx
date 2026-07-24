@@ -18,6 +18,7 @@ import { ChatComposer } from "./chat/chat-composer";
 import { AssistantResponse } from "./chat/assistant-response";
 import { AssistantActivityTimeline } from "./chat/assistant-activity";
 import type { AssistantActivity } from "./chat/assistant-activity-types";
+import { finishRunningActivities } from "./chat/finish-running-activities";
 import { toChatMessageInput } from "./chat/chat-message-input";
 import {
   MOBILE_HISTORY_CLICK_SUPPRESSION_MS,
@@ -668,12 +669,17 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   const stopStreaming = async () => {
     const activeRequest = activeRequestsRef.current[activeId];
     if (!activeRequest) return;
-    const token = await getAccessToken();
     const message = conversations.flatMap((conversation) => conversation.turns).flatMap((turn) => turn.versions).map((version) => version.assistant).find((item) => item.id === activeRequest.messageId);
-    if (token && message?.jobId) await cancelChatJob(activeRequest.conversationId, message.jobId, token).catch(() => undefined);
+    const stoppedAt = Date.now();
+    const thinkingTiming = thinkingByMessage[activeRequest.messageId];
+    const thinkingDurationMs = thinkingTiming
+      ? Math.max(0, performance.now() - thinkingTiming.startedAt)
+      : undefined;
     activeRequest.controller.abort();
     updateMessage(activeRequest.conversationId, activeRequest.messageId, (message) => ({
       ...message,
+      activities: finishRunningActivities(message.activities, true, stoppedAt),
+      thinkingDurationMs: message.thinkingDurationMs ?? thinkingDurationMs,
       status: "cancelled",
     }));
     delete activeRequestsRef.current[activeId];
@@ -692,6 +698,8 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
       delete next[activeRequest.messageId];
       return next;
     });
+    const token = await getAccessToken();
+    if (token && message?.jobId) await cancelChatJob(activeRequest.conversationId, message.jobId, token).catch(() => undefined);
   };
 
   const editTurn = (turn: ConversationTurn) => {
@@ -858,32 +866,9 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
 
     let streamError = false;
     let currentRound = 1;
-    const finishRunningActivities = (
-      message: Message,
-      failed = false,
-    ): Message => ({
+    const finishMessageActivities = (message: Message, failed = false): Message => ({
       ...message,
-      activities: message.activities?.map((activity) => {
-        if (activity.kind === "reasoning" && activity.status === "running") {
-          return {
-            ...activity,
-            status: "complete" as const,
-            durationMs:
-              activity.durationMs ??
-              (activity.startedAt === undefined ? undefined : Date.now() - activity.startedAt),
-          };
-        }
-        if (activity.kind === "python" && activity.status === "running" && failed) {
-          return {
-            ...activity,
-            status: "failed" as const,
-            durationMs:
-              activity.durationMs ??
-              (activity.startedAt === undefined ? undefined : Date.now() - activity.startedAt),
-          };
-        }
-        return activity;
-      }),
+      activities: finishRunningActivities(message.activities, failed),
     });
     try {
       const accessToken = await getAccessToken();
@@ -912,7 +897,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
         updateMessage(conversationId, assistantMessage.id, (message) => ({ ...message, lastSequence: "sequence" in event ? event.sequence : message.lastSequence }));
         if (event.type === "round") {
           updateMessage(conversationId, assistantMessage.id, (message) =>
-            finishRunningActivities(message),
+            finishMessageActivities(message),
           );
           currentRound = event.round;
         } else if (event.type === "reasoning") {
@@ -956,7 +941,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
             return next;
           });
           updateMessage(conversationId, assistantMessage.id, (message) => {
-            const finished = finishRunningActivities(message);
+            const finished = finishMessageActivities(message);
             return {
               ...finished,
               activities: [
@@ -1021,13 +1006,13 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
               return next;
             });
             updateMessage(conversationId, assistantMessage.id, (message) => ({
-              ...finishRunningActivities(message, true),
+              ...finishMessageActivities(message, true),
               thinkingDurationMs: duration,
               content: `${message.content}${event.delta}`,
             }));
           } else {
             updateMessage(conversationId, assistantMessage.id, (message) => ({
-              ...finishRunningActivities(message, true),
+              ...finishMessageActivities(message, true),
               content: `${message.content}${event.delta}`,
             }));
           }
@@ -1039,7 +1024,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
           });
           streamError = true;
           updateMessage(conversationId, assistantMessage.id, (message) => ({
-            ...finishRunningActivities(message, true),
+            ...finishMessageActivities(message, true),
             status: "error",
             error: event.message,
           }));
@@ -1050,7 +1035,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
             return next;
           });
           updateMessage(conversationId, assistantMessage.id, (message) => ({
-            ...finishRunningActivities(message, true),
+            ...finishMessageActivities(message, true),
             status: streamError ? "error" : "complete",
           }));
         }
@@ -1058,7 +1043,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
     } catch (error: unknown) {
       if (!controller.signal.aborted) {
         updateMessage(conversationId, assistantMessage.id, (message) => ({
-          ...finishRunningActivities(message, true),
+          ...finishMessageActivities(message, true),
           status: "error",
           error: error instanceof Error ? error.message : "The response failed.",
         }));
