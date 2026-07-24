@@ -290,6 +290,9 @@ button {
 }
 
 .conversation-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
   overflow: hidden;
   border: 0;
@@ -301,6 +304,23 @@ button {
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.conversation-title {
+  overflow: hidden;
+  flex: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-streaming-bulb {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 0 8px rgba(255, 255, 255, .8);
+  animation: conversation-bulb-pulse 1.2s ease-in-out infinite;
 }
 
 .conversation-item:hover,
@@ -849,6 +869,19 @@ button {
   100% {
     opacity: .28;
     transform: scale(.86);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes conversation-bulb-pulse {
+  0%,
+  100% {
+    opacity: .35;
+    transform: scale(.8);
   }
 
   50% {
