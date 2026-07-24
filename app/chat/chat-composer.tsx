@@ -181,7 +181,16 @@ export function ChatComposer({
             )}
           </div>
           {isStreaming ? (
-            <button type="button" className="stop-button" onClick={onStop}>Stop</button>
+            <button
+              type="button"
+              className="send-button stop-button"
+              aria-label="Stop generating"
+              onClick={onStop}
+            >
+              <svg className="stop-icon" viewBox="0 0 16 16" aria-hidden="true">
+                <rect x="3" y="3" width="10" height="10" rx="1" />
+              </svg>
+            </button>
           ) : (
             <button type="submit" className="send-button" aria-label="Send message" disabled={!draft.trim()}>↑</button>
           )}

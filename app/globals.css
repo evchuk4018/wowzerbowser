@@ -1339,20 +1339,13 @@ button {
 }
 
 .stop-button {
-  height: 34px;
-  margin-left: auto;
-  border: 1px solid #5b5c54;
-  border-radius: 10px;
-  background: #33342f;
-  padding: 0 12px;
-  color: var(--text);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
+  padding: 0;
 }
 
-.stop-button:hover {
-  background: #40413b;
+.stop-icon {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
 }
 
 .send-button:not(:disabled):hover {
