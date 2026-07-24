@@ -1069,19 +1069,30 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
 
         <div className="history-label">Recent</div>
         <nav className="conversation-list" aria-label="Recent conversations">
-          {conversations.map((conversation) => (
-            <button
-              key={conversation.id}
-              type="button"
-              className={`conversation-item ${conversation.id === activeId ? "active" : ""}`}
-              onClick={() => {
-                setActiveId(conversation.id);
-                setSidebarOpen(false);
-              }}
-            >
-              {conversation.title}
-            </button>
-          ))}
+          {conversations.map((conversation) => {
+            const conversationIsStreaming = Boolean(streamingByConversation[conversation.id]);
+
+            return (
+              <button
+                key={conversation.id}
+                type="button"
+                className={`conversation-item ${conversation.id === activeId ? "active" : ""}`}
+                onClick={() => {
+                  setActiveId(conversation.id);
+                  setSidebarOpen(false);
+                }}
+              >
+                <span className="conversation-title">{conversation.title}</span>
+                {conversationIsStreaming && (
+                  <span
+                    className="conversation-streaming-bulb"
+                    aria-label="Response in progress"
+                    title="Response in progress"
+                  />
+                )}
+              </button>
+            );
+          })}
         </nav>
 
         <div className="sidebar-footer">
