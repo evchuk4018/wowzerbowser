@@ -87,7 +87,26 @@ export type ChatRequest = {
   reasoningEffort: ChatReasoningEffort;
   /** Stable client-generated id used to persist the execution volume. */
   conversationId?: string;
+  /** Client-generated response identifier and idempotency key. */
+  jobId?: string;
+  idempotencyKey?: string;
 };
+
+export type ChatJobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type SequencedChatStreamEvent = ChatStreamEvent & { sequence: number; jobId: string };
+export type ChatJobResumeResponse = {
+  jobId: string;
+  conversationId: string;
+  status: ChatJobStatus;
+  events: SequencedChatStreamEvent[];
+  lastSequence: number;
+  error: string | null;
+  usage: ChatUsage | null;
+  finalOutput: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+export type ChatJobSubmissionResponse = { jobId: string; status: ChatJobStatus; resumed: boolean };
 
 export type ChatModelInfo = {
   id: ChatModelId;
@@ -343,6 +362,15 @@ export function parseChatRequest(value: unknown): ChatRequest {
     }
     conversationId = value.conversationId;
   }
+  const readJobKey = (input: unknown, field: string) => {
+    if (input === undefined) return undefined;
+    if (typeof input !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(input)) {
+      throw new ChatRequestValidationError(`${field} is invalid.`);
+    }
+    return input;
+  };
+  const jobId = readJobKey(value.jobId, "jobId");
+  const idempotencyKey = readJobKey(value.idempotencyKey, "idempotencyKey");
 
   return {
     systemPrompt,
@@ -352,5 +380,7 @@ export function parseChatRequest(value: unknown): ChatRequest {
     thinking: value.thinking,
     reasoningEffort: value.reasoningEffort,
     conversationId,
+    jobId,
+    idempotencyKey,
   };
 }

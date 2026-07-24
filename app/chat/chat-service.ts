@@ -2,26 +2,10 @@ import type {
   ChatArtifact,
   ChatModelInfo,
   ChatRequest,
-  ChatStreamEvent,
+  ChatJobResumeResponse,
+  ChatJobSubmissionResponse,
+  SequencedChatStreamEvent,
 } from "../../lib/chat-protocol";
-
-function parseStreamBlock(block: string): ChatStreamEvent | null {
-  let eventName = "message";
-  const data: string[] = [];
-
-  for (const line of block.split(/\r?\n/)) {
-    if (line.startsWith("event:")) eventName = line.slice(6).trim();
-    if (line.startsWith("data:")) data.push(line.slice(5).trim());
-  }
-
-  if (!data.length) return null;
-  try {
-    const parsed = JSON.parse(data.join("\n")) as ChatStreamEvent;
-    return parsed && parsed.type === eventName ? parsed : null;
-  } catch {
-    return null;
-  }
-}
 
 async function readError(response: Response): Promise<string> {
   const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
@@ -38,44 +22,53 @@ export async function fetchChatModels(accessToken: string): Promise<ChatModelInf
   return body.models ?? [];
 }
 
+export async function submitChatJob(request: ChatRequest, accessToken: string): Promise<ChatJobSubmissionResponse> {
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json() as Promise<ChatJobSubmissionResponse>;
+}
+
+export async function fetchChatJob(conversationId: string, jobId: string, after: number, accessToken: string, signal?: AbortSignal): Promise<ChatJobResumeResponse> {
+  const response = await fetch(`/api/chat/jobs/${encodeURIComponent(conversationId)}/${encodeURIComponent(jobId)}?after=${after}`, { headers: { authorization: `Bearer ${accessToken}` }, signal });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json() as Promise<ChatJobResumeResponse>;
+}
+
+export async function cancelChatJob(conversationId: string, jobId: string, accessToken: string) {
+  const response = await fetch(`/api/chat/jobs/${encodeURIComponent(conversationId)}/${encodeURIComponent(jobId)}/cancel`, { method: "POST", headers: { authorization: `Bearer ${accessToken}` } });
+  if (!response.ok) throw new Error(await readError(response));
+}
+
 export async function* streamChatResponse(
   request: ChatRequest,
   accessToken: string,
   signal?: AbortSignal,
-): AsyncGenerator<ChatStreamEvent> {
-  const response = await fetch("/api/chat", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(request),
-    signal,
-  });
-  if (!response.ok) throw new Error(await readError(response));
-  if (!response.body) throw new Error("The chat stream was empty.");
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    buffer += decoder.decode(value, { stream: !done });
-    const blocks = buffer.split(/\r?\n\r?\n/);
-    buffer = blocks.pop() ?? "";
-
-    for (const block of blocks) {
-      const event = parseStreamBlock(block);
-      if (event) yield event;
+): AsyncGenerator<SequencedChatStreamEvent> {
+  const submission = await submitChatJob(request, accessToken);
+  let sequence = 0;
+  while (!signal?.aborted) {
+    let snapshot: ChatJobResumeResponse;
+    try {
+      snapshot = await fetchChatJob(request.conversationId!, submission.jobId, sequence, accessToken, signal);
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      continue; // transient network loss: replay resumes strictly after sequence
     }
-
-    if (done) break;
-  }
-
-  if (buffer.trim()) {
-    const event = parseStreamBlock(buffer);
-    if (event) yield event;
+    for (const event of snapshot.events) {
+      if (event.sequence <= sequence) continue;
+      sequence = event.sequence;
+      yield event;
+    }
+    if (["completed", "failed", "cancelled"].includes(snapshot.status)) return;
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, 750);
+      signal?.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
+    });
   }
 }
 

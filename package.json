@@ -9,7 +9,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs tests/server-behavior.test.mjs",
+    "test": "npm run build && node --test tests/rendered-html.test.mjs tests/server-behavior.test.mjs tests/durable-chat-jobs.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
   },
   "dependencies": {
