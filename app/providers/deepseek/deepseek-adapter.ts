@@ -8,19 +8,17 @@ import type {
   ChatUsage,
 } from "../../../lib/chat-protocol";
 import { DEFAULT_CHAT_MODELS } from "../../../lib/chat-protocol";
+import {
+  buildDeepSeekMessages,
+  type DeepSeekMessage,
+  type DeepSeekMessageBuildOptions,
+} from "./deepseek-messages";
+
+export { buildDeepSeekMessages } from "./deepseek-messages";
+export type { DeepSeekMessage } from "./deepseek-messages";
 
 const DEEPSEEK_BASE_URL = "https://api.deepseek.com";
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
-
-export type DeepSeekMessage =
-  | { role: "system" | "user"; content: string }
-  | {
-      role: "assistant";
-      content: string | null;
-      reasoning_content?: string;
-      tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
-    }
-  | { role: "tool"; content: string; tool_call_id: string; name?: string };
 
 export type DeepSeekToolDefinition = {
   type: "function";
@@ -32,7 +30,14 @@ export type DeepSeekToolDefinition = {
 };
 
 export type DeepSeekRoundOptions = {
+  /**
+   * Kept for simple consumers that already provide provider messages. The
+   * chat orchestration path uses replayRounds so provider wire assembly stays
+   * inside this adapter.
+   */
   messages?: DeepSeekMessage[];
+  replayRounds?: DeepSeekMessageBuildOptions["replayRounds"];
+  systemInstructions?: DeepSeekMessageBuildOptions["systemInstructions"];
   tools?: DeepSeekToolDefinition[];
 };
 
@@ -186,65 +191,6 @@ async function* parseSse(response: Response): AsyncGenerator<ChatStreamEvent> {
   }
 }
 
-function baseMessages(request: ChatRequest): DeepSeekMessage[] {
-  const history: DeepSeekMessage[] = [];
-  for (const message of request.messages) {
-    if (message.role === "assistant" && message.rounds?.length) {
-      for (const round of message.rounds) {
-        const calls = round.toolCalls ?? [];
-        history.push({
-          role: "assistant",
-          content: round.content || null,
-          ...(round.reasoning ? { reasoning_content: round.reasoning } : {}),
-          ...(calls.length
-            ? {
-                tool_calls: calls.map((call) => ({
-                  id: call.id,
-                  type: "function" as const,
-                  function: { name: call.name, arguments: call.arguments },
-                })),
-              }
-            : {}),
-        });
-        for (const call of calls) {
-          if (call.result) {
-            history.push({
-              role: "tool",
-              content: JSON.stringify(call.result),
-              tool_call_id: call.id,
-              name: call.name,
-            });
-          }
-        }
-      }
-      continue;
-    }
-    if (message.role === "assistant") {
-      history.push({
-        role: "assistant",
-        content: message.content,
-        ...(message.reasoning ? { reasoning_content: message.reasoning } : {}),
-        ...(message.toolCalls?.length
-          ? {
-              tool_calls: message.toolCalls.map((call) => ({
-                id: call.id,
-                type: "function" as const,
-                function: { name: call.name, arguments: call.arguments },
-              })),
-            }
-          : {}),
-      });
-      continue;
-    }
-    history.push({ role: "user", content: message.content });
-  }
-  return [
-    { role: "system", content: request.systemPrompt },
-    ...(request.userPresence ? [{ role: "system" as const, content: request.userPresence }] : []),
-    ...history,
-  ];
-}
-
 /** Stream one provider round. Tool-call arguments are assembled before emission. */
 export async function* streamDeepSeekChatRound(
   request: ChatRequest,
@@ -257,7 +203,7 @@ export async function* streamDeepSeekChatRound(
     signal,
     body: JSON.stringify({
       model: request.model,
-      messages: options.messages ?? baseMessages(request),
+      messages: options.messages ?? buildDeepSeekMessages(request, options),
       stream: true,
       thinking: { type: request.thinking ? "enabled" : "disabled" },
       ...(request.thinking ? { reasoning_effort: request.reasoningEffort } : {}),

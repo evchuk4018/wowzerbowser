@@ -3,29 +3,12 @@ import "server-only";
 import type { ChatArtifact, ChatToolCall, ChatToolResult } from "../../../lib/chat-protocol";
 import { registerArtifact } from "../artifacts/artifact-store";
 import { isModalConfigured, ModalPythonExecutor } from "../modal/modal-python-executor";
+import {
+  PYTHON_TOOL_DEFINITION,
+  PYTHON_TOOL_NAME,
+} from "./python-tool-manifest";
 
-export const PYTHON_TOOL_NAME = "run_python";
-
-export const PYTHON_TOOL_DEFINITION = {
-  type: "function" as const,
-  function: {
-    name: PYTHON_TOOL_NAME,
-    description:
-      "Run a bounded Python program in the conversation sandbox. Provide exactly one of code or an existing relative file path. Use artifacts to return files.",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        code: { type: "string", description: "Inline Python source." },
-        file: { type: "string", description: "Existing relative path in this conversation's volume." },
-        packages: { type: "array", items: { type: "string" }, maxItems: 32 },
-        args: { type: "array", items: { type: "string" }, maxItems: 32 },
-        stdin: { type: "string" },
-        artifacts: { type: "array", items: { type: "string" }, maxItems: 16 },
-      },
-    },
-  },
-};
+export { PYTHON_TOOL_DEFINITION, PYTHON_TOOL_NAME } from "./python-tool-manifest";
 
 export function availableChatTools() {
   return isModalConfigured() ? [PYTHON_TOOL_DEFINITION] : [];

@@ -203,11 +203,12 @@ test("keeps Supabase calls behind adapters and owner authorization", async () =>
 });
 
 test("keeps DeepSeek access server-side and uses the V4 thinking contract", async () => {
-  const [page, client, protocol, adapter, route, modelsRoute, envExample] = await Promise.all([
+  const [page, client, protocol, adapter, messages, route, modelsRoute, envExample] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/chat-service.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/chat-protocol.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/providers/deepseek/deepseek-adapter.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/providers/deepseek/deepseek-messages.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/chat/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/chat/models/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../.env.example", import.meta.url), "utf8"),
@@ -222,11 +223,12 @@ test("keeps DeepSeek access server-side and uses the V4 thinking contract", asyn
   assert.match(protocol, /systemPrompt/);
   assert.match(protocol, /userPresence/);
   assert.match(adapter, /https:\/\/api\.deepseek\.com/);
-  assert.match(adapter, /role: "system"/);
   assert.match(adapter, /reasoning_content/);
   assert.match(adapter, /reasoning_effort/);
   assert.match(adapter, /thinking/);
   assert.doesNotMatch(adapter, /deepseek-chat|deepseek-reasoner/);
+  assert.match(messages, /role: "system"/);
+  assert.match(messages, /tool_call_id/);
   assert.match(route, /authorizeOwnerSession/);
   assert.match(route, /text\/event-stream/);
   assert.match(modelsRoute, /listDeepSeekModels/);
@@ -366,10 +368,11 @@ test("validates and preserves ordered assistant tool rounds", () => {
 });
 
 test("keeps Python execution isolated, persistent, bounded, and server-only", async () => {
-  const [executor, tool, streamService, artifactStore, artifactRoute, client, activity, envExample, packageJson] =
+  const [executor, tool, manifest, streamService, artifactStore, artifactRoute, client, activity, envExample, packageJson] =
     await Promise.all([
       readFile(new URL("../app/server/modal/modal-python-executor.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/server/agent/python-tool.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/server/agent/python-tool-manifest.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/chat/chat-server-service.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/server/artifacts/artifact-store.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/api/chat/artifacts/[artifactId]/route.ts", import.meta.url), "utf8"),
@@ -394,10 +397,12 @@ test("keeps Python execution isolated, persistent, bounded, and server-only", as
   assert.match(executor, /relativeWorkspacePath/);
   assert.match(executor, /readConversationArtifact/);
   assert.doesNotMatch(executor, /process\.env\.DEEPSEEK_API_KEY|SUPABASE_SECRET_KEY/);
-  assert.match(tool, /PYTHON_TOOL_NAME = "run_python"/);
-  assert.match(streamService, /message\.rounds/);
-  assert.match(streamService, /role: "tool"/);
-  assert.match(streamService, /new ModalPythonExecutor\(ownerId, conversationId\)/);
+  assert.match(tool, /python-tool-manifest/);
+  assert.match(manifest, /PYTHON_TOOL_NAME = "run_python"/);
+  assert.match(streamService, /replayRounds/);
+  assert.match(streamService, /systemInstructions/);
+  assert.match(streamService, /call\.result = result/);
+  assert.match(streamService, /new ModalPythonExecutor\(ownerId, conversationId, responseDeadlineAt\)/);
   assert.doesNotMatch(artifactStore, /new Map/);
   assert.match(artifactStore, /createHmac/);
   assert.match(artifactStore, /ARTIFACT_SIGNING_SECRET/);

@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { ChatArtifact } from "../../../lib/chat-protocol";
-import { relativeWorkspacePath } from "../modal/modal-python-executor";
+import { relativeWorkspacePath } from "../../../lib/python-tool-policy";
 
 type ArtifactDescriptor = {
   ownerId: string;

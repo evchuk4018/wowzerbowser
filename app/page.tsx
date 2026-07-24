@@ -16,16 +16,14 @@ import { useAuthSession } from "./auth/use-auth-session";
 import { fetchChatModels, streamChatResponse } from "./chat/chat-service";
 import { ChatComposer } from "./chat/chat-composer";
 import { AssistantResponse } from "./chat/assistant-response";
-import {
-  AssistantActivityTimeline,
-  type AssistantActivity,
-} from "./chat/assistant-activity";
+import { AssistantActivityTimeline } from "./chat/assistant-activity";
+import type { AssistantActivity } from "./chat/assistant-activity-types";
+import { toChatMessageInput } from "./chat/chat-message-input";
 import {
   MOBILE_HISTORY_CLICK_SUPPRESSION_MS,
   MobileHistorySwipeGesture,
 } from "./chat/mobile-history-swipe";
 import type {
-  ChatAssistantRound,
   ChatArtifact,
   ChatMessageInput,
   ChatModelId,
@@ -150,53 +148,6 @@ function normalizeStoredMessage(message: Message): Message {
       return activity;
     }),
   };
-}
-
-function toChatMessageInput(message: Message): ChatMessageInput | null {
-  const content = message.content.trim();
-  if (!content) return null;
-  if (message.role === "user" || !message.activities?.length) {
-    return { role: message.role, content };
-  }
-
-  const rounds: ChatAssistantRound[] = [];
-  const roundIndexes = new Map<number, number>();
-  for (const activity of message.activities) {
-    let roundIndex = roundIndexes.get(activity.round);
-    if (roundIndex === undefined) {
-      roundIndex = rounds.length;
-      roundIndexes.set(activity.round, roundIndex);
-      rounds.push({ content: "" });
-    }
-    const round = rounds[roundIndex];
-    if (activity.kind === "reasoning") {
-      round.reasoning = `${round.reasoning ?? ""}${activity.content}`;
-    } else {
-      const result =
-        activity.result ??
-        {
-          id: activity.call.id,
-          name: activity.call.name,
-          ok: false,
-          stdout: "",
-          stderr: "Python execution was interrupted before a result was returned.",
-        };
-      round.toolCalls = [
-        ...(round.toolCalls ?? []),
-        {
-          ...activity.call,
-          result,
-        },
-      ];
-    }
-  }
-
-  if (!rounds.length) return { role: "assistant", content };
-  rounds[rounds.length - 1] = {
-    ...rounds[rounds.length - 1],
-    content,
-  };
-  return { role: "assistant", content, rounds };
 }
 
 function migrateConversation(value: unknown): Conversation | null {

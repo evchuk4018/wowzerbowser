@@ -2,7 +2,13 @@ import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
 import { AlreadyExistsError, ModalClient, type ModalReadStream, type Sandbox } from "modal";
-import type { PythonToolInput } from "../../../lib/chat-protocol";
+import {
+  boundedPythonTimeoutMs,
+  waitForPythonDeadline,
+} from "../../../lib/python-execution-deadlines";
+import { PYTHON_TOOL_INPUT_LIMITS, relativeWorkspacePath, validatePythonToolInput } from "../../../lib/python-tool-policy";
+
+export { relativeWorkspacePath, validatePythonToolInput } from "../../../lib/python-tool-policy";
 
 export const PYTHON_TOOL_LIMITS = {
   cpu: 1,
@@ -12,7 +18,7 @@ export const PYTHON_TOOL_LIMITS = {
   responseTimeoutMs: 240_000,
   maxCodeLength: 64 * 1024,
   maxOutputLength: 64 * 1024,
-  maxArtifacts: 20,
+  maxArtifacts: PYTHON_TOOL_INPUT_LIMITS.maxArtifacts,
   maxArtifactBytes: 25 * 1024 * 1024,
   maxArtifactTotalBytes: 50 * 1024 * 1024,
 } as const;
@@ -20,7 +26,6 @@ export const PYTHON_TOOL_LIMITS = {
 const APP_NAME = process.env.MODAL_APP_NAME?.trim() || "wowzerbowser-python";
 const WORKSPACE = "/workspace";
 const VENV_PYTHON = `${WORKSPACE}/.venv/bin/python`;
-const PACKAGE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*(?:[<>=!~]=?[A-Za-z0-9.*+!-]+)?$/;
 
 type FileSnapshot = {
   path: string;
@@ -67,80 +72,46 @@ export function responseSandboxName(ownerId: string, conversationId: string): st
   return `chat-response-${resourceDigest(ownerId, conversationId)}`;
 }
 
-export function relativeWorkspacePath(path: string): string {
-  const value = path.replace(/\\/g, "/").trim().replace(/^\.\/+/, "");
-  const segments = value.split("/");
-  if (
-    !value ||
-    value.startsWith("/") ||
-    segments.some((segment) => !segment || segment === "." || segment === "..") ||
-    !/^[A-Za-z0-9_./ -]+$/.test(value)
-  ) {
-    throw new Error("file must be a safe relative path inside the conversation workspace.");
-  }
-  if (segments[0] === ".venv" || segments[0] === ".runs") {
-    throw new Error("file points to a reserved workspace directory.");
-  }
-  return value;
-}
+const PYTHON_DEADLINE_ERROR =
+  "Python execution timed out before its 60-second call or 240-second response deadline.";
+const BOUNDED_ARTIFACT_READ_SCRIPT = [
+  "import os, stat, sys",
+  "root, relative, limit_text = sys.argv[1:4]",
+  "limit = int(limit_text)",
+  "parts = relative.split('/')",
+  "if not hasattr(os, 'O_NOFOLLOW'):",
+  "    raise OSError('no-follow file reads are unavailable')",
+  "flags_base = os.O_RDONLY | getattr(os, 'O_CLOEXEC', 0) | os.O_NOFOLLOW",
+  "fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)",
+  "try:",
+  "    for index, part in enumerate(parts):",
+  "        flags = flags_base",
+  "        if index < len(parts) - 1:",
+  "            flags |= os.O_DIRECTORY",
+  "        next_fd = os.open(part, flags, dir_fd=fd)",
+  "        os.close(fd)",
+  "        fd = next_fd",
+  "    if not stat.S_ISREG(os.fstat(fd).st_mode):",
+  "        raise OSError('artifact must be a regular file')",
+  "    remaining = limit",
+  "    while remaining > 0:",
+  "        chunk = os.read(fd, min(65536, remaining))",
+  "        if not chunk:",
+  "            break",
+  "        sys.stdout.buffer.write(chunk)",
+  "        remaining -= len(chunk)",
+  "finally:",
+  "    os.close(fd)",
+].join("\n");
 
-export function validatePythonToolInput(value: unknown): PythonToolInput {
-  if (!value || typeof value !== "object") throw new Error("run_python arguments must be an object.");
-  const input = value as Record<string, unknown>;
-  const hasCode = typeof input.code === "string" && input.code.trim().length > 0;
-  const hasFile = typeof input.file === "string" && input.file.trim().length > 0;
-  if (hasCode === hasFile) throw new Error("Provide exactly one of code or file.");
-  if (hasCode && (input.code as string).length > PYTHON_TOOL_LIMITS.maxCodeLength) {
-    throw new Error("code is too long.");
-  }
-
-  const packages = input.packages;
-  if (packages !== undefined && (!Array.isArray(packages) || packages.length > 20)) {
-    throw new Error("packages must contain at most 20 entries.");
-  }
-  const normalizedPackages = packages?.map((pkg, index) => {
-    if (typeof pkg !== "string" || pkg.length > 120 || !PACKAGE_PATTERN.test(pkg)) {
-      throw new Error(`packages[${index}] is invalid.`);
-    }
-    return pkg;
-  });
-
-  const args = input.args;
-  if (
-    args !== undefined &&
-    (!Array.isArray(args) ||
-      args.length > 32 ||
-      args.some((arg) => typeof arg !== "string" || arg.length > 4_096))
-  ) {
-    throw new Error("args must contain at most 32 bounded strings.");
-  }
-  if (input.stdin !== undefined && (typeof input.stdin !== "string" || input.stdin.length > 64 * 1024)) {
-    throw new Error("stdin is too long.");
-  }
-  const requestedArtifacts = input.artifacts;
-  if (
-    requestedArtifacts !== undefined &&
-    (!Array.isArray(requestedArtifacts) || requestedArtifacts.length > PYTHON_TOOL_LIMITS.maxArtifacts)
-  ) {
-    throw new Error(`artifacts must contain at most ${PYTHON_TOOL_LIMITS.maxArtifacts} paths.`);
-  }
-
-  return {
-    ...(hasCode ? { code: input.code as string } : {}),
-    ...(hasFile ? { file: relativeWorkspacePath(input.file as string) } : {}),
-    ...(normalizedPackages?.length ? { packages: normalizedPackages } : {}),
-    ...(args ? { args: args as string[] } : {}),
-    ...(typeof input.stdin === "string" ? { stdin: input.stdin } : {}),
-    ...(requestedArtifacts
-      ? { artifacts: requestedArtifacts.map((path) => relativeWorkspacePath(String(path))) }
-      : {}),
-  };
+function assertDeadline(deadlineAt: number): void {
+  if (Date.now() >= deadlineAt) throw new Error(PYTHON_DEADLINE_ERROR);
 }
 
 async function runProcess(
   sandbox: Sandbox,
   command: string[],
-  options: { stdin?: string; timeoutMs?: number; outputLimit?: number } = {},
+  options: { stdin?: string; timeoutMs?: number; outputLimit?: number; deadlineAt?: number } = {},
 ): Promise<{
   stdout: string;
   stderr: string;
@@ -148,9 +119,17 @@ async function runProcess(
   stdoutTruncated: boolean;
   stderrTruncated: boolean;
 }> {
+  const deadlineAt = options.deadlineAt ?? Date.now() + PYTHON_TOOL_LIMITS.callTimeoutMs;
+  const timeoutMs = boundedPythonTimeoutMs(
+    options.timeoutMs ?? PYTHON_TOOL_LIMITS.callTimeoutMs,
+    deadlineAt,
+    Date.now(),
+    PYTHON_TOOL_LIMITS.callTimeoutMs,
+  );
+  if (timeoutMs <= 0) throw new Error(PYTHON_DEADLINE_ERROR);
   const process = await sandbox.exec(command, {
     workdir: WORKSPACE,
-    timeoutMs: options.timeoutMs ?? PYTHON_TOOL_LIMITS.callTimeoutMs,
+    timeoutMs,
   });
   if (options.stdin !== undefined) {
     await process.stdin.writeText(options.stdin);
@@ -201,7 +180,80 @@ async function drainBounded(
   };
 }
 
-async function snapshotFiles(sandbox: Sandbox): Promise<Map<string, FileSnapshot>> {
+async function drainBoundedBytes(
+  stream: ModalReadStream<Uint8Array>,
+  limit: number,
+): Promise<Uint8Array> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (length >= limit) continue;
+      const chunk = value.subarray(0, limit - length);
+      chunks.push(chunk);
+      length += chunk.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const result = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
+}
+
+async function readBoundedArtifactBytes(
+  sandbox: Sandbox,
+  path: string,
+  deadlineAt: number,
+): Promise<Uint8Array> {
+  const timeoutMs = boundedPythonTimeoutMs(
+    PYTHON_TOOL_LIMITS.callTimeoutMs,
+    deadlineAt,
+    Date.now(),
+    PYTHON_TOOL_LIMITS.callTimeoutMs,
+  );
+  if (timeoutMs <= 0) throw new Error(PYTHON_DEADLINE_ERROR);
+
+  const readLimit = PYTHON_TOOL_LIMITS.maxArtifactBytes + 1;
+  const process = await sandbox.exec(
+    [
+      "python3",
+      "-c",
+      BOUNDED_ARTIFACT_READ_SCRIPT,
+      WORKSPACE,
+      path,
+      String(readLimit),
+    ],
+    {
+      mode: "binary",
+      workdir: WORKSPACE,
+      timeoutMs,
+    },
+  );
+  const [stdout, stderr, exitCode] = await Promise.all([
+    drainBoundedBytes(process.stdout, readLimit),
+    drainBoundedBytes(process.stderr, PYTHON_TOOL_LIMITS.maxOutputLength),
+    process.wait(),
+  ]);
+  if (exitCode !== 0) {
+    const message = new TextDecoder().decode(stderr).trim();
+    throw new Error(message || "Unable to read artifact safely.");
+  }
+  if (stdout.byteLength > PYTHON_TOOL_LIMITS.maxArtifactBytes) {
+    throw new Error("Artifact exceeds the 25 MiB download limit.");
+  }
+  return stdout;
+}
+
+async function snapshotFiles(sandbox: Sandbox, deadlineAt: number): Promise<Map<string, FileSnapshot>> {
   const script = [
     "import json, os",
     `root=${JSON.stringify(WORKSPACE)}`,
@@ -220,6 +272,7 @@ async function snapshotFiles(sandbox: Sandbox): Promise<Map<string, FileSnapshot
   const result = await runProcess(sandbox, ["python3", "-c", script], {
     timeoutMs: 10_000,
     outputLimit: 512 * 1024,
+    deadlineAt,
   });
   if (result.exitCode !== 0) return new Map();
   const items = JSON.parse(result.stdout) as FileSnapshot[];
@@ -229,19 +282,34 @@ async function snapshotFiles(sandbox: Sandbox): Promise<Map<string, FileSnapshot
 async function createWorkspaceSandbox(
   ownerId: string,
   conversationId: string,
-  options: { readOnly?: boolean; name?: string; blockNetwork?: boolean } = {},
+  options: {
+    readOnly?: boolean;
+    name?: string;
+    blockNetwork?: boolean;
+    deadlineAt?: number;
+  } = {},
 ): Promise<{ client: ModalClient; sandbox: Sandbox }> {
   if (!isModalConfigured()) throw new Error("Modal Python execution is not configured.");
+  const deadlineAt =
+    options.deadlineAt ??
+    Date.now() +
+      (options.readOnly ? PYTHON_TOOL_LIMITS.callTimeoutMs : PYTHON_TOOL_LIMITS.responseTimeoutMs);
+  assertDeadline(deadlineAt);
   const client = new ModalClient();
+  let sandboxCreation: Promise<Sandbox> | null = null;
   try {
-    const [app, volume] = await Promise.all([
-      client.apps.fromName(APP_NAME, { createIfMissing: true }),
-      client.volumes.fromName(conversationVolumeName(ownerId, conversationId), {
-        createIfMissing: true,
-      }),
-    ]);
+    const [app, volume] = await waitForPythonDeadline(
+      Promise.all([
+        client.apps.fromName(APP_NAME, { createIfMissing: true }),
+        client.volumes.fromName(conversationVolumeName(ownerId, conversationId), {
+          createIfMissing: true,
+        }),
+      ]),
+      deadlineAt,
+      PYTHON_DEADLINE_ERROR,
+    );
     const image = client.images.fromRegistry("python:3.13-slim");
-    const sandbox = await client.sandboxes.create(app, image, {
+    sandboxCreation = client.sandboxes.create(app, image, {
       name: options.name,
       cpu: PYTHON_TOOL_LIMITS.cpu,
       cpuLimit: PYTHON_TOOL_LIMITS.cpu,
@@ -260,9 +328,26 @@ async function createWorkspaceSandbox(
             outboundCidrAllowlist: [],
           }),
     });
+    const sandbox = await waitForPythonDeadline(
+      sandboxCreation,
+      deadlineAt,
+      PYTHON_DEADLINE_ERROR,
+    );
     return { client, sandbox };
   } catch (error) {
-    client.close();
+    if (sandboxCreation) {
+      void sandboxCreation
+        .then(async (sandbox) => {
+          try {
+            await sandbox.terminate();
+          } finally {
+            client.close();
+          }
+        })
+        .catch(() => client.close());
+    } else {
+      client.close();
+    }
     throw error;
   }
 }
@@ -273,17 +358,19 @@ export async function readConversationArtifact(
   pathValue: string,
 ): Promise<Uint8Array> {
   const path = relativeWorkspacePath(pathValue);
+  const deadlineAt = Date.now() + PYTHON_TOOL_LIMITS.callTimeoutMs;
   const { client, sandbox } = await createWorkspaceSandbox(ownerId, conversationId, {
     readOnly: true,
     blockNetwork: true,
     name: `chat-artifact-${randomUUID().replaceAll("-", "").slice(0, 24)}`,
+    deadlineAt,
   });
   try {
-    const bytes = await sandbox.filesystem.readBytes(`${WORKSPACE}/${path}`);
-    if (bytes.byteLength > PYTHON_TOOL_LIMITS.maxArtifactBytes) {
-      throw new Error("Artifact exceeds the 25 MiB download limit.");
-    }
-    return bytes;
+    return await waitForPythonDeadline(
+      readBoundedArtifactBytes(sandbox, path, deadlineAt),
+      deadlineAt,
+      PYTHON_DEADLINE_ERROR,
+    );
   } finally {
     await sandbox.terminate().catch(() => undefined);
     client.close();
@@ -294,14 +381,14 @@ export class ModalPythonExecutor {
   private sandbox: Sandbox | null = null;
   private client: ModalClient | null = null;
   private calls = 0;
-  private readonly startedAt = Date.now();
 
   constructor(
     private readonly ownerId: string,
     private readonly conversationId: string,
+    private readonly responseDeadlineAt = Date.now() + PYTHON_TOOL_LIMITS.responseTimeoutMs,
   ) {}
 
-  private async ensureSandbox(): Promise<Sandbox> {
+  private async ensureSandbox(deadlineAt: number): Promise<Sandbox> {
     if (this.sandbox) return this.sandbox;
     let created;
     try {
@@ -309,6 +396,7 @@ export class ModalPythonExecutor {
       // concurrently mutate the same persistent conversation volume.
       created = await createWorkspaceSandbox(this.ownerId, this.conversationId, {
         name: responseSandboxName(this.ownerId, this.conversationId),
+        deadlineAt,
       });
     } catch (error) {
       if (error instanceof AlreadyExistsError) {
@@ -321,7 +409,7 @@ export class ModalPythonExecutor {
     const venv = await runProcess(
       this.sandbox,
       ["sh", "-lc", `test -x ${VENV_PYTHON} || python3 -m venv ${WORKSPACE}/.venv`],
-      { timeoutMs: PYTHON_TOOL_LIMITS.callTimeoutMs },
+      { timeoutMs: PYTHON_TOOL_LIMITS.callTimeoutMs, deadlineAt },
     );
     if (venv.exitCode !== 0) throw new Error(venv.stderr || "Unable to initialize Python.");
     return this.sandbox;
@@ -331,18 +419,25 @@ export class ModalPythonExecutor {
     if (this.calls >= PYTHON_TOOL_LIMITS.maxCalls) {
       throw new Error("The response reached the 6-call Python limit.");
     }
-    if (Date.now() - this.startedAt >= PYTHON_TOOL_LIMITS.responseTimeoutMs) {
+    const callStartedAt = Date.now();
+    if (callStartedAt >= this.responseDeadlineAt) {
       throw new Error("The response reached its 240-second execution limit.");
     }
     const input = validatePythonToolInput(inputValue);
+    const callDeadlineAt = Math.min(
+      this.responseDeadlineAt,
+      callStartedAt + PYTHON_TOOL_LIMITS.callTimeoutMs,
+    );
+    assertDeadline(callDeadlineAt);
     this.calls += 1;
-    const sandbox = await this.ensureSandbox();
-    const before = await snapshotFiles(sandbox);
+    const sandbox = await this.ensureSandbox(callDeadlineAt);
+    const before = await snapshotFiles(sandbox, callDeadlineAt);
 
     if (input.packages?.length) {
       const install = await runProcess(
         sandbox,
         [VENV_PYTHON, "-m", "pip", "install", "--disable-pip-version-check", ...input.packages],
+        { deadlineAt: callDeadlineAt },
       );
       if (install.exitCode !== 0) {
         return {
@@ -359,8 +454,8 @@ export class ModalPythonExecutor {
       input.code !== undefined
         ? [VENV_PYTHON, "-c", input.code, ...(input.args ?? [])]
         : [VENV_PYTHON, `${WORKSPACE}/${input.file}`, ...(input.args ?? [])];
-    const execution = await runProcess(sandbox, command, { stdin: input.stdin });
-    const after = await snapshotFiles(sandbox);
+    const execution = await runProcess(sandbox, command, { stdin: input.stdin, deadlineAt: callDeadlineAt });
+    const after = await snapshotFiles(sandbox, callDeadlineAt);
     const requested = new Set(input.artifacts ?? []);
     const artifactCandidates = [...after.values()]
       .filter((item) => {
@@ -373,7 +468,13 @@ export class ModalPythonExecutor {
     let artifactBytes = 0;
     for (const item of artifactCandidates) {
       if (artifactBytes + item.size > PYTHON_TOOL_LIMITS.maxArtifactTotalBytes) break;
-      const bytes = await sandbox.filesystem.readBytes(`${WORKSPACE}/${item.path}`);
+      assertDeadline(callDeadlineAt);
+      const bytes = await waitForPythonDeadline(
+        readBoundedArtifactBytes(sandbox, item.path, callDeadlineAt),
+        callDeadlineAt,
+        PYTHON_DEADLINE_ERROR,
+      );
+      if (artifactBytes + bytes.byteLength > PYTHON_TOOL_LIMITS.maxArtifactTotalBytes) break;
       artifacts.push({
         path: item.path,
         size: bytes.byteLength,

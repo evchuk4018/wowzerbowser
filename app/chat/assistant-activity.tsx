@@ -3,34 +3,20 @@
 import { useEffect, useState } from "react";
 import type {
   ChatArtifact,
-  ChatToolCall,
-  ChatToolResult,
 } from "../../lib/chat-protocol";
 import { AssistantResponse } from "./assistant-response";
+import type {
+  AssistantActivity,
+  PythonActivity,
+  ReasoningActivity,
+} from "./assistant-activity-types";
 import { fetchChatArtifact } from "./chat-service";
 
-export type ReasoningActivity = {
-  id: string;
-  kind: "reasoning";
-  round: number;
-  content: string;
-  status: "running" | "complete";
-  startedAt?: number;
-  durationMs?: number;
-};
-
-export type PythonActivity = {
-  id: string;
-  kind: "python";
-  round: number;
-  call: ChatToolCall;
-  result?: ChatToolResult;
-  status: "running" | "completed" | "failed";
-  startedAt?: number;
-  durationMs?: number;
-};
-
-export type AssistantActivity = ReasoningActivity | PythonActivity;
+export type {
+  AssistantActivity,
+  PythonActivity,
+  ReasoningActivity,
+} from "./assistant-activity-types";
 
 function formatDuration(milliseconds: number): string {
   if (milliseconds < 1000) return `${Math.max(0, Math.round(milliseconds))}ms`;

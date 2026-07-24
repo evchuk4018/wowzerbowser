@@ -1,59 +1,15 @@
 import "server-only";
 
 import { randomUUID, createHash } from "node:crypto";
-import type { ChatRequest, ChatStreamEvent, ChatToolCall, ChatUsage } from "../../lib/chat-protocol";
-import type { DeepSeekMessage } from "../providers/deepseek/deepseek-adapter";
+import type { ChatAssistantRound, ChatRequest, ChatStreamEvent, ChatToolCall } from "../../lib/chat-protocol";
 import { streamDeepSeekChatRound } from "../providers/deepseek/deepseek-adapter";
 import { availableChatTools, executePythonTool, PYTHON_TOOL_NAME } from "../server/agent/python-tool";
+import { runPythonInstructionsFor } from "../server/agent/python-tool-instructions";
 import { isModalConfigured, ModalPythonExecutor } from "../server/modal/modal-python-executor";
+import { latestNonNullUsage, sumRoundUsage } from "./chat-usage";
 
 const MAX_RESPONSE_MS = 240_000;
 const MAX_TOOL_CALLS = 6;
-
-function historyMessages(request: ChatRequest): DeepSeekMessage[] {
-  const history: DeepSeekMessage[] = [
-    { role: "system", content: request.systemPrompt },
-    ...(request.userPresence ? [{ role: "system" as const, content: request.userPresence }] : []),
-  ];
-  for (const message of request.messages) {
-    if (message.role === "assistant" && message.rounds?.length) {
-      for (const round of message.rounds) {
-        const calls = round.toolCalls ?? [];
-        history.push({
-          role: "assistant",
-          content: round.content || null,
-          ...(round.reasoning ? { reasoning_content: round.reasoning } : {}),
-          ...(calls.length
-            ? {
-                tool_calls: calls.map((call) => ({
-                  id: call.id,
-                  type: "function" as const,
-                  function: { name: call.name, arguments: call.arguments },
-                })),
-              }
-            : {}),
-        });
-        for (const call of calls) {
-          if (call.result) history.push({ role: "tool", content: JSON.stringify(call.result), tool_call_id: call.id, name: call.name });
-        }
-      }
-      continue;
-    }
-    if (message.role === "assistant") {
-      history.push({
-        role: "assistant",
-        content: message.content,
-        ...(message.reasoning ? { reasoning_content: message.reasoning } : {}),
-        ...(message.toolCalls?.length
-          ? { tool_calls: message.toolCalls.map((call) => ({ id: call.id, type: "function" as const, function: { name: call.name, arguments: call.arguments } })) }
-          : {}),
-      });
-    } else {
-      history.push({ role: "user", content: message.content });
-    }
-  }
-  return history;
-}
 
 function encodeEvent(encoder: TextEncoder, event: ChatStreamEvent): Uint8Array {
   return encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
@@ -72,6 +28,7 @@ export function createChatEventStream(
   ownerId: string,
   signal: AbortSignal,
 ): ReadableStream<Uint8Array> {
+  const responseDeadlineAt = Date.now() + MAX_RESPONSE_MS;
   const encoder = new TextEncoder();
   const responseId = randomUUID();
   const conversationId = stableConversationId(chatRequest);
@@ -91,10 +48,10 @@ export function createChatEventStream(
         ...(toolDefinitions.length ? { tools: [PYTHON_TOOL_NAME] } : {}),
       });
 
-      const deadline = AbortSignal.timeout(MAX_RESPONSE_MS);
+      const deadline = AbortSignal.timeout(Math.max(0, responseDeadlineAt - Date.now()));
       const roundSignal = AbortSignal.any([signal, deadline]);
-      const providerMessages = historyMessages(chatRequest);
-      let usage: ChatUsage | null = null;
+      const replayRounds: ChatAssistantRound[] = [];
+      const roundUsages: Array<ReturnType<typeof latestNonNullUsage>> = [];
       let totalToolCalls = 0;
       let executor: ModalPythonExecutor | null = null;
 
@@ -102,13 +59,16 @@ export function createChatEventStream(
         for (let round = 1; round <= MAX_TOOL_CALLS + 1; round += 1) {
           enqueue({ type: "round", round });
           const canCallTools = totalToolCalls < MAX_TOOL_CALLS && round <= MAX_TOOL_CALLS;
+          const systemInstructions = runPythonInstructionsFor(Boolean(toolDefinitions.length && canCallTools));
           const reasoningParts: string[] = [];
           const contentParts: string[] = [];
           const calls: ChatToolCall[] = [];
+          const roundUsageIndex = roundUsages.push(null) - 1;
           for await (const event of streamDeepSeekChatRound(
             chatRequest,
             {
-              messages: providerMessages,
+              replayRounds,
+              systemInstructions,
               ...(toolDefinitions.length && canCallTools ? { tools: toolDefinitions } : {}),
             },
             roundSignal,
@@ -121,7 +81,7 @@ export function createChatEventStream(
             } else if (event.type === "tool_call") {
               calls.push(event.call);
             } else if (event.type === "done") {
-              usage = event.usage ?? usage;
+              roundUsages[roundUsageIndex] = latestNonNullUsage(roundUsages[roundUsageIndex], event.usage);
             } else if (event.type === "error") {
               enqueue(event);
             }
@@ -141,31 +101,21 @@ export function createChatEventStream(
             enqueue({ type: "error", message: "The response reached the 6-call Python limit." });
             break;
           }
-          if (!executor) executor = new ModalPythonExecutor(ownerId, conversationId);
+          if (!executor) executor = new ModalPythonExecutor(ownerId, conversationId, responseDeadlineAt);
 
-          providerMessages.push({
-            role: "assistant",
-            content: contentParts.join("") || null,
-            ...(reasoningParts.length ? { reasoning_content: reasoningParts.join("") } : {}),
-            tool_calls: calls.map((item) => ({
-              id: item.id,
-              type: "function" as const,
-              function: { name: item.name, arguments: item.arguments },
-            })),
-          });
           for (const call of calls) {
             totalToolCalls += 1;
             enqueue({ type: "tool_call", call });
             const result = await executePythonTool(call, executor, ownerId, conversationId);
+            call.result = result;
             enqueue({ type: "tool_result", result });
             for (const artifact of result.artifacts ?? []) enqueue({ type: "artifact", artifact });
-            providerMessages.push({
-              role: "tool",
-              content: JSON.stringify(result),
-              tool_call_id: call.id,
-              name: call.name,
-            });
           }
+          replayRounds.push({
+            content: contentParts.join(""),
+            ...(reasoningParts.length ? { reasoning: reasoningParts.join("") } : {}),
+            toolCalls: calls,
+          });
         }
       } catch (error: unknown) {
         if (!signal.aborted) {
@@ -175,7 +125,7 @@ export function createChatEventStream(
       } finally {
         await executor?.close().catch(() => undefined);
         if (!signal.aborted) {
-          enqueue({ type: "done", usage });
+          enqueue({ type: "done", usage: sumRoundUsage(roundUsages) });
           controller.close();
         } else {
           controller.close();
