@@ -35,7 +35,94 @@ function useLiveDuration(startedAt?: number, running = false) {
   return startedAt === undefined ? undefined : Math.max(0, now - startedAt);
 }
 
-function ReasoningCard({ activity }: { activity: ReasoningActivity }) {
+type PythonSource = {
+  filename: string;
+  code: string;
+};
+
+function pythonSourceFor(activity: PythonActivity): PythonSource {
+  try {
+    const input = JSON.parse(activity.call.arguments) as { code?: unknown; file?: unknown };
+    if (typeof input.file === "string" && input.file.trim()) {
+      return { filename: input.file, code: `# Executed file: ${input.file}` };
+    }
+    if (typeof input.code === "string") return { filename: "script.py", code: input.code };
+  } catch {
+    // Keep malformed calls visible without allowing them to break the transcript.
+  }
+  return { filename: "script.py", code: "# Python source unavailable" };
+}
+
+type PythonToken = { text: string; className?: string };
+
+function highlightPython(code: string): PythonToken[] {
+  const tokenPattern = new RegExp("(#[^\\n]*|'''[\\s\\S]*?'''|\\\"\\\"\\\"[\\s\\S]*?\\\"\\\"\\\"|'(?:\\\\.|[^'\\\\])*'|\\\"(?:\\\\.|[^\\\"\\\\])*\\\"|\\b(?:and|as|assert|async|await|break|class|continue|def|del|elif|else|except|False|finally|for|from|global|if|import|in|is|lambda|None|nonlocal|not|or|pass|raise|return|True|try|while|with|yield)\\b|\\b(?:print|len|range|str|int|float|list|dict|set|tuple|enumerate|zip|open|sum|min|max|sorted|super|self)\\b|\\b\\d+(?:\\.\\d+)?\\b|@[A-Za-z_][\\w.]*|==|!=|<=|>=|->|\\*\\*|//|[+\\-*%=<>:&|^~\\x2f])", "g");
+  const tokens: PythonToken[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = tokenPattern.exec(code))) {
+    if (match.index > lastIndex) tokens.push({ text: code.slice(lastIndex, match.index) });
+    const value = match[0];
+    const className = value.startsWith("#")
+      ? "python-token-comment"
+      : value.startsWith("\"") || value.startsWith("'")
+        ? "python-token-string"
+        : value.startsWith("@")
+          ? "python-token-decorator"
+          : /^\d/.test(value)
+            ? "python-token-number"
+            : /^(?:print|len|range|str|int|float|list|dict|set|tuple|enumerate|zip|open|sum|min|max|sorted|super|self)$/.test(value)
+              ? "python-token-builtin"
+              : /^[A-Za-z]/.test(value)
+                ? "python-token-keyword"
+                : "python-token-operator";
+    tokens.push({ text: value, className });
+    lastIndex = tokenPattern.lastIndex;
+  }
+  if (lastIndex < code.length) tokens.push({ text: code.slice(lastIndex) });
+  return tokens;
+}
+
+function PythonCode({ activity }: { activity: PythonActivity }) {
+  const source = pythonSourceFor(activity);
+  return (
+    <pre className="python-source" aria-label={`${source.filename} source code`}>
+      <code>{highlightPython(source.code).map((token, index) => (
+        <span key={`${index}-${token.text}`} className={token.className}>{token.text}</span>
+      ))}</code>
+    </pre>
+  );
+}
+
+function PythonDisclosure({ activity }: { activity: PythonActivity }) {
+  const [codeOpen, setCodeOpen] = useState(false);
+  const [outputOpen, setOutputOpen] = useState(false);
+  const liveDuration = useLiveDuration(activity.startedAt, activity.status === "running");
+  const duration = activity.durationMs ?? liveDuration;
+  const statusLabel = activity.status === "running" ? "Running" : activity.status === "completed" ? "Completed" : "Failed";
+  const source = pythonSourceFor(activity);
+  const output = [activity.result?.stdout, activity.result?.stderr ? `stderr\n${activity.result.stderr}` : ""].filter(Boolean).join("\n");
+
+  return (
+    <div className={`python-nested python-nested-${activity.status}`}>
+      <button type="button" className="python-nested-summary" aria-expanded={codeOpen} onClick={() => setCodeOpen((current) => !current)}>
+        <span className="python-nested-chevron" aria-hidden="true">{codeOpen ? "⌄" : "›"}</span>
+        <span className="python-nested-filename">{source.filename}</span>
+        <span className="python-activity-status" aria-live="polite">{statusLabel}</span>
+        {duration !== undefined && <span className="python-activity-duration">{formatDuration(duration)}</span>}
+      </button>
+      {codeOpen && <PythonCode activity={activity} />}
+      <div className="python-output-divider" />
+      <button type="button" className="python-output-summary" aria-expanded={outputOpen} onClick={() => setOutputOpen((current) => !current)}>
+        <span className="python-nested-chevron" aria-hidden="true">{outputOpen ? "⌄" : "›"}</span>
+        <span>Output</span>
+      </button>
+      {outputOpen && <pre className="python-output">{output || (activity.status === "running" ? "Waiting for output…" : "No output")}</pre>}
+    </div>
+  );
+}
+
+function ReasoningCard({ activity, pythonActivities }: { activity: ReasoningActivity; pythonActivities: PythonActivity[] }) {
   const [open, setOpen] = useState(false);
   const liveDuration = useLiveDuration(activity.startedAt, activity.status === "running");
   const duration = activity.durationMs ?? liveDuration;
@@ -55,50 +142,12 @@ function ReasoningCard({ activity }: { activity: ReasoningActivity }) {
           <span className="reasoning-duration">{formatDuration(duration)}</span>
         )}
       </button>
-      {open && <div className="reasoning-content">{activity.content}</div>}
-    </section>
-  );
-}
-
-function PythonCard({ activity }: { activity: PythonActivity }) {
-  const [open, setOpen] = useState(false);
-  const liveDuration = useLiveDuration(activity.startedAt, activity.status === "running");
-  const duration = activity.durationMs ?? liveDuration;
-  const statusLabel =
-    activity.status === "running"
-      ? "Running"
-      : activity.status === "completed"
-        ? "Completed"
-        : "Failed";
-
-  return (
-    <section className={`python-activity python-activity-${activity.status}`}>
-      <button
-        type="button"
-        className="python-activity-summary"
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-      >
-        <span className="python-activity-icon" aria-hidden="true">&gt;_</span>
-        <span className="python-activity-title">Python</span>
-        <span className="python-activity-status" aria-live="polite">{statusLabel}</span>
-        {duration !== undefined && (
-          <span className="python-activity-duration">{formatDuration(duration)}</span>
-        )}
-        <span className="python-activity-chevron" aria-hidden="true">
-          {open ? "⌃" : "⌄"}
-        </span>
-      </button>
       {open && (
-        <div className="python-activity-details">
-          <div>
-            <div className="python-activity-detail-label">Call</div>
-            <pre>{JSON.stringify(activity.call, null, 2)}</pre>
-          </div>
-          {activity.result && (
-            <div>
-              <div className="python-activity-detail-label">Result</div>
-              <pre>{JSON.stringify(activity.result, null, 2)}</pre>
+        <div className="reasoning-content">
+          <div>{activity.content}</div>
+          {pythonActivities.length > 0 && (
+            <div className="reasoning-python-list">
+              {pythonActivities.map((python) => <PythonDisclosure key={python.id} activity={python} />)}
             </div>
           )}
         </div>
@@ -160,16 +209,29 @@ export function AssistantActivityTimeline({
   artifacts: ChatArtifact[];
   getAccessToken: () => Promise<string | null>;
 }) {
+  const rounds = activities.reduce<Map<number, { reasoning?: ReasoningActivity; python: PythonActivity[] }>>((grouped, activity) => {
+    const round = grouped.get(activity.round) ?? { python: [] };
+    if (activity.kind === "reasoning") round.reasoning = round.reasoning
+      ? { ...round.reasoning, content: `${round.reasoning.content}${activity.content}`, status: activity.status }
+      : activity;
+    else round.python.push(activity);
+    grouped.set(activity.round, round);
+    return grouped;
+  }, new Map());
+
   return (
     <>
       <div className="assistant-activity-timeline">
-        {activities.map((activity) =>
-          activity.kind === "reasoning" ? (
-            <ReasoningCard key={activity.id} activity={activity} />
-          ) : (
-            <PythonCard key={activity.id} activity={activity} />
-          ),
-        )}
+        {[...rounds.entries()].map(([round, group]) => {
+          const reasoning = group.reasoning ?? {
+            id: `reasoning-${round}`,
+            kind: "reasoning" as const,
+            round,
+            content: "",
+            status: "complete" as const,
+          };
+          return <ReasoningCard key={reasoning.id} activity={reasoning} pythonActivities={group.python} />;
+        })}
       </div>
       {content && (
         <div className="message-bubble">

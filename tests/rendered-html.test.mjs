@@ -414,7 +414,12 @@ test("keeps Python execution isolated, persistent, bounded, and server-only", as
   assert.doesNotMatch(client, /artifact\.downloadUrl/);
   assert.match(activity, /aria-expanded=\{open\}/);
   assert.match(activity, /Created \{artifact\.name\}/);
-  assert.match(activity, /JSON\.stringify\(activity\.call, null, 2\)/);
+  assert.match(activity, /pythonSourceFor/);
+  assert.match(activity, /filename: "script\.py"/);
+  assert.match(activity, /className="python-source"/);
+  assert.match(activity, /className="python-output"/);
+  assert.match(activity, /rounds = activities\.reduce/);
+  assert.doesNotMatch(activity, /JSON\.stringify\(activity\.call, null, 2\)/);
   assert.match(envExample, /^MODAL_TOKEN_ID=$/m);
   assert.match(envExample, /^MODAL_TOKEN_SECRET=$/m);
   assert.match(envExample, /^ARTIFACT_SIGNING_SECRET=$/m);

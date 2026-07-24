@@ -921,6 +921,13 @@ button {
   white-space: pre-wrap;
 }
 
+.reasoning-python-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  white-space: normal;
+}
+
 .assistant-activity-timeline {
   display: grid;
   width: min(100%, 680px);
@@ -940,24 +947,25 @@ button {
   text-transform: uppercase;
 }
 
-.python-activity {
+.python-nested {
   overflow: hidden;
   border: 1px solid #3d3f39;
   border-radius: 12px;
   background: #20211f;
 }
 
-.python-activity-running {
+.python-nested-running {
   border-color: #5a604b;
 }
 
-.python-activity-failed {
+.python-nested-failed {
   border-color: rgba(255, 156, 145, .45);
 }
 
-.python-activity-summary {
+.python-nested-summary,
+.python-output-summary {
   display: grid;
-  grid-template-columns: auto auto 1fr auto auto;
+  grid-template-columns: auto 1fr auto auto;
   align-items: center;
   width: 100%;
   min-height: 44px;
@@ -969,24 +977,28 @@ button {
   text-align: left;
 }
 
-.python-activity-summary:hover {
+.python-nested-summary:hover,
+.python-output-summary:hover {
   background: rgba(255, 255, 255, .035);
 }
 
-.python-activity-summary:focus-visible,
+.python-nested-summary:focus-visible,
+.python-output-summary:focus-visible,
 .artifact-download button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
-.python-activity-icon {
-  margin-right: 9px;
+.python-nested-chevron {
+  width: 20px;
   color: var(--accent);
-  font-family: var(--font-geist-mono), monospace;
-  font-size: 12px;
+  text-align: center;
 }
 
-.python-activity-title {
+.python-nested-filename {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 13px;
   font-weight: 650;
 }
@@ -1015,34 +1027,11 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
-.python-activity-chevron {
-  width: 20px;
-  margin-left: 8px;
-  color: var(--quiet);
-  text-align: center;
-}
-
-.python-activity-details {
-  display: grid;
-  gap: 12px;
-  border-top: 1px solid #353631;
-  padding: 12px;
-}
-
-.python-activity-detail-label {
-  margin-bottom: 6px;
-  color: var(--quiet);
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: .05em;
-  text-transform: uppercase;
-}
-
-.python-activity-details pre {
+.python-source,
+.python-output {
   max-height: 280px;
   overflow: auto;
   margin: 0;
-  border-radius: 8px;
   background: #181918;
   padding: 10px;
   color: #c9cac2;
@@ -1051,6 +1040,35 @@ button {
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.python-source code {
+  font: inherit;
+}
+
+.python-token-comment { color: #7f9872; }
+.python-token-string { color: #d6b778; }
+.python-token-decorator { color: #c08ad1; }
+.python-token-number { color: #8fc7d8; }
+.python-token-builtin { color: #82c7b5; }
+.python-token-keyword { color: #d28caa; }
+.python-token-operator { color: #c9cac2; }
+
+.python-output-divider {
+  border-top: 1px solid #353631;
+}
+
+.python-output-summary {
+  min-height: 34px;
+  padding-block: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.python-output {
+  max-height: 180px;
+  border-top: 1px solid #292a27;
+  color: #c9cac2;
 }
 
 .artifact-downloads {
@@ -1452,13 +1470,9 @@ button {
     padding-inline: 7px;
   }
 
-  .python-activity-summary {
+  .python-nested-summary {
     grid-template-columns: auto 1fr auto;
     padding-inline: 10px;
-  }
-
-  .python-activity-icon {
-    display: none;
   }
 
   .python-activity-status {
