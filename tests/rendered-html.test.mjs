@@ -243,6 +243,9 @@ test("keeps composer model and thinking controls accessible and responsive", asy
 
   assert.match(composer, /aria-label="Choose model"/);
   assert.match(composer, /aria-label="Choose thinking mode"/);
+  assert.match(composer, /aria-label="Stop generating"/);
+  assert.match(composer, /className="send-button stop-button"/);
+  assert.match(composer, /<rect x="3" y="3" width="10" height="10" rx="1"/);
   assert.match(composer, /aria-controls="model-options"/);
   assert.match(composer, /aria-controls="thinking-options"/);
   assert.match(composer, /aria-pressed=/);
