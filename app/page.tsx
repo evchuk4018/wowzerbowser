@@ -16,7 +16,10 @@ import { useAuthSession } from "./auth/use-auth-session";
 import { fetchChatModels, streamChatResponse } from "./chat/chat-service";
 import { ChatComposer } from "./chat/chat-composer";
 import { AssistantResponse } from "./chat/assistant-response";
-import { MobileHistorySwipeGesture } from "./chat/mobile-history-swipe";
+import {
+  MOBILE_HISTORY_CLICK_SUPPRESSION_MS,
+  MobileHistorySwipeGesture,
+} from "./chat/mobile-history-swipe";
 import type {
   ChatModelId,
   ChatReasoningEffort,
@@ -424,10 +427,11 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
     swipeClickResetTimerRef.current = window.setTimeout(() => {
       mobileHistorySwipeRef.current.clearClickSuppression();
       swipeClickResetTimerRef.current = null;
-    }, 0);
+    }, MOBILE_HISTORY_CLICK_SUPPRESSION_MS);
   };
 
   const handleMobileHistoryPointerUp = (event: ReactPointerEvent<HTMLElement>) => {
+    if (!mobileHistorySwipeRef.current.isTrackingPointer(event.pointerId)) return;
     const action = mobileHistorySwipeRef.current.end({
       clientX: event.clientX,
       clientY: event.clientY,
@@ -443,8 +447,8 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
     scheduleSwipeClickReset();
   };
 
-  const handleMobileHistoryPointerCancel = () => {
-    mobileHistorySwipeRef.current.cancel();
+  const handleMobileHistoryPointerCancel = (event: ReactPointerEvent<HTMLElement>) => {
+    mobileHistorySwipeRef.current.cancel(event.pointerId);
   };
 
   const handleMobileHistoryClickCapture = (event: ReactMouseEvent<HTMLElement>) => {

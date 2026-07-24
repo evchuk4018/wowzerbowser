@@ -344,6 +344,23 @@ test("keeps mobile history gesture tracking touch-safe and click-safe", () => {
   assert.equal(begin({ viewportWidth: 761 }), false);
 
   assert.equal(begin(), true);
+  assert.equal(begin({ pointerId: 2, isPrimary: false }), false);
+  assert.equal(gesture.isTrackingPointer(1), true);
+  assert.equal(gesture.cancel(2), false);
+  assert.equal(gesture.isTrackingPointer(1), true);
+  assert.equal(gesture.end({ clientX: 20, clientY: 0, pointerId: 2 }), null);
+  assert.equal(gesture.isTrackingPointer(1), true);
+  assert.equal(
+    gesture.move({
+      clientX: MOBILE_HISTORY_HORIZONTAL_INTENT_PX,
+      clientY: 0,
+      pointerId: 1,
+    }),
+    true,
+  );
+  gesture.cancel();
+
+  assert.equal(begin(), true);
   assert.equal(
     gesture.move({
       clientX: MOBILE_HISTORY_HORIZONTAL_INTENT_PX - 1,
@@ -384,6 +401,8 @@ test("wires mobile history swipes without pointer capture", async () => {
   assert.match(page, /onPointerMove=\{handleMobileHistoryPointerMove\}/);
   assert.match(page, /onPointerUp=\{handleMobileHistoryPointerUp\}/);
   assert.match(page, /onPointerCancel=\{handleMobileHistoryPointerCancel\}/);
+  assert.match(page, /isTrackingPointer\(event\.pointerId\)/);
+  assert.match(page, /cancel\(event\.pointerId\)/);
   assert.match(page, /onClickCapture=\{handleMobileHistoryClickCapture\}/);
   assert.match(page, /window\.addEventListener\("blur", resetMobileHistorySwipe\)/);
   assert.match(page, /window\.addEventListener\("resize", resetMobileHistorySwipe\)/);

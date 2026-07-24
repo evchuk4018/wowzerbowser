@@ -1,6 +1,7 @@
 export const MOBILE_HISTORY_MAX_WIDTH = 760;
 export const MOBILE_HISTORY_SWIPE_THRESHOLD = 0.25;
 export const MOBILE_HISTORY_HORIZONTAL_INTENT_PX = 10;
+export const MOBILE_HISTORY_CLICK_SUPPRESSION_MS = 500;
 
 export type MobileHistorySwipeAction = "open" | "close" | null;
 
@@ -69,6 +70,7 @@ export class MobileHistorySwipeGesture {
     sidebarOpen,
     viewportWidth,
   }: SwipeStart): boolean {
+    if (this.activeSwipe && this.activeSwipe.pointerId !== pointerId) return false;
     this.cancel();
     if (
       disabled
@@ -109,6 +111,10 @@ export class MobileHistorySwipeGesture {
     return activeSwipe.horizontalIntent;
   }
 
+  isTrackingPointer(pointerId: number): boolean {
+    return this.activeSwipe?.pointerId === pointerId;
+  }
+
   end({ clientX, clientY, pointerId }: SwipeCoordinates): MobileHistorySwipeAction {
     const activeSwipe = this.activeSwipe;
     if (!activeSwipe || pointerId !== activeSwipe.pointerId) return null;
@@ -125,9 +131,11 @@ export class MobileHistorySwipeGesture {
     return action;
   }
 
-  cancel(): void {
+  cancel(pointerId?: number): boolean {
+    if (pointerId !== undefined && !this.isTrackingPointer(pointerId)) return false;
     this.activeSwipe = null;
     this.suppressClick = false;
+    return true;
   }
 
   hasClickSuppression(): boolean {
