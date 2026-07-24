@@ -2,6 +2,7 @@
 
 import type { Dispatch, FormEvent, KeyboardEvent, RefObject, SetStateAction } from "react";
 import type { ChatModelId, ChatModelInfo, ChatReasoningEffort } from "../../lib/chat-protocol";
+import type { ChatModelPreference } from "../../lib/chat-model-preference";
 
 export type ChatComposerProps = {
   draft: string;
@@ -18,6 +19,7 @@ export type ChatComposerProps = {
   setThinking: Dispatch<SetStateAction<boolean>>;
   effort: ChatReasoningEffort;
   setEffort: Dispatch<SetStateAction<ChatReasoningEffort>>;
+  onPreferenceChange: (preference: ChatModelPreference) => void;
   supportedEfforts: ChatReasoningEffort[];
   canThink: boolean;
   effectiveThinking: boolean;
@@ -44,6 +46,7 @@ export function ChatComposer({
   setThinking,
   effort,
   setEffort,
+  onPreferenceChange,
   supportedEfforts,
   canThink,
   effectiveThinking,
@@ -105,12 +108,13 @@ export function ChatComposer({
                     disabled={isStreaming}
                     onClick={() => {
                       setModel(availableModel.id);
-                      if (!availableModel.thinkingSupported || !availableModel.supportedEfforts.length) {
-                        setThinking(false);
-                      }
-                      if (!availableModel.supportedEfforts.includes(effort)) {
-                        setEffort(availableModel.supportedEfforts[0] ?? "high");
-                      }
+                      const nextThinking = thinking && availableModel.thinkingSupported && Boolean(availableModel.supportedEfforts.length);
+                      const nextEffort = availableModel.supportedEfforts.includes(effort)
+                        ? effort
+                        : (availableModel.supportedEfforts[0] ?? "high");
+                      setThinking(nextThinking);
+                      setEffort(nextEffort);
+                      onPreferenceChange({ model: availableModel.id, thinking: nextThinking, reasoningEffort: nextEffort });
                       setOpenMenu(null);
                     }}
                   >
@@ -148,6 +152,7 @@ export function ChatComposer({
                   disabled={isStreaming}
                   onClick={() => {
                     setThinking(false);
+                    onPreferenceChange({ model, thinking: false, reasoningEffort: effort });
                     setOpenMenu(null);
                   }}
                 >
@@ -164,6 +169,7 @@ export function ChatComposer({
                     onClick={() => {
                       setThinking(true);
                       setEffort(supportedEffort);
+                      onPreferenceChange({ model, thinking: true, reasoningEffort: supportedEffort });
                       setOpenMenu(null);
                     }}
                   >
