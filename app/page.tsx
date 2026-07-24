@@ -30,6 +30,14 @@ import type {
   ChatReasoningEffort,
 } from "../lib/chat-protocol";
 import { DEFAULT_CHAT_MODELS } from "../lib/chat-protocol";
+import {
+  DEFAULT_CHAT_MODEL_PREFERENCE,
+  type ChatModelPreference,
+} from "../lib/chat-model-preference";
+import {
+  fetchChatModelPreferences,
+  saveChatModelPreference,
+} from "./chat/chat-model-preference-service";
 
 type Message = {
   id: string;
@@ -244,8 +252,10 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   const [ready, setReady] = useState(false);
   const [models, setModels] = useState(DEFAULT_CHAT_MODELS);
   const [model, setModel] = useState<ChatModelId>("deepseek-v4-flash");
-  const [thinking, setThinking] = useState(false);
+  const [thinking, setThinking] = useState(true);
   const [effort, setEffort] = useState<ChatReasoningEffort>("high");
+  const [modelPreferences, setModelPreferences] = useState<Record<string, ChatModelPreference>>({});
+  const [modelPreferencesLoaded, setModelPreferencesLoaded] = useState(false);
   const [streamingByConversation, setStreamingByConversation] = useState<Record<string, string>>({});
   const [waitingByMessage, setWaitingByMessage] = useState<Record<string, boolean>>({});
   const [thinkingByMessage, setThinkingByMessage] = useState<
@@ -333,6 +343,37 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
       mounted = false;
     };
   }, [getAccessToken]);
+
+  useEffect(() => {
+    let mounted = true;
+    void getAccessToken()
+      .then((token) => token ? fetchChatModelPreferences(token) : {})
+      .then((preferences) => {
+        if (mounted) setModelPreferences(preferences);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (mounted) setModelPreferencesLoaded(true);
+      });
+    return () => { mounted = false; };
+  }, [getAccessToken]);
+
+  useEffect(() => {
+    if (!activeId || !modelPreferencesLoaded) return;
+    const preference = modelPreferences[activeId] ?? DEFAULT_CHAT_MODEL_PREFERENCE;
+    setModel(preference.model);
+    setThinking(preference.thinking);
+    setEffort(preference.reasoningEffort);
+  }, [activeId, modelPreferences, modelPreferencesLoaded]);
+
+  const persistModelPreference = (preference: ChatModelPreference) => {
+    if (!activeId) return;
+    const conversationId = activeId;
+    setModelPreferences((current) => ({ ...current, [conversationId]: preference }));
+    void getAccessToken()
+      .then((token) => token ? saveChatModelPreference(conversationId, preference, token) : undefined)
+      .catch(() => undefined);
+  };
 
   const active = conversations.find((conversation) => conversation.id === activeId);
   const latestTurn = active?.turns[active.turns.length - 1];
@@ -1370,6 +1411,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
           setThinking={setThinking}
           effort={effort}
           setEffort={setEffort}
+          onPreferenceChange={persistModelPreference}
           supportedEfforts={supportedEfforts}
           canThink={canThink}
           effectiveThinking={effectiveThinking}
