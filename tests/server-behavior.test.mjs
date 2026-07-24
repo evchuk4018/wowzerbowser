@@ -155,6 +155,8 @@ test("Python policy keeps workspace paths relative and rejects traversal", () =>
 test("Python subprocess timeout is capped by call and response deadlines", () => {
   assert.equal(boundedPythonTimeoutMs(90_000, 200_000, 100_000), 60_000);
   assert.equal(boundedPythonTimeoutMs(10_000, 105_000, 100_000), 5_000);
+  assert.equal(boundedPythonTimeoutMs(60_000, 151_243, 100_000), 51_000);
+  assert.equal(boundedPythonTimeoutMs(10_000, 100_999, 100_000), 0);
   assert.equal(boundedPythonTimeoutMs(10_000, 100_000, 100_000), 0);
 });
 
