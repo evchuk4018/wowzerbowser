@@ -48,6 +48,12 @@ function parse(call: ChatToolCall): Record<string, unknown> {
 }
 
 function text(value: unknown, max: number) { return typeof value === "string" ? value.trim().slice(0, max) : ""; }
+function searchQuery(input: Record<string, unknown>): string {
+  // Some OpenAI-compatible providers occasionally emit the conventional `q`
+  // spelling even when the advertised schema calls the field `query`. Accept
+  // that wire-level alias so a valid search does not turn into a retry loop.
+  return text(input.query ?? input.q, 400);
+}
 function requireOnly(input: Record<string, unknown>, allowed: readonly string[], tool: string) {
   const unexpected = Object.keys(input).find((key) => !allowed.includes(key));
   if (unexpected) throw new Error(`${tool} received an unexpected argument.`);
@@ -97,8 +103,8 @@ export async function executeWebTool(call: ChatToolCall): Promise<ChatToolResult
       return { id: call.id, name: call.name, ok: true, stdout: "", stderr: "", durationMs: Date.now() - startedAt, utility };
     }
     if (call.name === WEB_SEARCH_TOOL_NAME) {
-      requireOnly(input, ["query", "count"], call.name);
-      const query = text(input.query, 400); const count = Math.max(1, Math.min(MAX_RESULTS, Number(input.count) || MAX_RESULTS));
+      requireOnly(input, ["query", "q", "count"], call.name);
+      const query = searchQuery(input); const count = Math.max(1, Math.min(MAX_RESULTS, Number(input.count) || MAX_RESULTS));
       if (!query) throw new Error("web_search requires a query.");
       const response = await withProviderKeys(configuredKeys("brave"), (key) => providerFetch(`https://api.search.brave.com/res/v1/web/search?${new URLSearchParams({ q: query, count: String(count), text_decorations: "false" })}`, { headers: { Accept: "application/json", "X-Subscription-Token": key } }));
       if (!response.ok) throw response;

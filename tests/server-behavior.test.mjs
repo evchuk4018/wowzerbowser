@@ -160,6 +160,27 @@ test("time, date, and location tools validate inputs and produce bounded structu
   if (original === undefined) delete process.env.DEPLOYMENT_LOCATION; else process.env.DEPLOYMENT_LOCATION = original;
 });
 
+test("web search accepts the provider-compatible q argument alias", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalKeys = process.env.BRAVE_API_KEYS;
+  process.env.BRAVE_API_KEYS = "test-key";
+  let requestedUrl = "";
+  globalThis.fetch = async (url) => {
+    requestedUrl = String(url);
+    return Response.json({ web: { results: [] } });
+  };
+  try {
+    const result = await executeWebTool({ id: "search-1", name: "web_search", arguments: '{"q":"current date"}' });
+    assert.equal(result.ok, true);
+    assert.equal(result.web?.kind, "search");
+    assert.equal(result.web?.query, "current date");
+    assert.equal(new URL(requestedUrl).searchParams.get("q"), "current date");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKeys === undefined) delete process.env.BRAVE_API_KEYS; else process.env.BRAVE_API_KEYS = originalKeys;
+  }
+});
+
 test("web and utility tool results replay in the provider transcript", () => {
   const messages = buildDeepSeekMessages(request(), { replayRounds: [{ content: "", toolCalls: [{ id: "web-1", name: "web_search", arguments: '{"query":"today"}', result: { id: "web-1", name: "web_search", ok: true, stdout: "", stderr: "", web: { kind: "search", query: "today", results: [{ title: "Result", url: "https://example.com", snippet: "Snippet" }] } } }, { id: "date-1", name: CHECK_DATE_TOOL_NAME, arguments: "{}", result: { id: "date-1", name: CHECK_DATE_TOOL_NAME, ok: true, stdout: "", stderr: "", utility: { kind: "date", currentDate: "2026-07-24", timeZone: "UTC" } } }] }] });
   assert.equal(messages.at(-2)?.role, "assistant");
