@@ -15,14 +15,31 @@ export type SettingsModalProps = {
   loadUsage?: (range: UsageRange) => Promise<UsageReport>;
 };
 
-type SettingsSection = "general" | "usage" | "models" | "api-keys" | "data";
+type SettingsSection =
+  | "general"
+  | "usage"
+  | "notifications"
+  | "personalization"
+  | "plugins"
+  | "voice"
+  | "storage"
+  | "safety"
+  | "security"
+  | "account"
+  | "keyboard";
 
 const sections: Array<{ id: SettingsSection; label: string }> = [
   { id: "general", label: "General" },
   { id: "usage", label: "Usage" },
-  { id: "models", label: "Models" },
-  { id: "api-keys", label: "API keys" },
-  { id: "data", label: "Data controls" },
+  { id: "notifications", label: "Notifications" },
+  { id: "personalization", label: "Personalization" },
+  { id: "plugins", label: "Plugins" },
+  { id: "voice", label: "Voice" },
+  { id: "storage", label: "Storage" },
+  { id: "safety", label: "Safety" },
+  { id: "security", label: "Security and login" },
+  { id: "account", label: "Account" },
+  { id: "keyboard", label: "Keyboard" },
 ];
 
 const ranges: Array<{ id: UsageRange; label: string }> = [

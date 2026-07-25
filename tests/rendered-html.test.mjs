@@ -319,6 +319,15 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(settings, /Week/);
   assert.match(settings, /Month/);
   assert.match(settings, /All time/);
+  assert.match(settings, /Notifications/);
+  assert.match(settings, /Personalization/);
+  assert.match(settings, /Plugins/);
+  assert.match(settings, /Voice/);
+  assert.match(settings, /Storage/);
+  assert.match(settings, /Safety/);
+  assert.match(settings, /Security and login/);
+  assert.match(settings, /Account/);
+  assert.match(settings, /Keyboard/);
   assert.match(settings, /role="tooltip"/);
   assert.match(settings, /Cached input/);
   assert.match(settings, /estimatedRequestCount/);
