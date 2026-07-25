@@ -15,6 +15,7 @@ import { SettingsModal } from "../settings/settings-modal";
 import { ChatComposer } from "./chat-composer";
 import { ChatSidebar } from "./chat-sidebar";
 import { ChatTranscript } from "./chat-transcript";
+import { fetchChatUsage } from "./chat-usage-service";
 import { createConversation, DEFAULT_CHAT_SETTINGS } from "./conversation-defaults";
 import { DeleteConfirmationDialog } from "./delete-confirmation-dialog";
 import { conversationReducer, createInitialConversationState } from "./conversation-reducer";
@@ -60,6 +61,12 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
   const endRef = useRef<HTMLDivElement>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const conversationLongPressTimerRef = useRef<number | null>(null);
+  const loadUsage = useCallback(async (range: Parameters<typeof fetchChatUsage>[0]) => {
+    const accessToken = await getAccessToken();
+    if (!accessToken) throw new Error("Sign in to view usage.");
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return fetchChatUsage(range, timeZone, accessToken);
+  }, [getAccessToken]);
 
   useEffect(() => {
     let mounted = true;
@@ -373,6 +380,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
       {settingsOpen && (
         <SettingsModal
           settings={settings}
+          loadUsage={loadUsage}
           onClose={closeSettings}
           onSave={(next) => {
             setSettings(next);

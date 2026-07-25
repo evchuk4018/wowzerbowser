@@ -1,36 +1,18 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import type {
+  UsageModelSummary,
+  UsageRange,
+  UsageReport,
+} from "../../lib/usage-protocol";
 import type { ChatSettings } from "../chat/conversation-types";
-
-export type UsageRange = "day" | "week" | "month" | "all";
-
-export type SettingsUsageData = {
-  summary: {
-    requests: number;
-    inputTokens: number;
-    outputTokens: number;
-    estimatedCost: number;
-    currency?: string;
-  };
-  bars: Array<{
-    label: string;
-    value: number;
-    cost?: number;
-  }>;
-  pricing: Array<{
-    model: string;
-    inputPerMillion: number;
-    outputPerMillion: number;
-    currency?: string;
-  }>;
-};
 
 export type SettingsModalProps = {
   settings: ChatSettings;
   onClose: () => void;
   onSave: (settings: ChatSettings) => void;
-  loadUsage?: (range: UsageRange) => Promise<SettingsUsageData>;
+  loadUsage?: (range: UsageRange) => Promise<UsageReport>;
 };
 
 type SettingsSection = "general" | "usage" | "models" | "api-keys" | "data";
@@ -59,6 +41,17 @@ function formatCurrency(value: number, currency = "USD") {
     minimumFractionDigits: value < 0.01 ? 4 : 2,
     maximumFractionDigits: value < 0.01 ? 4 : 2,
   }).format(value);
+}
+
+function providerLabel(provider: string) {
+  return provider.charAt(0).toUpperCase() + provider.slice(1);
+}
+
+function modelBreakdownLabel(models: UsageModelSummary[]) {
+  return models
+    .map(({ provider, label, totalTokens }) =>
+      `${providerLabel(provider)} ${label}: ${numberFormat.format(totalTokens)} tokens`)
+    .join("; ");
 }
 
 function GeneralSettings({
@@ -98,7 +91,7 @@ function UsageSettings({ loadUsage }: Pick<SettingsModalProps, "loadUsage">) {
   const [range, setRange] = useState<UsageRange>("week");
   const [response, setResponse] = useState<{
     range: UsageRange;
-    usage: SettingsUsageData | null;
+    usage: UsageReport | null;
     failed: boolean;
   } | null>(null);
 
@@ -129,8 +122,11 @@ function UsageSettings({ loadUsage }: Pick<SettingsModalProps, "loadUsage">) {
       : response.failed
         ? "error"
         : "idle";
-  const maximum = Math.max(1, ...(usage?.bars.map(({ value }) => value) ?? []));
-  const currency = usage?.summary.currency ?? "USD";
+  const maximumCost = Math.max(
+    Number.EPSILON,
+    ...(usage?.buckets.map(({ costUsd }) => costUsd) ?? []),
+  );
+  const totals = usage?.totals;
 
   return (
     <>
@@ -153,7 +149,7 @@ function UsageSettings({ loadUsage }: Pick<SettingsModalProps, "loadUsage">) {
         </div>
       </div>
 
-      {status === "loading" && <p className="settings-status" role="status">Loading usage…</p>}
+      {status === "loading" && <p className="settings-status" role="status">Loading usage...</p>}
       {status === "error" && <p className="settings-status settings-error" role="alert">Usage could not be loaded.</p>}
       {!loadUsage && (
         <p className="settings-status">
@@ -161,37 +157,77 @@ function UsageSettings({ loadUsage }: Pick<SettingsModalProps, "loadUsage">) {
         </p>
       )}
 
-      <div className="settings-summary" aria-label="Usage summary">
-        <div><span>Requests</span><strong>{numberFormat.format(usage?.summary.requests ?? 0)}</strong></div>
-        <div><span>Input tokens</span><strong>{numberFormat.format(usage?.summary.inputTokens ?? 0)}</strong></div>
-        <div><span>Output tokens</span><strong>{numberFormat.format(usage?.summary.outputTokens ?? 0)}</strong></div>
-        <div><span>Estimated cost</span><strong>{formatCurrency(usage?.summary.estimatedCost ?? 0, currency)}</strong></div>
-      </div>
-
       <div className="settings-chart" aria-label={`${ranges.find(({ id }) => id === range)?.label} usage chart`}>
-        {usage?.bars.length ? usage.bars.map((bar) => (
-          <div className="settings-bar-column" key={bar.label}>
-            <button
-              type="button"
-              className="settings-bar-target"
-              aria-label={`${bar.label}: ${numberFormat.format(bar.value)} tokens${bar.cost == null ? "" : `, ${formatCurrency(bar.cost, currency)}`}`}
-            >
-              <span className="settings-bar-tooltip" role="tooltip">
-                <strong>{numberFormat.format(bar.value)} tokens</strong>
-                {bar.cost != null && <span>{formatCurrency(bar.cost, currency)}</span>}
-              </span>
-              <span
-                className="settings-bar"
-                style={{ height: `${Math.max(4, (bar.value / maximum) * 100)}%` }}
-                aria-hidden="true"
-              />
-            </button>
-            <span className="settings-bar-label">{bar.label}</span>
-          </div>
-        )) : (
+        {usage?.buckets.length ? usage.buckets.map((bucket) => {
+          const breakdown = modelBreakdownLabel(bucket.models);
+          const indicators = [
+            bucket.estimatedRequestCount
+              ? `${numberFormat.format(bucket.estimatedRequestCount)} estimated`
+              : "",
+            bucket.unpricedRequestCount
+              ? `${numberFormat.format(bucket.unpricedRequestCount)} unpriced`
+              : "",
+          ].filter(Boolean).join(", ");
+          return (
+            <div className="settings-bar-column" key={bucket.key}>
+              <button
+                type="button"
+                className="settings-bar-target"
+                aria-label={`${bucket.label}: ${formatCurrency(bucket.costUsd)}, ${numberFormat.format(bucket.totalTokens)} tokens${breakdown ? `. ${breakdown}` : ""}${indicators ? `. ${indicators}` : ""}`}
+              >
+                <span className="settings-bar-tooltip" role="tooltip">
+                  <span className="settings-tooltip-heading">
+                    <strong>{bucket.label}</strong>
+                    <span>{formatCurrency(bucket.costUsd)}</span>
+                  </span>
+                  <span className="settings-tooltip-total">{numberFormat.format(bucket.totalTokens)} tokens</span>
+                  {bucket.models.map((model) => (
+                    <span className="settings-tooltip-model" key={`${model.provider}:${model.model}`}>
+                      <span>{providerLabel(model.provider)} / {model.label}</span>
+                      <strong>{numberFormat.format(model.totalTokens)}</strong>
+                    </span>
+                  ))}
+                  {!!(bucket.estimatedRequestCount || bucket.unpricedRequestCount) && (
+                    <span className="settings-tooltip-flags">
+                      {!!bucket.estimatedRequestCount && <span>{bucket.estimatedRequestCount} estimated</span>}
+                      {!!bucket.unpricedRequestCount && <span>{bucket.unpricedRequestCount} unpriced</span>}
+                    </span>
+                  )}
+                </span>
+                <span
+                  className="settings-bar"
+                  style={{ height: `${Math.max(4, (bucket.costUsd / maximumCost) * 100)}%` }}
+                  aria-hidden="true"
+                />
+              </button>
+              <span className="settings-bar-label">{bucket.label}</span>
+            </div>
+          );
+        }) : (
           <div className="settings-chart-empty">No usage in this period</div>
         )}
       </div>
+
+      <div className="settings-summary" aria-label="Usage summary">
+        <div><span>Requests</span><strong>{numberFormat.format(totals?.requestCount ?? 0)}</strong></div>
+        <div><span>Input tokens</span><strong>{numberFormat.format(totals?.promptTokens ?? 0)}</strong></div>
+        <div><span>Output tokens</span><strong>{numberFormat.format(totals?.completionTokens ?? 0)}</strong></div>
+        <div>
+          <span>Estimated cost</span>
+          <strong>{formatCurrency(totals?.costUsd ?? 0)}</strong>
+          {!!totals?.unpricedRequestCount && <small>Partial / {totals.unpricedRequestCount} unpriced</small>}
+        </div>
+      </div>
+      {!!(totals?.estimatedRequestCount || totals?.unpricedRequestCount) && (
+        <div className="settings-usage-flags" aria-label="Usage data notes">
+          {!!totals.estimatedRequestCount && (
+            <span><i aria-hidden="true">~</i>{numberFormat.format(totals.estimatedRequestCount)} estimated</span>
+          )}
+          {!!totals.unpricedRequestCount && (
+            <span><i aria-hidden="true">!</i>{numberFormat.format(totals.unpricedRequestCount)} unpriced</span>
+          )}
+        </div>
+      )}
 
       <div className="settings-pricing">
         <div className="settings-pricing-heading">
@@ -201,17 +237,25 @@ function UsageSettings({ loadUsage }: Pick<SettingsModalProps, "loadUsage">) {
         <div className="settings-table-wrap">
           <table>
             <thead>
-              <tr><th scope="col">Model</th><th scope="col">Input</th><th scope="col">Output</th></tr>
+              <tr>
+                <th scope="col">Provider</th>
+                <th scope="col">Model</th>
+                <th scope="col">Input</th>
+                <th scope="col">Cached input</th>
+                <th scope="col">Output</th>
+              </tr>
             </thead>
             <tbody>
               {usage?.pricing.length ? usage.pricing.map((item) => (
-                <tr key={item.model}>
-                  <th scope="row">{item.model}</th>
-                  <td>{formatCurrency(item.inputPerMillion, item.currency)}</td>
-                  <td>{formatCurrency(item.outputPerMillion, item.currency)}</td>
+                <tr key={`${item.provider}:${item.model}`}>
+                  <td>{providerLabel(item.provider)}</td>
+                  <th scope="row">{item.label}</th>
+                  <td>{formatCurrency(item.inputUsdPerMillion)}</td>
+                  <td>{item.cachedInputUsdPerMillion == null ? "N/A" : formatCurrency(item.cachedInputUsdPerMillion)}</td>
+                  <td>{formatCurrency(item.outputUsdPerMillion)}</td>
                 </tr>
               )) : (
-                <tr><td colSpan={3} className="settings-table-empty">Pricing will appear with usage data.</td></tr>
+                <tr><td colSpan={5} className="settings-table-empty">Pricing will appear with usage data.</td></tr>
               )}
             </tbody>
           </table>

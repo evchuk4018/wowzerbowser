@@ -292,6 +292,7 @@
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   overflow: hidden;
+  margin-top: 18px;
   border: 1px solid var(--line);
   border-radius: 12px;
 }
@@ -321,6 +322,41 @@
   font-size: 16px;
   font-weight: 600;
   text-overflow: ellipsis;
+}
+
+.settings-summary small {
+  overflow: hidden;
+  color: #e8bd71;
+  font-size: 9px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-usage-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.settings-usage-flags > span {
+  display: inline-flex;
+  min-height: 25px;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 8px;
+  color: var(--quiet);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.settings-usage-flags i {
+  color: #e8bd71;
+  font-size: 12px;
+  font-style: normal;
 }
 
 .settings-chart {
@@ -376,7 +412,8 @@
   left: 50%;
   display: none;
   width: max-content;
-  max-width: 150px;
+  min-width: 190px;
+  max-width: 260px;
   transform: translateX(-50%);
   border: 1px solid #4a4b45;
   border-radius: 7px;
@@ -389,14 +426,67 @@
   text-align: left;
 }
 
-.settings-bar-tooltip span,
-.settings-bar-tooltip strong {
+.settings-tooltip-heading,
+.settings-tooltip-model,
+.settings-tooltip-flags {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-tooltip-heading {
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-tooltip-heading > span,
+.settings-tooltip-total {
+  color: var(--quiet);
+}
+
+.settings-tooltip-total {
   display: block;
+  padding: 5px 0 3px;
+}
+
+.settings-tooltip-model {
+  padding-top: 3px;
+}
+
+.settings-tooltip-model > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-tooltip-model > strong {
+  flex: 0 0 auto;
+}
+
+.settings-tooltip-flags {
+  justify-content: flex-start;
+  margin-top: 7px;
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+  color: #e8bd71;
 }
 
 .settings-bar-target:hover .settings-bar-tooltip,
 .settings-bar-target:focus-visible .settings-bar-tooltip {
   display: block;
+}
+
+.settings-bar-column:first-child .settings-bar-tooltip {
+  right: auto;
+  left: 0;
+  transform: none;
+}
+
+.settings-bar-column:last-child .settings-bar-tooltip {
+  right: 0;
+  left: auto;
+  transform: none;
 }
 
 .settings-bar-label {
@@ -457,7 +547,9 @@
   text-align: right;
 }
 
-.settings-pricing th:first-child {
+.settings-pricing th:first-child,
+.settings-pricing td:first-child,
+.settings-pricing th:nth-child(2) {
   text-align: left;
 }
 
