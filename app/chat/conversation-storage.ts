@@ -5,6 +5,7 @@ import type {
 } from "../../lib/chat-protocol";
 import type { ChatAssistantActivity } from "../../lib/chat-history";
 import {
+  deleteChatConversation,
   fetchChatConversation,
   fetchChatConversations,
   updateChatConversation,
@@ -333,6 +334,14 @@ export async function saveConversation(
   } catch {
     // Persistence is best effort at the UI boundary; the local reducer remains authoritative.
   }
+}
+
+export async function deleteConversation(
+  conversationId: string,
+  accessToken: string,
+): Promise<void> {
+  if (!conversationId) return;
+  await deleteChatConversation(conversationId, accessToken);
 }
 
 export async function saveConversationSelection(

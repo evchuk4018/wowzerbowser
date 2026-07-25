@@ -107,6 +107,11 @@
   overflow-y: auto;
 }
 
+.conversation-row {
+  position: relative;
+  flex: 0 0 auto;
+}
+
 .conversation-item {
   display: flex;
   align-items: center;
@@ -117,11 +122,53 @@
   border-radius: 8px;
   background: transparent;
   padding: 9px 10px;
+  padding-right: 38px;
   color: #c7c7c0;
   cursor: pointer;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.conversation-delete-button {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: background 150ms ease, color 150ms ease, opacity 150ms ease;
+}
+
+.conversation-row:hover .conversation-delete-button,
+.conversation-row:focus-within .conversation-delete-button {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.conversation-delete-button:hover,
+.conversation-delete-button:focus-visible {
+  outline: 0;
+  background: rgba(255, 255, 255, .1);
+  color: #ffaaa0;
+}
+
+.conversation-delete-button span {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.conversation-action-popover {
+  display: none;
 }
 
 .conversation-title {

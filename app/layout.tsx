@@ -8,6 +8,7 @@ import "./styles/auth.css";
 import "./styles/app-shell.css";
 import "./styles/sidebar.css";
 import "./styles/settings.css";
+import "./styles/delete-dialog.css";
 import "./styles/transcript.css";
 import "./styles/assistant-markdown.css";
 import "./styles/message-actions.css";

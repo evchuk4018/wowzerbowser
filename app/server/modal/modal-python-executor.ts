@@ -23,7 +23,7 @@ export const PYTHON_TOOL_LIMITS = {
   maxArtifactTotalBytes: 50 * 1024 * 1024,
 } as const;
 
-const APP_NAME = process.env.MODAL_APP_NAME?.trim() || "wowzerbowser-python";
+export const MODAL_APP_NAME = process.env.MODAL_APP_NAME?.trim() || "wowzerbowser-python";
 const WORKSPACE = "/workspace";
 const VENV_PYTHON = `${WORKSPACE}/.venv/bin/python`;
 
@@ -300,7 +300,7 @@ async function createWorkspaceSandbox(
   try {
     const [app, volume] = await waitForPythonDeadline(
       Promise.all([
-        client.apps.fromName(APP_NAME, { createIfMissing: true }),
+        client.apps.fromName(MODAL_APP_NAME, { createIfMissing: true }),
         client.volumes.fromName(conversationVolumeName(ownerId, conversationId), {
           createIfMissing: true,
         }),

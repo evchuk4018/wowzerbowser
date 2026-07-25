@@ -32,3 +32,12 @@ export async function saveChatModelPreference(
   });
   if (error) throw error;
 }
+
+export async function deleteChatModelPreference(ownerId: string, conversationId: string): Promise<void> {
+  const { error } = await getServerClient()
+    .from("chat_model_preferences")
+    .delete()
+    .eq("owner_id", ownerId)
+    .eq("conversation_id", conversationId);
+  if (error) throw error;
+}

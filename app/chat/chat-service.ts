@@ -45,6 +45,14 @@ export async function updateChatConversation(
   if (!response.ok) throw new Error(await readError(response));
 }
 
+export async function deleteChatConversation(conversationId: string, accessToken: string): Promise<void> {
+  const response = await fetch(`/api/chat/conversations/${encodeURIComponent(conversationId)}`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) throw new Error(await readError(response));
+}
+
 export async function fetchChatModels(accessToken: string): Promise<ChatModelInfo[]> {
   const response = await fetch("/api/chat/models", {
     headers: { authorization: `Bearer ${accessToken}` },

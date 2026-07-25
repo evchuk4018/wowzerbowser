@@ -35,6 +35,17 @@ function client() {
   return getServerClient();
 }
 
+export async function chatConversationExists(ownerId: string, conversationId: string): Promise<boolean> {
+  const { data, error } = await client()
+    .from("chat_conversations")
+    .select("conversation_id")
+    .eq("owner_id", ownerId)
+    .eq("conversation_id", conversationId)
+    .maybeSingle();
+  if (error) throw error;
+  return Boolean(data);
+}
+
 function arrayValue<T>(value: unknown): T[] {
   return Array.isArray(value) ? value as T[] : [];
 }
@@ -337,6 +348,15 @@ export async function updateChatConversationTitle(ownerId: string, conversationI
   const { error } = await client()
     .from("chat_conversations")
     .update({ title: title.trim().slice(0, 160), updated_at: new Date().toISOString() })
+    .eq("owner_id", ownerId)
+    .eq("conversation_id", conversationId);
+  if (error) throw error;
+}
+
+export async function deleteChatConversationRecord(ownerId: string, conversationId: string): Promise<void> {
+  const { error } = await client()
+    .from("chat_conversations")
+    .delete()
     .eq("owner_id", ownerId)
     .eq("conversation_id", conversationId);
   if (error) throw error;

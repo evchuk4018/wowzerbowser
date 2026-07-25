@@ -5,6 +5,7 @@ import {
   updateChatActiveVersion,
   updateChatConversationTitle,
 } from "../../../../server/chat/chat-history-store";
+import { deleteChatConversation } from "../../../../server/chat/chat-conversation-service";
 
 const idPattern = /^[a-zA-Z0-9_-]{1,128}$/;
 
@@ -56,5 +57,18 @@ export async function PATCH(request: Request, context: { params: Promise<{ conve
   } catch (error) {
     if (error instanceof SyntaxError) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
     return NextResponse.json({ error: "Chat history is unavailable." }, { status: 503 });
+  }
+}
+
+export async function DELETE(request: Request, context: { params: Promise<{ conversationId: string }> }) {
+  const owner = await ownerFor(request);
+  if (!owner) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const { conversationId } = await context.params;
+  if (!idPattern.test(conversationId)) return NextResponse.json({ error: "Conversation not found." }, { status: 404 });
+  try {
+    await deleteChatConversation(owner.id, conversationId);
+    return new NextResponse(null, { status: 204 });
+  } catch {
+    return NextResponse.json({ error: "The conversation could not be deleted." }, { status: 503 });
   }
 }

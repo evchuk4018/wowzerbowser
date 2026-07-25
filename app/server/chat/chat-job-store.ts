@@ -33,7 +33,13 @@ export async function appendChatJobEvent(ownerId: string, conversationId: string
     .insert({ owner_id: ownerId, conversation_id: conversationId, job_id: jobId, event })
     .select("sequence")
     .single();
-  if (error) throw error;
+  // A deleted conversation removes its job row while a worker may still be
+  // between cancellation polls. Treat the resulting foreign-key failure as
+  // a dropped event; the next cancellation poll stops the worker.
+  if (error) {
+    if (error.code === "23503") return;
+    throw error;
+  }
   await applyChatJobEvent(ownerId, conversationId, jobId, event, Number(data.sequence));
   await client.from("chat_jobs").update({ updated_at: new Date().toISOString() }).eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("job_id", jobId);
 }
@@ -72,7 +78,31 @@ export async function cancelChatJob(ownerId: string, conversationId: string, job
   return Boolean(data);
 }
 
+export async function cancelChatJobsForConversation(ownerId: string, conversationId: string): Promise<void> {
+  const now = new Date().toISOString();
+  const { data, error } = await table()
+    .from("chat_jobs")
+    .update({ status: "cancelled", completed_at: now, updated_at: now })
+    .eq("owner_id", ownerId)
+    .eq("conversation_id", conversationId)
+    .in("status", ["queued", "running"])
+    .select("job_id");
+  if (error) throw error;
+  await Promise.all(
+    (data ?? []).map((row) => finalizeChatJobMessage(ownerId, conversationId, row.job_id as string, "cancelled")),
+  );
+}
+
+export async function deleteChatJobsForConversation(ownerId: string, conversationId: string): Promise<void> {
+  const { error } = await table()
+    .from("chat_jobs")
+    .delete()
+    .eq("owner_id", ownerId)
+    .eq("conversation_id", conversationId);
+  if (error) throw error;
+}
+
 export async function isChatJobCancelled(ownerId: string, conversationId: string, jobId: string) {
   const { data } = await table().from("chat_jobs").select("status").eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("job_id", jobId).maybeSingle();
-  return data?.status === "cancelled";
+  return !data || data.status === "cancelled";
 }

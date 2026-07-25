@@ -28,6 +28,13 @@ export type SelectConversationAction = {
   conversationId: string;
 };
 
+export type RemoveConversationAction = {
+  type: "REMOVE_CONVERSATION";
+  conversationId: string;
+  /** A replacement is used when the deleted conversation was active. */
+  replacement?: ChatConversation;
+};
+
 export type UpdateTitleAction = {
   type: "UPDATE_TITLE";
   conversationId: string;
@@ -87,6 +94,7 @@ export type ConversationAction =
   | LoadConversationsAction
   | CreateConversationAction
   | SelectConversationAction
+  | RemoveConversationAction
   | UpdateTitleAction
   | AppendTurnAction
   | AppendTurnVersionAction
@@ -100,4 +108,3 @@ export const initialConversationState: ConversationState = {
   conversations: [],
   activeId: "",
 };
-

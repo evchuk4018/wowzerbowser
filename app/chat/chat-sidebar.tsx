@@ -2,18 +2,25 @@
 
 import type { RefObject } from "react";
 import type { Conversation } from "./conversation-types";
+import { ConversationActions } from "./conversation-actions";
 
 export type ChatSidebarProps = {
   sidebarOpen: boolean;
   conversations: Conversation[];
   activeConversationId: string;
   streamingByConversation: Record<string, string>;
+  openConversationActions: string | null;
   userEmail: string;
   settingsButtonRef: RefObject<HTMLButtonElement | null>;
   onToggleSidebar: () => void;
   onCloseSidebar: () => void;
   onStartNewChat: () => void;
   onSelectConversation: (conversationId: string) => void;
+  onOpenConversationActions: (conversationId: string) => void;
+  onCloseConversationActions: () => void;
+  onStartConversationLongPress: (conversationId: string, pointerType: string) => void;
+  onCancelConversationLongPress: () => void;
+  onDeleteConversation: (conversationId: string) => void;
   onOpenSettings: () => void;
   onSignOut: () => void | Promise<void>;
 };
@@ -24,12 +31,18 @@ export function ChatSidebar({
   conversations,
   activeConversationId,
   streamingByConversation,
+  openConversationActions,
   userEmail,
   settingsButtonRef,
   onToggleSidebar,
   onCloseSidebar,
   onStartNewChat,
   onSelectConversation,
+  onOpenConversationActions,
+  onCloseConversationActions,
+  onStartConversationLongPress,
+  onCancelConversationLongPress,
+  onDeleteConversation,
   onOpenSettings,
   onSignOut,
 }: ChatSidebarProps) {
@@ -79,22 +92,51 @@ export function ChatSidebar({
           {conversations.map((conversation) => {
             const conversationIsStreaming = Boolean(streamingByConversation[conversation.id]);
 
+            const actionsOpen = openConversationActions === conversation.id;
+
             return (
-              <button
-                key={conversation.id}
-                type="button"
-                className={`conversation-item ${conversation.id === activeConversationId ? "active" : ""}`}
-                onClick={() => onSelectConversation(conversation.id)}
-              >
-                <span className="conversation-title">{conversation.title}</span>
-                {conversationIsStreaming && (
-                  <span
-                    className="conversation-streaming-bulb"
-                    aria-label="Response in progress"
-                    title="Response in progress"
+              <div className={`conversation-row ${actionsOpen ? "conversation-actions-open" : ""}`} key={conversation.id}>
+                <button
+                  type="button"
+                  className={`conversation-item ${conversation.id === activeConversationId ? "active" : ""}`}
+                  aria-expanded={actionsOpen}
+                  onClick={() => {
+                    if (actionsOpen) return;
+                    onSelectConversation(conversation.id);
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    onOpenConversationActions(conversation.id);
+                  }}
+                  onPointerDown={(event) => onStartConversationLongPress(conversation.id, event.pointerType)}
+                  onPointerUp={onCancelConversationLongPress}
+                  onPointerCancel={onCancelConversationLongPress}
+                  onPointerMove={onCancelConversationLongPress}
+                >
+                  <span className="conversation-title">{conversation.title}</span>
+                  {conversationIsStreaming && (
+                    <span
+                      className="conversation-streaming-bulb"
+                      aria-label="Response in progress"
+                      title="Response in progress"
+                    />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  className="conversation-delete-button"
+                  aria-label={`Delete conversation: ${conversation.title}`}
+                  onClick={() => onDeleteConversation(conversation.id)}
+                >
+                  <span aria-hidden="true">×</span>
+                </button>
+                {actionsOpen && (
+                  <ConversationActions
+                    onDelete={() => onDeleteConversation(conversation.id)}
+                    onClose={onCloseConversationActions}
                   />
                 )}
-              </button>
+              </div>
             );
           })}
         </nav>

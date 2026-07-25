@@ -36,6 +36,91 @@
     transform: translateX(0);
   }
 
+  .conversation-delete-button {
+    display: none;
+  }
+
+  .conversation-row.conversation-actions-open {
+    z-index: 24;
+  }
+
+  .conversation-actions-open .conversation-item {
+    position: relative;
+    z-index: 25;
+    border: 1px solid #5b5d54;
+    background: #34352f;
+    box-shadow: 0 9px 25px rgba(0, 0, 0, .26);
+    transform: scale(1.04);
+    transform-origin: center left;
+    transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+  }
+
+  .conversation-action-popover {
+    position: relative;
+    z-index: 26;
+    display: grid;
+    width: calc(100% - 8px);
+    gap: 2px;
+    margin: -1px 0 7px 4px;
+    border: 1px solid rgba(255, 255, 255, .13);
+    border-radius: 16px;
+    background: rgba(31, 31, 33, .98);
+    padding: 9px;
+    box-shadow: 0 18px 38px rgba(0, 0, 0, .48);
+    animation: conversation-action-pop-in 150ms ease-out;
+  }
+
+  .conversation-action-meta {
+    padding: 3px 11px 7px;
+    color: #98989f;
+    font-size: 10px;
+    font-weight: 650;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+
+  .conversation-action-popover button {
+    display: flex;
+    min-height: 45px;
+    align-items: center;
+    gap: 12px;
+    border: 0;
+    border-radius: 11px;
+    background: transparent;
+    padding: 0 11px;
+    color: #f1f1f2;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 560;
+    text-align: left;
+  }
+
+  .conversation-action-popover button:hover:not(:disabled),
+  .conversation-action-popover button:focus-visible {
+    outline: 0;
+    background: rgba(255, 255, 255, .1);
+  }
+
+  .conversation-action-popover button:disabled {
+    color: var(--quiet);
+    cursor: default;
+    opacity: .55;
+  }
+
+  .conversation-action-icon {
+    display: inline-flex;
+    width: 21px;
+    justify-content: center;
+    color: #e6e6e8;
+    font-size: 21px;
+    font-weight: 400;
+  }
+
+  @keyframes conversation-action-pop-in {
+    from { opacity: 0; transform: translateY(5px) scale(.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
   .sidebar-scrim {
     position: fixed;
     z-index: 15;

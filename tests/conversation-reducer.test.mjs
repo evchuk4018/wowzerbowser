@@ -136,3 +136,37 @@ test("appends a new turn without changing the selected conversation", () => {
   assert.deepEqual(next.conversations[0].turns.map(({ id }) => id), ["turn-1", "turn-2"]);
 });
 
+test("removes conversations and replaces an active chat with a blank conversation", () => {
+  const state = conversationReducer(initialConversationState, {
+    type: "LOAD_CONVERSATIONS",
+    conversations: [conversation("conversation-1"), conversation("conversation-2")],
+  });
+  const replacement = { id: "conversation-blank", title: "New conversation", turns: [] };
+  const removed = conversationReducer(state, {
+    type: "REMOVE_CONVERSATION",
+    conversationId: "conversation-1",
+    replacement,
+  });
+
+  assert.equal(removed.activeId, "conversation-blank");
+  assert.deepEqual(removed.conversations.map(({ id }) => id), ["conversation-blank", "conversation-2"]);
+  assert.equal(removed.conversations[0].turns.length, 0);
+});
+
+test("removes a non-active conversation without changing the active chat", () => {
+  const state = conversationReducer(initialConversationState, {
+    type: "LOAD_CONVERSATIONS",
+    conversations: [conversation("conversation-1"), conversation("conversation-2")],
+  });
+  const selected = conversationReducer(state, {
+    type: "SELECT_CONVERSATION",
+    conversationId: "conversation-2",
+  });
+  const removed = conversationReducer(selected, {
+    type: "REMOVE_CONVERSATION",
+    conversationId: "conversation-1",
+  });
+
+  assert.equal(removed.activeId, "conversation-2");
+  assert.deepEqual(removed.conversations.map(({ id }) => id), ["conversation-2"]);
+});

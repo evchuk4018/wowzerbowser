@@ -105,6 +105,27 @@ export function conversationReducer(
           : { ...state, activeId: action.conversationId })
         : state;
 
+    case "REMOVE_CONVERSATION": {
+      const remaining = state.conversations.filter(({ id }) => id !== action.conversationId);
+      if (remaining.length === state.conversations.length) return state;
+      if (state.activeId !== action.conversationId) {
+        return { ...state, conversations: remaining };
+      }
+      if (action.replacement) {
+        return {
+          conversations: [
+            action.replacement,
+            ...remaining.filter(({ id }) => id !== action.replacement?.id),
+          ],
+          activeId: action.replacement.id,
+        };
+      }
+      return {
+        conversations: remaining,
+        activeId: remaining[0]?.id ?? "",
+      };
+    }
+
     case "UPDATE_TITLE":
       return updateConversation(state, action.conversationId, (conversation) =>
         conversation.title === action.title

@@ -16,8 +16,10 @@ import { ChatComposer } from "./chat-composer";
 import { ChatSidebar } from "./chat-sidebar";
 import { ChatTranscript } from "./chat-transcript";
 import { createConversation, DEFAULT_CHAT_SETTINGS } from "./conversation-defaults";
+import { DeleteConfirmationDialog } from "./delete-confirmation-dialog";
 import { conversationReducer, createInitialConversationState } from "./conversation-reducer";
 import {
+  deleteConversation,
   loadConversations,
   loadSettings,
   saveConversationSelection,
@@ -45,6 +47,10 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
   const [settings, setSettings] = useState(DEFAULT_CHAT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [openMenu, setOpenMenu] = useState<"model" | "thinking" | null>(null);
+  const [openConversationActions, setOpenConversationActions] = useState<string | null>(null);
+  const [deleteConversationId, setDeleteConversationId] = useState<string | null>(null);
+  const [deleteConversationError, setDeleteConversationError] = useState<string | null>(null);
+  const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
   const [editingTurnId, setEditingTurnId] = useState<string | null>(null);
   const [openMessageActions, setOpenMessageActions] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -53,6 +59,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const longPressTimerRef = useRef<number | null>(null);
+  const conversationLongPressTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -134,6 +141,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
     setDraft("");
     setEditingTurnId(null);
     setOpenMessageActions(null);
+    setOpenConversationActions(null);
     setSidebarOpen(false);
     requestAnimationFrame(() => textareaRef.current?.focus());
   }, [state.conversations]);
@@ -147,6 +155,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
     onBeforeSidebarOpen: () => {
       setOpenMenu(null);
       setOpenMessageActions(null);
+      setOpenConversationActions(null);
     },
   });
 
@@ -156,11 +165,15 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
       if (openMessageActions && (!(event.target instanceof Element) || !event.target.closest(".message-action-popover"))) {
         setOpenMessageActions(null);
       }
+      if (openConversationActions && (!(event.target instanceof Element) || !event.target.closest(".conversation-row"))) {
+        setOpenConversationActions(null);
+      }
     };
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
         setOpenMenu(null);
         setOpenMessageActions(null);
+        setOpenConversationActions(null);
       }
     };
     document.addEventListener("pointerdown", closeMenus);
@@ -169,7 +182,13 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
       document.removeEventListener("pointerdown", closeMenus);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [openMessageActions]);
+  }, [openConversationActions, openMessageActions]);
+
+  useEffect(() => () => {
+    if (conversationLongPressTimerRef.current !== null) {
+      window.clearTimeout(conversationLongPressTimerRef.current);
+    }
+  }, []);
 
   const latestTurn = active?.turns.at(-1);
   const latestMessage = latestTurn?.versions[latestTurn.activeVersion]?.assistant;
@@ -188,6 +207,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
 
   const selectConversation = (conversationId: string) => {
     dispatch({ type: "SELECT_CONVERSATION", conversationId });
+    setOpenConversationActions(null);
     setSidebarOpen(false);
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
@@ -228,6 +248,64 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
     window.clearTimeout(longPressTimerRef.current);
     longPressTimerRef.current = null;
   };
+
+  const cancelConversationLongPress = () => {
+    if (conversationLongPressTimerRef.current === null) return;
+    window.clearTimeout(conversationLongPressTimerRef.current);
+    conversationLongPressTimerRef.current = null;
+  };
+
+  const startConversationLongPress = (conversationId: string, pointerType: string) => {
+    cancelConversationLongPress();
+    if (pointerType !== "touch") return;
+    conversationLongPressTimerRef.current = window.setTimeout(() => {
+      setOpenConversationActions(conversationId);
+      conversationLongPressTimerRef.current = null;
+    }, 500);
+  };
+
+  const requestDeleteConversation = (conversationId: string) => {
+    if (deletingConversationId) return;
+    setOpenConversationActions(null);
+    setDeleteConversationError(null);
+    setDeleteConversationId(conversationId);
+  };
+
+  const confirmDeleteConversation = async () => {
+    const conversationId = deleteConversationId;
+    if (!conversationId || deletingConversationId) return;
+    const conversation = state.conversations.find(({ id }) => id === conversationId);
+    if (!conversation) {
+      setDeleteConversationId(null);
+      return;
+    }
+
+    setDeletingConversationId(conversationId);
+    setDeleteConversationError(null);
+    try {
+      await generation.stopStreaming(conversationId);
+      const token = await getAccessToken();
+      if (!token) throw new Error("Your session expired. Please sign in again.");
+      await deleteConversation(conversationId, token);
+      const replacement = conversationId === state.activeId ? createConversation() : undefined;
+      dispatch({ type: "REMOVE_CONVERSATION", conversationId, replacement });
+      setRecoveredStreaming((current) => {
+        if (!(conversationId in current)) return current;
+        const next = { ...current };
+        delete next[conversationId];
+        return next;
+      });
+      if (conversationId === state.activeId) {
+        setEditingTurnId(null);
+        setDraft("");
+      }
+      setDeleteConversationId(null);
+    } catch (error) {
+      setDeleteConversationError(error instanceof Error ? error.message : "The conversation could not be deleted.");
+    } finally {
+      setDeletingConversationId(null);
+    }
+  };
   const startLongPress = (turnId: string, pointerType: string) => {
     cancelLongPress();
     if (pointerType !== "touch") return;
@@ -259,15 +337,39 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
         conversations={state.conversations}
         activeConversationId={state.activeId}
         streamingByConversation={streamingByConversation}
+        openConversationActions={openConversationActions}
         userEmail={user.email}
         settingsButtonRef={settingsButtonRef}
         onToggleSidebar={() => setSidebarOpen((open) => !open)}
         onCloseSidebar={() => setSidebarOpen(false)}
         onStartNewChat={startNewChat}
         onSelectConversation={selectConversation}
+        onOpenConversationActions={setOpenConversationActions}
+        onCloseConversationActions={() => setOpenConversationActions(null)}
+        onStartConversationLongPress={startConversationLongPress}
+        onCancelConversationLongPress={cancelConversationLongPress}
+        onDeleteConversation={requestDeleteConversation}
         onOpenSettings={() => setSettingsOpen(true)}
         onSignOut={onSignOut}
       />
+      {deleteConversationId && (() => {
+        const conversation = state.conversations.find(({ id }) => id === deleteConversationId);
+        if (!conversation) return null;
+        return (
+          <DeleteConfirmationDialog
+            conversationTitle={conversation.title}
+            pending={deletingConversationId === deleteConversationId}
+            error={deleteConversationError}
+            onCancel={() => {
+              if (!deletingConversationId) {
+                setDeleteConversationId(null);
+                setDeleteConversationError(null);
+              }
+            }}
+            onConfirm={() => void confirmDeleteConversation()}
+          />
+        );
+      })()}
       {settingsOpen && (
         <SettingsModal
           settings={settings}
