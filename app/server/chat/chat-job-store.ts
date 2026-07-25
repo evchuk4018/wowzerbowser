@@ -1,9 +1,12 @@
 import "server-only";
 import type { ChatJobResumeResponse, ChatJobStatus, ChatRequest, ChatStreamEvent, ChatUsage } from "../../../lib/chat-protocol";
 import { getServerClient } from "../../auth/supabase-server-adapter";
-import { applyChatJobEvent, ensureChatSubmission, finalizeChatJobMessage } from "./chat-history-store";
+import { createAsyncBatchWriter, type AsyncBatchWriter } from "./chat-event-writer";
+import { ensureChatSubmission, finalizeChatJobMessage } from "./chat-history-store";
 
 const table = () => getServerClient();
+const CHAT_EVENT_BATCH_SIZE = 32;
+const CHAT_EVENT_FLUSH_INTERVAL_MS = 100;
 
 export async function createOrGetChatJob(ownerId: string, request: ChatRequest) {
   const conversationId = request.conversationId!;
@@ -26,13 +29,17 @@ export async function claimChatJob(ownerId: string, conversationId: string, jobI
   return (data?.request as ChatRequest | undefined) ?? null;
 }
 
-export async function appendChatJobEvent(ownerId: string, conversationId: string, jobId: string, event: ChatStreamEvent) {
+async function appendChatJobEvents(
+  ownerId: string,
+  conversationId: string,
+  jobId: string,
+  events: readonly ChatStreamEvent[],
+): Promise<void> {
+  if (!events.length) return;
   const client = table();
-  const { data, error } = await client
-    .from("chat_job_events")
-    .insert({ owner_id: ownerId, conversation_id: conversationId, job_id: jobId, event })
-    .select("sequence")
-    .single();
+  const { error } = await client.from("chat_job_events").insert(
+    events.map((event) => ({ owner_id: ownerId, conversation_id: conversationId, job_id: jobId, event })),
+  );
   // A deleted conversation removes its job row while a worker may still be
   // between cancellation polls. Treat the resulting foreign-key failure as
   // a dropped event; the next cancellation poll stops the worker.
@@ -40,8 +47,24 @@ export async function appendChatJobEvent(ownerId: string, conversationId: string
     if (error.code === "23503") return;
     throw error;
   }
-  await applyChatJobEvent(ownerId, conversationId, jobId, event, Number(data.sequence));
-  await client.from("chat_jobs").update({ updated_at: new Date().toISOString() }).eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("job_id", jobId);
+  const { error: updateError } = await client
+    .from("chat_jobs")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("owner_id", ownerId)
+    .eq("conversation_id", conversationId)
+    .eq("job_id", jobId);
+  if (updateError) throw updateError;
+}
+
+export function createChatJobEventWriter(
+  ownerId: string,
+  conversationId: string,
+  jobId: string,
+): AsyncBatchWriter<ChatStreamEvent> {
+  return createAsyncBatchWriter(
+    (events) => appendChatJobEvents(ownerId, conversationId, jobId, events),
+    { batchSize: CHAT_EVENT_BATCH_SIZE, flushIntervalMs: CHAT_EVENT_FLUSH_INTERVAL_MS },
+  );
 }
 
 export async function finishChatJob(ownerId: string, conversationId: string, jobId: string, status: ChatJobStatus, values: { error?: string | null; usage?: ChatUsage | null; finalOutput?: string | null } = {}) {

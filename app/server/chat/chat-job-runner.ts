@@ -2,7 +2,7 @@ import "server-only";
 import type { ChatStreamEvent, ChatUsage } from "../../../lib/chat-protocol";
 import { generateChatResponse } from "../../chat/chat-server-service";
 import { recordUsage } from "../usage/usage-store";
-import { appendChatJobEvent, claimChatJob, finishChatJob, isChatJobCancelled } from "./chat-job-store";
+import { claimChatJob, createChatJobEventWriter, finishChatJob, isChatJobCancelled } from "./chat-job-store";
 
 /** Runs from Next's server-owned `after` lifecycle, never from the request signal. */
 export async function runChatJob(ownerId: string, conversationId: string, jobId: string) {
@@ -10,6 +10,7 @@ export async function runChatJob(ownerId: string, conversationId: string, jobId:
   if (!request) return; // another route instance already claimed this idempotent job
   const controller = new AbortController();
   const poll = setInterval(() => void isChatJobCancelled(ownerId, conversationId, jobId).then((cancelled) => cancelled && controller.abort()), 750);
+  const eventWriter = createChatJobEventWriter(ownerId, conversationId, jobId);
   let output = "";
   let usage: ChatUsage | null = null;
   let generationError: string | null = null;
@@ -19,7 +20,7 @@ export async function runChatJob(ownerId: string, conversationId: string, jobId:
       ownerId,
       controller.signal,
       async (event: ChatStreamEvent) => {
-        await appendChatJobEvent(ownerId, conversationId, jobId, event);
+        eventWriter.enqueue(event);
         if (event.type === "content") output += event.delta;
         if (event.type === "done") usage = event.usage;
         if (event.type === "error") generationError = event.message;
@@ -37,12 +38,15 @@ export async function runChatJob(ownerId: string, conversationId: string, jobId:
         });
       },
     );
+    await eventWriter.drain();
     if (!controller.signal.aborted) {
       await finishChatJob(ownerId, conversationId, jobId, generationError ? "failed" : "completed", { error: generationError, usage, finalOutput: output });
     }
   } catch (error) {
+    await eventWriter.drain().catch(() => undefined);
     if (!controller.signal.aborted) await finishChatJob(ownerId, conversationId, jobId, "failed", { error: error instanceof Error ? error.message : "Generation failed.", finalOutput: output });
   } finally {
+    await eventWriter.drain().catch(() => undefined);
     clearInterval(poll);
   }
 }

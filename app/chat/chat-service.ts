@@ -8,6 +8,8 @@ import type {
 } from "../../lib/chat-protocol";
 import type { ChatConversation, ChatConversationSummary } from "../../lib/chat-history";
 
+const LIVE_CHAT_POLL_INTERVAL_MS = 100;
+
 async function readError(response: Response): Promise<string> {
   const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
   return typeof body?.error === "string" ? body.error : `Request failed (${response.status}).`;
@@ -107,7 +109,7 @@ export async function* streamChatResponse(
     }
     if (["completed", "failed", "cancelled"].includes(snapshot.status)) return;
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(resolve, 750);
+      const timer = setTimeout(resolve, LIVE_CHAT_POLL_INTERVAL_MS);
       signal?.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
     });
   }

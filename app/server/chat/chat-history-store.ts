@@ -176,34 +176,6 @@ export async function ensureChatSubmission(ownerId: string, request: ChatRequest
   if (conversationError) throw conversationError;
 }
 
-export async function applyChatJobEvent(
-  ownerId: string,
-  conversationId: string,
-  jobId: string,
-  event: ChatStreamEvent,
-  sequence: number,
-): Promise<void> {
-  const { data, error } = await client()
-    .from("chat_messages")
-    .select("*")
-    .eq("owner_id", ownerId)
-    .eq("conversation_id", conversationId)
-    .eq("job_id", jobId)
-    .eq("role", "assistant")
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) return;
-  const next = applyChatStreamEvent(messageFromRow(data as MessageRow), event, sequence);
-  const { error: updateError } = await client()
-    .from("chat_messages")
-    .update(messageRow(ownerId, conversationId, data.turn_id as string, data.version_id as string, next))
-    .eq("owner_id", ownerId)
-    .eq("conversation_id", conversationId)
-    .eq("message_id", next.id);
-  if (updateError) throw updateError;
-  await touchConversation(ownerId, conversationId);
-}
-
 export async function finalizeChatJobMessage(
   ownerId: string,
   conversationId: string,

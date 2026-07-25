@@ -5,7 +5,7 @@ import test from "node:test";
 const source = async (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("chat submission is durable and idempotent", async () => {
-  const [sql, historySql, store, historyStore, route] = await Promise.all([source("supabase/migrations/20260724000000_chat_jobs.sql"), source("supabase/migrations/20260724020000_chat_history.sql"), source("app/server/chat/chat-job-store.ts"), source("app/server/chat/chat-history-store.ts"), source("app/api/chat/route.ts")]);
+  const [sql, historySql, store, historyStore, runner, route] = await Promise.all([source("supabase/migrations/20260724000000_chat_jobs.sql"), source("supabase/migrations/20260724020000_chat_history.sql"), source("app/server/chat/chat-job-store.ts"), source("app/server/chat/chat-history-store.ts"), source("app/server/chat/chat-job-runner.ts"), source("app/api/chat/route.ts")]);
   assert.match(sql, /unique \(owner_id, conversation_id, idempotency_key\)/);
   assert.match(sql, /chat_job_events/);
   assert.match(historySql, /chat_conversations/);
@@ -15,9 +15,14 @@ test("chat submission is durable and idempotent", async () => {
   assert.match(historySql, /alter table public\.chat_messages enable row level security/);
   assert.match(store, /error\.code !== "23505"/);
   assert.match(store, /ensureChatSubmission/);
-  assert.match(store, /applyChatJobEvent/);
+  assert.match(store, /createChatJobEventWriter/);
+  assert.match(store, /CHAT_EVENT_BATCH_SIZE = 32/);
+  assert.match(store, /CHAT_EVENT_FLUSH_INTERVAL_MS = 100/);
+  assert.doesNotMatch(store, /applyChatJobEvent/);
   assert.match(historyStore, /applyChatStreamEvent/);
   assert.match(historyStore, /finalizeChatHistoryMessage/);
+  assert.match(runner, /eventWriter\.enqueue/);
+  assert.match(runner, /await eventWriter\.drain\(\)/);
   assert.match(store, /eq\("status", "queued"\)/);
   assert.match(route, /after\(\(\) => runChatJob/);
   assert.doesNotMatch(route, /request\.signal/);
@@ -30,6 +35,16 @@ test("replay is ordered, exclusive, and owner isolated", async () => {
   const endpoint = await source("app/api/chat/jobs/[conversationId]/[jobId]/route.ts");
   assert.match(endpoint, /authorizeOwnerSession/);
   assert.match(endpoint, /getChatJob\(user\.id/);
+});
+
+test("live delivery polls faster than background recovery", async () => {
+  const [service, recovery] = await Promise.all([
+    source("app/chat/chat-service.ts"),
+    source("app/chat/use-persisted-job-recovery.ts"),
+  ]);
+  assert.match(service, /LIVE_CHAT_POLL_INTERVAL_MS = 100/);
+  assert.match(service, /setTimeout\(resolve, LIVE_CHAT_POLL_INTERVAL_MS\)/);
+  assert.match(recovery, /pollIntervalMs = 750/);
 });
 
 test("disconnect is delivery-only while explicit stop calls durable cancellation", async () => {
