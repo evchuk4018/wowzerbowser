@@ -376,6 +376,7 @@ test("keeps mobile prompt actions prominent and ephemeral", async () => {
   assert.match(styles, /\.message-actions-open \.message\.user \.message-bubble[\s\S]*?transform: scale\(1\.06\)/);
   assert.match(styles, /\.message-action-popover[\s\S]*?top: calc\(100% - 1px\)/);
   assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.message\.user \.message-bubble \{[\s\S]*?user-select: none;[\s\S]*?-webkit-user-select: none;/);
+  assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.conversation-item,[\s\S]*?\.conversation-title \{[\s\S]*?user-select: none;[\s\S]*?-webkit-user-select: none;/);
 });
 
 test("validates and preserves ordered assistant tool rounds", () => {

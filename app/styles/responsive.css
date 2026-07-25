@@ -8,6 +8,12 @@
     -webkit-user-select: none;
   }
 
+  .conversation-item,
+  .conversation-title {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
   .auth-card {
     padding: 30px 24px;
   }
