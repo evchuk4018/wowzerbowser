@@ -40,6 +40,8 @@ export type DeepSeekRoundOptions = {
   replayRounds?: DeepSeekMessageBuildOptions["replayRounds"];
   systemInstructions?: DeepSeekMessageBuildOptions["systemInstructions"];
   tools?: readonly DeepSeekToolDefinition[];
+  /** Reports whether the provider accepted the request before body parsing. */
+  onResponse?: (accepted: boolean) => void;
 };
 
 type DeepSeekModelResponse = { data?: Array<{ id?: unknown }> };
@@ -55,6 +57,7 @@ type DeepSeekChunk = {
     prompt_tokens?: unknown;
     completion_tokens?: unknown;
     total_tokens?: unknown;
+    prompt_tokens_details?: { cached_tokens?: unknown };
     completion_tokens_details?: { reasoning_tokens?: unknown };
   } | null;
 };
@@ -73,6 +76,7 @@ function usageFromChunk(value: DeepSeekChunk["usage"]): ChatUsage | null {
     promptTokens: numberOrUndefined(value.prompt_tokens),
     completionTokens: numberOrUndefined(value.completion_tokens),
     totalTokens: numberOrUndefined(value.total_tokens),
+    cachedPromptTokens: numberOrUndefined(value.prompt_tokens_details?.cached_tokens),
     reasoningTokens: numberOrUndefined(value.completion_tokens_details?.reasoning_tokens),
   };
   return Object.values(usage).some((item) => item !== undefined) ? usage : null;
@@ -194,12 +198,14 @@ export async function* streamDeepSeekChatRound(
     }),
   });
   if (!response.ok) {
+    options.onResponse?.(false);
     const providerMessage = await response.text().catch(() => "");
     throw new DeepSeekError(
       providerMessage.slice(0, 240) || `DeepSeek request failed (${response.status}).`,
       response.status >= 400 && response.status < 500 ? response.status : 502,
     );
   }
+  options.onResponse?.(true);
   yield* parseSse(response);
 }
 

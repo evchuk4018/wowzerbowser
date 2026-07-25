@@ -1,7 +1,8 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import type { ChatAssistantRound, ChatRequest, ChatStreamEvent, ChatToolCall, ChatToolResult } from "../../lib/chat-protocol";
+import type { ChatAssistantRound, ChatRequest, ChatStreamEvent, ChatToolCall, ChatToolResult, ChatUsage } from "../../lib/chat-protocol";
+import { estimateUsageFromText } from "../../lib/usage-pricing";
 import { streamDeepSeekChatRound } from "../providers/deepseek/deepseek-adapter";
 import { availableChatTools, executePythonTool } from "../server/agent/python-tool";
 import { runPythonInstructionsFor } from "../server/agent/python-tool-instructions";
@@ -12,6 +13,12 @@ import { latestNonNullUsage, sumRoundUsage } from "./chat-usage";
 
 const MAX_RESPONSE_MS = 240_000;
 const MAX_TOOL_CALLS = 6;
+
+export type ChatRoundUsage = {
+  round: number;
+  usage: ChatUsage | null;
+  estimatedUsage: ChatUsage;
+};
 
 function stableConversationId(request: ChatRequest): string {
   if (request.conversationId) return request.conversationId;
@@ -26,6 +33,7 @@ export async function generateChatResponse(
   ownerId: string,
   signal: AbortSignal,
   persistEvent: (event: ChatStreamEvent) => Promise<void>,
+  persistUsage?: (usage: ChatRoundUsage) => Promise<void>,
 ): Promise<void> {
   const responseDeadlineAt = Date.now() + MAX_RESPONSE_MS;
   const responseId = chatRequest.jobId;
@@ -65,27 +73,51 @@ export async function generateChatResponse(
           const contentParts: string[] = [];
           const calls: ChatToolCall[] = [];
           const roundUsageIndex = roundUsages.push(null) - 1;
-          for await (const event of streamDeepSeekChatRound(
-            chatRequest,
-            {
-              replayRounds,
-              systemInstructions,
-              ...(toolDefinitions.length && canCallTools ? { tools: toolDefinitions } : {}),
-            },
-            roundSignal,
-          )) {
-            if (event.type === "reasoning") {
-              reasoningParts.push(event.delta);
-              await enqueue(event);
-            } else if (event.type === "content") {
-              contentParts.push(event.delta);
-              await enqueue(event);
-            } else if (event.type === "tool_call") {
-              calls.push(event.call);
-            } else if (event.type === "done") {
-              roundUsages[roundUsageIndex] = latestNonNullUsage(roundUsages[roundUsageIndex], event.usage);
-            } else if (event.type === "error") {
-              await enqueue(event);
+          let providerAccepted = false;
+          try {
+            for await (const event of streamDeepSeekChatRound(
+              chatRequest,
+              {
+                replayRounds,
+                systemInstructions,
+                ...(toolDefinitions.length && canCallTools ? { tools: toolDefinitions } : {}),
+                onResponse: (accepted) => {
+                  providerAccepted = accepted;
+                },
+              },
+              roundSignal,
+            )) {
+              if (event.type === "reasoning") {
+                reasoningParts.push(event.delta);
+                await enqueue(event);
+              } else if (event.type === "content") {
+                contentParts.push(event.delta);
+                await enqueue(event);
+              } else if (event.type === "tool_call") {
+                calls.push(event.call);
+              } else if (event.type === "done") {
+                roundUsages[roundUsageIndex] = latestNonNullUsage(roundUsages[roundUsageIndex], event.usage);
+              } else if (event.type === "error") {
+                await enqueue(event);
+              }
+            }
+          } finally {
+            if (providerAccepted) {
+              await persistUsage?.({
+                round,
+                usage: roundUsages[roundUsageIndex],
+                estimatedUsage: estimateUsageFromText(
+                  JSON.stringify({
+                    messages: chatRequest.messages,
+                    systemPrompt: chatRequest.systemPrompt,
+                    userPresence: chatRequest.userPresence,
+                    replayRounds,
+                    systemInstructions,
+                    tools: toolDefinitions,
+                  }),
+                  `${reasoningParts.join("")} ${contentParts.join("")} ${calls.map((call) => call.arguments).join(" ")}`,
+                ),
+              });
             }
           }
 

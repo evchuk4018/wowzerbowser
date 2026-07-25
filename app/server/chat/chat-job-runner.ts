@@ -1,6 +1,7 @@
 import "server-only";
 import type { ChatStreamEvent, ChatUsage } from "../../../lib/chat-protocol";
 import { generateChatResponse } from "../../chat/chat-server-service";
+import { recordUsage } from "../usage/usage-store";
 import { appendChatJobEvent, claimChatJob, finishChatJob, isChatJobCancelled } from "./chat-job-store";
 
 /** Runs from Next's server-owned `after` lifecycle, never from the request signal. */
@@ -13,12 +14,29 @@ export async function runChatJob(ownerId: string, conversationId: string, jobId:
   let usage: ChatUsage | null = null;
   let generationError: string | null = null;
   try {
-    await generateChatResponse(request, ownerId, controller.signal, async (event: ChatStreamEvent) => {
-      await appendChatJobEvent(ownerId, conversationId, jobId, event);
-      if (event.type === "content") output += event.delta;
-      if (event.type === "done") usage = event.usage;
-      if (event.type === "error") generationError = event.message;
-    });
+    await generateChatResponse(
+      request,
+      ownerId,
+      controller.signal,
+      async (event: ChatStreamEvent) => {
+        await appendChatJobEvent(ownerId, conversationId, jobId, event);
+        if (event.type === "content") output += event.delta;
+        if (event.type === "done") usage = event.usage;
+        if (event.type === "error") generationError = event.message;
+      },
+      async ({ round, usage: providerUsage, estimatedUsage }) => {
+        await recordUsage({
+          ownerId,
+          provider: "deepseek",
+          model: request.model,
+          requestKind: "chat",
+          requestId: jobId,
+          round,
+          usage: providerUsage ?? estimatedUsage,
+          source: providerUsage ? "exact" : "estimated",
+        });
+      },
+    );
     if (!controller.signal.aborted) {
       await finishChatJob(ownerId, conversationId, jobId, generationError ? "failed" : "completed", { error: generationError, usage, finalOutput: output });
     }
