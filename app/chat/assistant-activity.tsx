@@ -12,6 +12,7 @@ import type {
   WebActivity,
 } from "./assistant-activity-types";
 import { fetchChatArtifact } from "./chat-service";
+import { formatDuration } from "./format-duration";
 
 export type {
   AssistantActivity,
@@ -19,11 +20,6 @@ export type {
   ReasoningActivity,
   WebActivity,
 } from "./assistant-activity-types";
-
-function formatDuration(milliseconds: number): string {
-  if (milliseconds < 1000) return `${Math.max(0, Math.round(milliseconds))}ms`;
-  return `${(milliseconds / 1000).toFixed(1)}s`;
-}
 
 function useLiveDuration(startedAt?: number, running = false) {
   const [now, setNow] = useState(() => Date.now());

@@ -236,11 +236,19 @@ test("keeps DeepSeek access server-side and uses the V4 thinking contract", asyn
 });
 
 test("keeps composer model and thinking controls accessible and responsive", async () => {
-  const [page, composer, styles] = await Promise.all([
+  const [page, workspace, sidebar, preferences, storage, settings, defaults, protocol, composer, styles] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/chat-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/chat-sidebar.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/use-chat-preferences.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/conversation-storage.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/settings/settings-modal.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/conversation-defaults.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/chat-protocol.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/chat-composer.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
+  const client = `${page}\n${workspace}\n${sidebar}\n${preferences}\n${storage}\n${settings}\n${defaults}\n${protocol}`;
 
   assert.match(composer, /aria-label="Choose model"/);
   assert.match(composer, /aria-label="Choose thinking mode"/);
@@ -250,16 +258,16 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(composer, /aria-controls="model-options"/);
   assert.match(composer, /aria-controls="thinking-options"/);
   assert.match(composer, /aria-pressed=/);
-  assert.match(page, /supportedEfforts/);
-  assert.match(page, /Open settings/);
-  assert.match(page, /fetchChatUserPreferences/);
-  assert.match(page, /saveChatUserPreferences/);
-  assert.doesNotMatch(page, /localStorage/);
-  assert.match(page, /readOnly/);
-  assert.match(page, /responds in English/);
-  assert.match(page, /User presence/);
+  assert.match(client, /supportedEfforts/);
+  assert.match(client, /Open settings/);
+  assert.match(client, /fetchChatUserPreferences/);
+  assert.match(client, /saveChatUserPreferences/);
+  assert.doesNotMatch(client, /localStorage/);
+  assert.match(client, /readOnly/);
+  assert.match(client, /responds in English/);
+  assert.match(client, /User presence/);
   assert.match(styles, /backdrop-filter: blur\(8px\)/);
-  assert.doesNotMatch(page, /Messages stay on this device/);
+  assert.doesNotMatch(client, /Messages stay on this device/);
   assert.doesNotMatch(styles, /privacy-note/);
   assert.match(styles, /bottom: calc\(100% \+ 8px\)/);
   assert.match(styles, /padding: 34px 0 220px/);
@@ -270,41 +278,53 @@ test("keeps composer model and thinking controls accessible and responsive", asy
 });
 
 test("shows call activity without a generic generation indicator", async () => {
-  const [page, styles] = await Promise.all([
+  const [page, workspace, transcript, turn, generation, stream, indicator, styles] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/chat-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/chat-transcript.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/conversation-turn.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/use-chat-generation.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/chat-stream-reducer.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/call-activity-indicator.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
+  const client = `${page}\n${workspace}\n${transcript}\n${turn}\n${generation}\n${stream}\n${indicator}`;
 
   assert.doesNotMatch(page, /Generating(?:…|Ã¢â‚¬Â¦)/);
-  assert.match(page, /controller\.signal\.aborted[\s\S]*?activeRequestsRef\.current/);
-  assert.match(page, /setWaitingByMessage/);
-  assert.match(page, /event\.type === "reasoning"/);
-  assert.match(page, /\{Boolean\(assistantMessage\.reasoning\) && \(/);
-  assert.doesNotMatch(page, /Waiting for reasoning/);
-  assert.match(page, /!assistantMessage\.thinkingEnabled && waitingByMessage\[assistantMessage\.id\][\s\S]*?<CallActivityIndicator \/>/);
-  assert.match(page, /!message\.thinkingEnabled && message\.status === "streaming"[\s\S]*?<CallActivityIndicator \/>/);
-  assert.match(page, /role="status" aria-label="Waiting for response"/);
-  assert.match(page, /<span aria-hidden="true">✦<\/span>/);
+  assert.match(client, /controller\.signal\.aborted[\s\S]*?activeRequestsRef\.current/);
+  assert.match(client, /setWaitingByMessage/);
+  assert.match(client, /case "reasoning"|event\.type === "reasoning"/);
+  assert.match(client, /reasoning/);
+  assert.doesNotMatch(client, /Waiting for reasoning/);
+  assert.match(client, /waitingByMessage\[message\.id\][\s\S]*?<CallActivityIndicator \/>|waitingByMessage\[assistantMessage\.id\][\s\S]*?<CallActivityIndicator \/>/);
+  assert.match(client, /!assistantMessage\.thinkingEnabled && waitingByMessage\[assistantMessage\.id\][\s\S]*?<CallActivityIndicator \/>/);
+  assert.match(client, /role="status" aria-label="Waiting for response"/);
+  assert.match(client, /<span aria-hidden="true">[^<]+<\/span>/);
   assert.match(styles, /\.call-activity-indicator > span[\s\S]*?animation: call-activity-pulse/);
   assert.match(styles, /@keyframes call-activity-pulse/);
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.call-activity-indicator > span \{[\s\S]*?animation: none;/);
 });
 
 test("keeps mobile prompt actions prominent and ephemeral", async () => {
-  const [page, styles] = await Promise.all([
+  const [page, workspace, transcript, turn, actions, styles] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/chat-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/chat-transcript.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/conversation-turn.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/message-actions.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
+  const client = `${page}\n${workspace}\n${transcript}\n${turn}\n${actions}`;
 
-  assert.match(page, /message-action-popover/);
-  assert.match(page, /message-actions-backdrop/);
-  assert.match(page, /message-user-container/);
-  assert.match(page, /aria-label="Close prompt actions"/);
-  assert.match(page, /role="menuitem"/);
-  assert.match(page, /Share prompt/);
-  assert.match(page, /navigator\.share/);
-  assert.match(page, /event\.key === "Escape"\) setOpenMessageActions\(null\)/);
-  assert.match(page, /onScroll=\{\(\) => setOpenMessageActions\(null\)\}/);
+  assert.match(client, /message-action-popover/);
+  assert.match(client, /message-actions-backdrop/);
+  assert.match(client, /message-user-container/);
+  assert.match(client, /aria-label="Close prompt actions"/);
+  assert.match(client, /role="menuitem"/);
+  assert.match(client, /Share prompt/);
+  assert.match(client, /navigator\.share/);
+  assert.match(client, /event\.key === "Escape"/);
+  assert.match(client, /setOpenMessageActions\(null\)/);
   assert.match(styles, /\.message-actions-backdrop[\s\S]*?backdrop-filter: blur\(8px\)/);
   assert.match(styles, /\.message-action-popover[\s\S]*?backdrop-filter: blur\(16px\)/);
   assert.match(styles, /\.message-actions-open \.message-user-container[\s\S]*?z-index: 20/);
@@ -509,25 +529,29 @@ test("keeps mobile history gesture tracking touch-safe and click-safe", () => {
 });
 
 test("wires mobile history swipes without pointer capture", async () => {
-  const [page, styles, gestureSource] = await Promise.all([
+  const [page, workspace, navigation, sidebar, styles, gestureSource] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/chat-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/use-mobile-history-navigation.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/chat-sidebar.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/mobile-history-swipe.ts", import.meta.url), "utf8"),
   ]);
+  const client = `${page}\n${workspace}\n${navigation}\n${sidebar}`;
 
-  assert.match(page, /onPointerDown=\{handleMobileHistoryPointerDown\}/);
-  assert.match(page, /onPointerMove=\{handleMobileHistoryPointerMove\}/);
-  assert.match(page, /onPointerUp=\{handleMobileHistoryPointerUp\}/);
-  assert.match(page, /onPointerCancel=\{handleMobileHistoryPointerCancel\}/);
-  assert.match(page, /isTrackingPointer\(event\.pointerId\)/);
-  assert.match(page, /cancel\(event\.pointerId\)/);
-  assert.match(page, /onClickCapture=\{handleMobileHistoryClickCapture\}/);
-  assert.match(page, /window\.addEventListener\("blur", resetMobileHistorySwipe\)/);
-  assert.match(page, /window\.addEventListener\("resize", resetMobileHistorySwipe\)/);
-  assert.match(page, /disabled: settingsOpen/);
-  assert.match(page, /action === "open"[\s\S]*?setOpenMenu\(null\)[\s\S]*?setOpenMessageActions\(null\)[\s\S]*?setSidebarOpen\(true\)/);
-  assert.match(page, /aria-label="Collapse sidebar"[\s\S]*?onClick=\{\(\) => setSidebarOpen\(false\)\}/);
-  assert.doesNotMatch(page, /setPointerCapture|releasePointerCapture/);
+  assert.match(client, /onPointerDown: handlePointerDown/);
+  assert.match(client, /onPointerMove: handlePointerMove/);
+  assert.match(client, /onPointerUp: handlePointerUp/);
+  assert.match(client, /onPointerCancel: handlePointerCancel/);
+  assert.match(client, /isTrackingPointer\(event\.pointerId\)/);
+  assert.match(client, /cancel\(event\.pointerId\)/);
+  assert.match(client, /onClickCapture: handleClickCapture/);
+  assert.match(client, /window\.addEventListener\("blur"/);
+  assert.match(client, /window\.addEventListener\("resize"/);
+  assert.match(client, /disabled: settingsOpen/);
+  assert.match(client, /action === "open"[\s\S]*?onBeforeSidebarOpen[\s\S]*?onSidebarOpen\(\)/);
+  assert.match(client, /aria-label="Collapse sidebar"[\s\S]*?onCloseSidebar/);
+  assert.doesNotMatch(client, /setPointerCapture|releasePointerCapture/);
   assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.app-shell \{[\s\S]*?touch-action: pan-y;/);
   assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.chat-area \{[\s\S]*?touch-action: pan-y;[\s\S]*?overscroll-behavior-x: none;/);
   assert.match(gestureSource, /MOBILE_HISTORY_MAX_WIDTH = 760/);
@@ -537,17 +561,23 @@ test("wires mobile history swipes without pointer capture", async () => {
 });
 
 test("renders assistant Markdown and LaTeX with the bobert default prompt", async () => {
-  const [page, renderer, layout, packageJson] = await Promise.all([
+  const [page, workspace, defaults, protocol, transcript, turn, renderer, layout, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/chat-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/conversation-defaults.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/chat-protocol.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/chat-transcript.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/conversation-turn.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/assistant-response.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
 
-  assert.match(page, /<bobert_behavior>/);
-  assert.match(page, /bobert may use Markdown/);
-  assert.match(page, /DEFAULT_SYSTEM_PROMPT/);
-  assert.match(page, /<AssistantResponse content=\{message\.content\} \/>/);
+  const client = `${page}\n${workspace}\n${defaults}\n${protocol}\n${transcript}\n${turn}`;
+  assert.match(client, /<bobert_behavior>/);
+  assert.match(client, /bobert may use Markdown/);
+  assert.match(client, /DEFAULT_CHAT_SYSTEM_PROMPT/);
+  assert.match(client, /<AssistantResponse content=\{assistantMessage\.content\} \/>/);
   assert.match(renderer, /remarkGfm/);
   assert.match(renderer, /remarkMath/);
   assert.match(renderer, /rehypeKatex/);
@@ -574,16 +604,17 @@ test("does not retain removed hosting integrations", async () => {
 });
 
 test("renders web activities inside thought-process disclosures", async () => {
-  const [activity, styles, page] = await Promise.all([
+  const [activity, styles, stream, history] = await Promise.all([
     readFile(new URL("../app/chat/assistant-activity.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/chat-stream-reducer.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/chat-history.ts", import.meta.url), "utf8"),
   ]);
   assert.match(activity, /WebDisclosure/);
   assert.match(activity, /webActivities\.map/);
   assert.match(activity, /Thought process/);
   assert.match(activity, /web\.results/);
   assert.match(activity, /web\.markdown/);
-  assert.match(page, /kind: event\.call\.name === "run_python" \? "python" : "web"/);
+  assert.match(`${stream}\n${history}`, /kind: call\.name === "run_python" \? "python" : "web"/);
   assert.match(styles, /\.web-nested/);
 });

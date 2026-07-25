@@ -33,33 +33,38 @@ test("replay is ordered, exclusive, and owner isolated", async () => {
 });
 
 test("disconnect is delivery-only while explicit stop calls durable cancellation", async () => {
-  const [page, runner] = await Promise.all([source("app/page.tsx"), source("app/server/chat/chat-job-runner.ts")]);
-  assert.match(page, /Abort only this tab's delivery/);
-  assert.match(page, /await cancelChatJob/);
+  const [page, generation, runner] = await Promise.all([source("app/page.tsx"), source("app/chat/use-chat-generation.ts"), source("app/server/chat/chat-job-runner.ts")]);
+  const client = `${page}\n${generation}`;
+  assert.match(client, /controller\.abort\(\)/);
+  assert.match(client, /await cancelChatJob/);
   assert.match(runner, /isChatJobCancelled/);
 });
 
 test("page reload and visibility restoration retain sequence and final output", async () => {
-  const [page, history] = await Promise.all([source("app/page.tsx"), source("lib/chat-history.ts")]);
-  assert.match(page, /jobId: makeId\(\)/);
+  const [page, generation, recovery, history] = await Promise.all([source("app/page.tsx"), source("app/chat/use-chat-generation.ts"), source("app/chat/use-persisted-job-recovery.ts"), source("lib/chat-history.ts")]);
+  const client = `${page}\n${generation}\n${recovery}`;
+  assert.match(client, /const jobId = makeId\(\)/);
   assert.match(history, /lastSequence\?: number/);
-  assert.match(page, /visibilitychange/);
-  assert.match(page, /event\.sequence <= after/);
-  assert.match(page, /snapshot\.finalOutput/);
-  assert.doesNotMatch(page, /status: message\.status === "streaming" \? "cancelled"/);
-  assert.doesNotMatch(page, /localStorage/);
+  assert.match(client, /visibilitychange/);
+  assert.match(client, /event\.sequence <= after/);
+  assert.match(client, /snapshot\.finalOutput/);
+  assert.doesNotMatch(client, /status: message\.status === "streaming" \? "cancelled"/);
+  assert.doesNotMatch(client, /localStorage/);
 });
 
 test("fresh history ignores local conversations and saves user preferences remotely", async () => {
-  const [page, historyService, preferencesRoute, preferencesStore] = await Promise.all([
+  const [page, workspace, storage, historyService, preferencesRoute, preferencesStore] = await Promise.all([
     source("app/page.tsx"),
+    source("app/chat/chat-workspace.tsx"),
+    source("app/chat/conversation-storage.ts"),
     source("app/chat/chat-user-preferences-service.ts"),
     source("app/api/chat/user-preferences/route.ts"),
     source("app/server/chat/chat-user-preferences-store.ts"),
   ]);
-  assert.match(page, /fetchChatConversations/);
-  assert.match(page, /fetchChatConversation/);
-  assert.doesNotMatch(page, /localStorage/);
+  const client = `${page}\n${workspace}\n${storage}`;
+  assert.match(client, /fetchChatConversations/);
+  assert.match(client, /fetchChatConversation/);
+  assert.doesNotMatch(client, /localStorage/);
   assert.match(historyService, /\/api\/chat\/user-preferences/);
   assert.match(preferencesRoute, /authorizeOwnerSession/);
   assert.match(preferencesStore, /chat_user_preferences/);
