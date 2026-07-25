@@ -226,7 +226,7 @@ function UsageSettings({ loadUsage }: Pick<SettingsModalProps, "loadUsage">) {
       </div>
 
       <div className="settings-summary" aria-label="Usage summary">
-        <div><span>Requests</span><strong>{numberFormat.format(totals?.requestCount ?? 0)}</strong></div>
+        <div><span>Provider calls</span><strong>{numberFormat.format(totals?.requestCount ?? 0)}</strong></div>
         <div><span>Input tokens</span><strong>{numberFormat.format(totals?.promptTokens ?? 0)}</strong></div>
         <div><span>Output tokens</span><strong>{numberFormat.format(totals?.completionTokens ?? 0)}</strong></div>
         <div>

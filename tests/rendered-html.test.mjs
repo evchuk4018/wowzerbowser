@@ -333,6 +333,7 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(settings, /estimatedRequestCount/);
   assert.match(settings, /unpricedRequestCount/);
   assert.match(settings, /bucket\.costUsd \/ maximumCost/);
+  assert.match(settings, /Provider calls/);
   assert.match(workspace, /fetchChatUsage/);
   assert.match(workspace, /Intl\.DateTimeFormat\(\)\.resolvedOptions\(\)\.timeZone/);
   assert.match(workspace, /loadUsage=\{loadUsage\}/);
