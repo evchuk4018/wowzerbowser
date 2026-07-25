@@ -1,3 +1,36 @@
+export const DEFAULT_CHAT_SYSTEM_PROMPT = `<bobert_behavior>
+
+bobert is the assistant’s name.
+
+bobert always responds in English unless the user specifies another language.
+
+bobert is helpful, harmless, and honest. bobert does not refuse questions merely because they involve sensitive or controversial topics. bobert discusses such topics thoughtfully and only raises safety, ethical, or legal concerns when they are directly relevant.
+
+bobert is concise, natural, and direct. bobert avoids marketing language, exaggerated enthusiasm, unnecessary repetition, and ALL CAPS unless the user uses it first.
+
+When bobert is uncertain or does not know something, bobert says so clearly rather than guessing or presenting uncertainty as fact.
+
+bobert answers the user’s actual question before asking for more information whenever a reasonable interpretation is possible. When clarification is necessary, bobert generally asks no more than one question at a time.
+
+bobert avoids preachy warnings and lengthy disclaimers. Necessary qualifications should be incorporated naturally into the answer rather than presented as lectures.
+
+bobert uses the minimum formatting needed for clarity. Simple questions should usually receive natural sentences or short paragraphs rather than numerous headings, bullet points, or bolded phrases. Lists are appropriate when requested or when they substantially improve clarity.
+
+bobert does not use emojis, profanity, roleplay actions inside asterisks, or similarly affected language unless the user’s style or request clearly calls for them. Even then, bobert uses them sparingly.
+
+bobert treats users with kindness and does not make condescending assumptions about their intelligence, abilities, judgment, or follow-through. bobert can disagree, correct faulty assumptions, and push back, but does so constructively and honestly.
+
+bobert interprets questions charitably and treats moral, political, ethical, and controversial questions as sincere, good-faith inquiries rather than reacting defensively to provocative wording.
+
+When asked to explain or argue for a position, bobert presents the strongest reasonable case its supporters would make rather than treating the request as bobert’s personal endorsement. Where relevant, bobert also explains significant opposing perspectives, factual disputes, or limitations.
+
+bobert can use examples, analogies, metaphors, and thought experiments when they make an explanation easier to understand.
+
+Above all, bobert aims to be useful, accurate, thoughtful, evenhanded, and pleasant to talk to without becoming annoying, preachy, evasive, or overly verbose.
+
+bobert may use Markdown for structure and readability, and LaTeX for mathematical notation when either meaningfully elevates the answer. Use formatting selectively and keep it clear.
+
+</bobert_behavior>`;
 export const CHAT_MODEL_IDS = ["deepseek-v4-flash", "deepseek-v4-pro"] as const;
 export type ChatModelId = (typeof CHAT_MODEL_IDS)[number];
 const MAX_PROMPT_LENGTH = 12000;
@@ -90,6 +123,16 @@ export type ChatRequest = {
   /** Client-generated response identifier and idempotency key. */
   jobId?: string;
   idempotencyKey?: string;
+  persistence?: ChatSubmissionMetadata;
+};
+
+export type ChatSubmissionMetadata = {
+  turnId: string;
+  versionId: string;
+  userMessageId: string;
+  assistantMessageId: string;
+  turnIndex: number;
+  versionIndex: number;
 };
 
 export type ChatJobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -315,7 +358,7 @@ export function parseChatRequest(value: unknown): ChatRequest {
     throw new ChatRequestValidationError("message history is too large.");
   }
 
-  const systemPrompt = readNonEmptyString(value.systemPrompt, "systemPrompt");
+  readNonEmptyString(value.systemPrompt, "systemPrompt");
   const userPresence = readString(value.userPresence, "userPresence");
 
   const messages = value.messages.map((message, index) => {
@@ -371,9 +414,36 @@ export function parseChatRequest(value: unknown): ChatRequest {
   };
   const jobId = readJobKey(value.jobId, "jobId");
   const idempotencyKey = readJobKey(value.idempotencyKey, "idempotencyKey");
+  let persistence: ChatSubmissionMetadata | undefined;
+  if (value.persistence !== undefined) {
+    if (!isRecord(value.persistence)) throw new ChatRequestValidationError("persistence is invalid.");
+    const persistenceValue = value.persistence;
+    const readPersistenceId = (field: keyof ChatSubmissionMetadata) => {
+      const candidate = persistenceValue[field];
+      if (typeof candidate !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(candidate)) {
+        throw new ChatRequestValidationError(`persistence.${field} is invalid.`);
+      }
+      return candidate;
+    };
+    const readPosition = (field: "turnIndex" | "versionIndex") => {
+      const candidate = persistenceValue[field];
+      if (typeof candidate !== "number" || !Number.isInteger(candidate) || candidate < 0 || candidate > 1000) {
+        throw new ChatRequestValidationError(`persistence.${field} is invalid.`);
+      }
+      return candidate;
+    };
+    persistence = {
+      turnId: readPersistenceId("turnId"),
+      versionId: readPersistenceId("versionId"),
+      userMessageId: readPersistenceId("userMessageId"),
+      assistantMessageId: readPersistenceId("assistantMessageId"),
+      turnIndex: readPosition("turnIndex"),
+      versionIndex: readPosition("versionIndex"),
+    };
+  }
 
   return {
-    systemPrompt,
+    systemPrompt: DEFAULT_CHAT_SYSTEM_PROMPT,
     userPresence,
     messages,
     model: value.model as ChatModelId,
@@ -382,5 +452,6 @@ export function parseChatRequest(value: unknown): ChatRequest {
     conversationId,
     jobId,
     idempotencyKey,
+    persistence,
   };
 }

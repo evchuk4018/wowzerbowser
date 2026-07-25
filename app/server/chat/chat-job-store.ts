@@ -1,6 +1,7 @@
 import "server-only";
 import type { ChatJobResumeResponse, ChatJobStatus, ChatRequest, ChatStreamEvent, ChatUsage } from "../../../lib/chat-protocol";
 import { getServerClient } from "../../auth/supabase-server-adapter";
+import { applyChatJobEvent, ensureChatSubmission, finalizeChatJobMessage } from "./chat-history-store";
 
 const table = () => getServerClient();
 
@@ -8,6 +9,7 @@ export async function createOrGetChatJob(ownerId: string, request: ChatRequest) 
   const conversationId = request.conversationId!;
   const jobId = request.jobId!;
   const idempotencyKey = request.idempotencyKey!;
+  await ensureChatSubmission(ownerId, request);
   const row = { owner_id: ownerId, conversation_id: conversationId, job_id: jobId, idempotency_key: idempotencyKey, request, status: "queued" };
   const { error } = await table().from("chat_jobs").insert(row);
   if (!error) return { jobId, status: "queued" as ChatJobStatus, resumed: false };
@@ -26,8 +28,13 @@ export async function claimChatJob(ownerId: string, conversationId: string, jobI
 
 export async function appendChatJobEvent(ownerId: string, conversationId: string, jobId: string, event: ChatStreamEvent) {
   const client = table();
-  const { error } = await client.from("chat_job_events").insert({ owner_id: ownerId, conversation_id: conversationId, job_id: jobId, event });
+  const { data, error } = await client
+    .from("chat_job_events")
+    .insert({ owner_id: ownerId, conversation_id: conversationId, job_id: jobId, event })
+    .select("sequence")
+    .single();
   if (error) throw error;
+  await applyChatJobEvent(ownerId, conversationId, jobId, event, Number(data.sequence));
   await client.from("chat_jobs").update({ updated_at: new Date().toISOString() }).eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("job_id", jobId);
 }
 
@@ -35,6 +42,13 @@ export async function finishChatJob(ownerId: string, conversationId: string, job
   const now = new Date().toISOString();
   const { error } = await table().from("chat_jobs").update({ status, error: values.error ?? null, usage: values.usage ?? null, final_output: values.finalOutput ?? null, completed_at: now, updated_at: now }).eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("job_id", jobId);
   if (error) throw error;
+  await finalizeChatJobMessage(
+    ownerId,
+    conversationId,
+    jobId,
+    status === "completed" ? "complete" : status === "cancelled" ? "cancelled" : "error",
+    values,
+  );
 }
 
 export async function getChatJob(ownerId: string, conversationId: string, jobId: string, after = 0): Promise<ChatJobResumeResponse | null> {
@@ -54,6 +68,7 @@ export async function cancelChatJob(ownerId: string, conversationId: string, job
   const now = new Date().toISOString();
   const { data, error } = await table().from("chat_jobs").update({ status: "cancelled", completed_at: now, updated_at: now }).eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("job_id", jobId).in("status", ["queued", "running"]).select("job_id").maybeSingle();
   if (error) throw error;
+  if (data) await finalizeChatJobMessage(ownerId, conversationId, jobId, "cancelled");
   return Boolean(data);
 }
 

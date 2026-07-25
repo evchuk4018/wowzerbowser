@@ -6,10 +6,43 @@ import type {
   ChatJobSubmissionResponse,
   SequencedChatStreamEvent,
 } from "../../lib/chat-protocol";
+import type { ChatConversation, ChatConversationSummary } from "../../lib/chat-history";
 
 async function readError(response: Response): Promise<string> {
   const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
   return typeof body?.error === "string" ? body.error : `Request failed (${response.status}).`;
+}
+
+export async function fetchChatConversations(accessToken: string): Promise<ChatConversationSummary[]> {
+  const response = await fetch("/api/chat/conversations", {
+    headers: { authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  const body = await response.json() as { conversations?: ChatConversationSummary[] };
+  return body.conversations ?? [];
+}
+
+export async function fetchChatConversation(conversationId: string, accessToken: string): Promise<ChatConversation> {
+  const response = await fetch(`/api/chat/conversations/${encodeURIComponent(conversationId)}`, {
+    headers: { authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  const body = await response.json() as { conversation?: ChatConversation };
+  if (!body.conversation) throw new Error("Conversation not found.");
+  return body.conversation;
+}
+
+export async function updateChatConversation(
+  conversationId: string,
+  values: { title?: string; turnId?: string; versionId?: string },
+  accessToken: string,
+): Promise<void> {
+  const response = await fetch(`/api/chat/conversations/${encodeURIComponent(conversationId)}`, {
+    method: "PATCH",
+    headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+    body: JSON.stringify(values),
+  });
+  if (!response.ok) throw new Error(await readError(response));
 }
 
 export async function fetchChatModels(accessToken: string): Promise<ChatModelInfo[]> {

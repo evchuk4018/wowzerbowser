@@ -17,8 +17,8 @@ export async function POST(request: Request) {
   if (!user) return unauthorized();
   try {
     const chatRequest = parseChatRequest(await request.json());
-    if (!chatRequest.conversationId || !chatRequest.jobId || !chatRequest.idempotencyKey) {
-      return NextResponse.json({ error: "conversationId, jobId, and idempotencyKey are required." }, { status: 400 });
+    if (!chatRequest.conversationId || !chatRequest.jobId || !chatRequest.idempotencyKey || !chatRequest.persistence) {
+      return NextResponse.json({ error: "conversationId, jobId, idempotencyKey, and persistence are required." }, { status: 400 });
     }
     assertDeepSeekConfigured();
     const submission = await createOrGetChatJob(user.id, chatRequest);

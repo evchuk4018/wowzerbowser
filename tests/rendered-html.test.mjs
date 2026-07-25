@@ -203,11 +203,12 @@ test("keeps Supabase calls behind adapters and owner authorization", async () =>
 });
 
 test("keeps DeepSeek access server-side and uses the V4 thinking contract", async () => {
-  const [page, client, protocol, adapter, messages, route, modelsRoute, envExample] = await Promise.all([
+  const [page, client, protocol, adapter, adapterConfig, messages, route, modelsRoute, envExample] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/chat-service.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/chat-protocol.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/providers/deepseek/deepseek-adapter.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/providers/deepseek/deepseek-client-config.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/providers/deepseek/deepseek-messages.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/chat/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/chat/models/route.ts", import.meta.url), "utf8"),
@@ -222,7 +223,7 @@ test("keeps DeepSeek access server-side and uses the V4 thinking contract", asyn
   assert.match(protocol, /reasoningEffort/);
   assert.match(protocol, /systemPrompt/);
   assert.match(protocol, /userPresence/);
-  assert.match(adapter, /https:\/\/api\.deepseek\.com/);
+  assert.match(adapterConfig, /https:\/\/api\.deepseek\.com/);
   assert.match(adapter, /reasoning_content/);
   assert.match(adapter, /reasoning_effort/);
   assert.match(adapter, /thinking/);
@@ -230,7 +231,7 @@ test("keeps DeepSeek access server-side and uses the V4 thinking contract", asyn
   assert.match(messages, /role: "system"/);
   assert.match(messages, /tool_call_id/);
   assert.match(route, /authorizeOwnerSession/);
-  assert.match(route, /text\/event-stream/);
+  assert.match(route, /after\(\(\) => runChatJob/);
   assert.match(modelsRoute, /listDeepSeekModels/);
 });
 
@@ -251,8 +252,11 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(composer, /aria-pressed=/);
   assert.match(page, /supportedEfforts/);
   assert.match(page, /Open settings/);
-  assert.match(page, /local-chat-settings/);
-  assert.match(page, /Always respond in English/);
+  assert.match(page, /fetchChatUserPreferences/);
+  assert.match(page, /saveChatUserPreferences/);
+  assert.doesNotMatch(page, /localStorage/);
+  assert.match(page, /readOnly/);
+  assert.match(page, /responds in English/);
   assert.match(page, /User presence/);
   assert.match(styles, /backdrop-filter: blur\(8px\)/);
   assert.doesNotMatch(page, /Messages stay on this device/);
@@ -272,18 +276,12 @@ test("shows call activity without a generic generation indicator", async () => {
   ]);
 
   assert.doesNotMatch(page, /Generating(?:…|Ã¢â‚¬Â¦)/);
-  const waitingGuard = "if (controller.signal.aborted || activeRequestRef.current?.messageId !== assistantMessage.id)";
-  const waitingStateSetter = "setWaitingMessageId(assistantMessage.id)";
-  assert.ok(page.includes(waitingGuard));
-  assert.ok(page.includes(waitingStateSetter));
-  assert.ok(
-    page.indexOf(waitingGuard) < page.indexOf(waitingStateSetter),
-    "the cancelled-request guard must run before the waiting indicator state is set",
-  );
-  assert.match(page, /event\.type === "reasoning"[\s\S]*?current === assistantMessage\.id \? null : current/);
+  assert.match(page, /controller\.signal\.aborted[\s\S]*?activeRequestsRef\.current/);
+  assert.match(page, /setWaitingByMessage/);
+  assert.match(page, /event\.type === "reasoning"/);
   assert.match(page, /\{Boolean\(assistantMessage\.reasoning\) && \(/);
   assert.doesNotMatch(page, /Waiting for reasoning/);
-  assert.match(page, /!assistantMessage\.thinkingEnabled && waitingMessageId === assistantMessage\.id[\s\S]*?<CallActivityIndicator \/>/);
+  assert.match(page, /!assistantMessage\.thinkingEnabled && waitingByMessage\[assistantMessage\.id\][\s\S]*?<CallActivityIndicator \/>/);
   assert.match(page, /!message\.thinkingEnabled && message\.status === "streaming"[\s\S]*?<CallActivityIndicator \/>/);
   assert.match(page, /role="status" aria-label="Waiting for response"/);
   assert.match(page, /<span aria-hidden="true">✦<\/span>/);
@@ -548,7 +546,7 @@ test("renders assistant Markdown and LaTeX with the bobert default prompt", asyn
 
   assert.match(page, /<bobert_behavior>/);
   assert.match(page, /bobert may use Markdown/);
-  assert.match(page, /LEGACY_DEFAULT_SYSTEM_PROMPT/);
+  assert.match(page, /DEFAULT_SYSTEM_PROMPT/);
   assert.match(page, /<AssistantResponse content=\{message\.content\} \/>/);
   assert.match(renderer, /remarkGfm/);
   assert.match(renderer, /remarkMath/);

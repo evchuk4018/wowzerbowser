@@ -27,6 +27,7 @@ import {
   WEB_TOOL_DEFINITIONS,
 } from "../app/server/agent/web-tools.ts";
 import { parseChatRequest } from "../lib/chat-protocol.ts";
+import { applyChatStreamEvent } from "../lib/chat-history.ts";
 
 function request(overrides = {}) {
   return {
@@ -183,12 +184,13 @@ test("web search accepts the provider-compatible q argument alias", async () => 
 
 test("web and utility tool results replay in the provider transcript", () => {
   const messages = buildDeepSeekMessages(request(), { replayRounds: [{ content: "", toolCalls: [{ id: "web-1", name: "web_search", arguments: '{"query":"today"}', result: { id: "web-1", name: "web_search", ok: true, stdout: "", stderr: "", web: { kind: "search", query: "today", results: [{ title: "Result", url: "https://example.com", snippet: "Snippet" }] } } }, { id: "date-1", name: CHECK_DATE_TOOL_NAME, arguments: "{}", result: { id: "date-1", name: CHECK_DATE_TOOL_NAME, ok: true, stdout: "", stderr: "", utility: { kind: "date", currentDate: "2026-07-24", timeZone: "UTC" } } }] }] });
-  assert.equal(messages.at(-2)?.role, "assistant");
-  assert.match(messages.at(-2)?.tool_calls?.[1]?.function.name ?? "", /check_date/);
-  assert.match(messages.at(-1)?.content ?? "", /"query":"today"/);
-  assert.match(messages.at(-1)?.content ?? "", /"currentDate":"2026-07-24"/);
-  const replay = parseChatRequest(request({ messages: [{ role: "assistant", content: "", rounds: [{ content: "", toolCalls: [{ id: "date-1", name: CHECK_DATE_TOOL_NAME, arguments: "{}", result: { id: "date-1", name: CHECK_DATE_TOOL_NAME, ok: true, stdout: "", stderr: "", utility: { kind: "date", currentDate: "2026-07-24", timeZone: "UTC" } } }] }] }] }));
-  assert.deepEqual(replay.messages[0].rounds?.[0]?.toolCalls?.[0]?.result?.utility, { kind: "date", currentDate: "2026-07-24", timeZone: "UTC" });
+  const replayAssistant = messages.findLast((message) => message.role === "assistant" && message.tool_calls?.length);
+  assert.equal(replayAssistant?.role, "assistant");
+  assert.match(replayAssistant?.tool_calls?.[1]?.function.name ?? "", /check_date/);
+  assert.match(messages.filter((message) => message.role === "tool")[0]?.content ?? "", /"query":"today"/);
+  assert.match(messages.filter((message) => message.role === "tool")[1]?.content ?? "", /"currentDate":"2026-07-24"/);
+  const replay = parseChatRequest(request({ messages: [{ role: "user", content: "Replay this" }, { role: "assistant", content: "Done", rounds: [{ content: "", toolCalls: [{ id: "date-1", name: CHECK_DATE_TOOL_NAME, arguments: "{}", result: { id: "date-1", name: CHECK_DATE_TOOL_NAME, ok: true, stdout: "", stderr: "", utility: { kind: "date", currentDate: "2026-07-24", timeZone: "UTC" } } }] }] }, { role: "user", content: "What was the date?" }] }));
+  assert.deepEqual(replay.messages[1].rounds?.[0]?.toolCalls?.[0]?.result?.utility, { kind: "date", currentDate: "2026-07-24", timeZone: "UTC" });
 });
 
 test("Python policy accepts shared maxima and rejects the next value", () => {
@@ -273,6 +275,45 @@ test("chat orchestration reserves one usage slot per round", async () => {
   assert.match(source, /roundUsages\[roundUsageIndex\] = latestNonNullUsage/);
   assert.doesNotMatch(source, /roundUsages\.push\(roundUsage\)/);
   assert.match(source, /new ModalPythonExecutor\(ownerId, conversationId, responseDeadlineAt\)/);
+});
+
+test("persisted trace projection keeps reasoning, tools, artifacts, and final output ordered", () => {
+  let message = {
+    id: "assistant-1",
+    role: "assistant",
+    content: "",
+    reasoning: "",
+    activities: [],
+    artifacts: [],
+    thinkingEnabled: true,
+    status: "streaming",
+    jobId: "job-1",
+    lastSequence: 0,
+  };
+  const events = [
+    { type: "round", round: 1 },
+    { type: "reasoning", delta: "I should calculate." },
+    { type: "tool_call", call: { id: "call-1", name: "run_python", arguments: '{"code":"print(42)"}' } },
+    { type: "tool_result", result: { id: "call-1", name: "run_python", ok: true, stdout: "42\n", stderr: "", artifacts: [{ id: "artifact-1", name: "answer.txt", contentType: "text/plain", size: 2 }] } },
+    { type: "content", delta: "The answer is 42." },
+    { type: "done", usage: null },
+  ];
+  events.forEach((event, index) => {
+    message = applyChatStreamEvent(message, event, index + 1, 1_000 + index * 100);
+  });
+  assert.equal(message.reasoning, "I should calculate.");
+  assert.equal(message.content, "The answer is 42.");
+  assert.equal(message.activities?.[0]?.kind, "reasoning");
+  assert.equal(message.activities?.[1]?.kind, "python");
+  assert.equal(message.activities?.[1]?.result?.stdout, "42\n");
+  assert.equal(message.artifacts?.[0]?.id, "artifact-1");
+  assert.equal(message.lastSequence, events.length);
+});
+
+test("server canonicalizes the system prompt so the client cannot override it", () => {
+  const parsed = parseChatRequest(request({ systemPrompt: "User supplied prompt" }));
+  assert.match(parsed.systemPrompt, /<bobert_behavior>/);
+  assert.doesNotMatch(parsed.systemPrompt, /User supplied prompt/);
 });
 
 test("usage keeps the last snapshot within a round and sums finalized rounds once", () => {

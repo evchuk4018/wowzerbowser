@@ -1,28 +1,6 @@
-import type {
-  ChatToolCall,
-  ChatToolResult,
-} from "../../lib/chat-protocol";
-
-export type ReasoningActivity = {
-  id: string;
-  kind: "reasoning";
-  round: number;
-  content: string;
-  status: "running" | "complete";
-  startedAt?: number;
-  durationMs?: number;
-};
-
-export type PythonActivity = {
-  id: string;
-  kind: "python";
-  round: number;
-  call: ChatToolCall;
-  result?: ChatToolResult;
-  status: "running" | "completed" | "failed";
-  startedAt?: number;
-  durationMs?: number;
-};
-export type WebActivity = Omit<PythonActivity, "kind"> & { kind: "web" };
-
-export type AssistantActivity = ReasoningActivity | PythonActivity | WebActivity;
+export type {
+  ChatAssistantActivity as AssistantActivity,
+  ChatPythonActivity as PythonActivity,
+  ChatReasoningActivity as ReasoningActivity,
+  ChatWebActivity as WebActivity,
+} from "../../lib/chat-history";

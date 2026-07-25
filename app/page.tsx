@@ -13,11 +13,18 @@ import {
 import { MagicLinkForm } from "./auth/magic-link-form";
 import type { AuthUser } from "./auth/types";
 import { useAuthSession } from "./auth/use-auth-session";
-import { cancelChatJob, fetchChatJob, fetchChatModels, streamChatResponse } from "./chat/chat-service";
+import {
+  cancelChatJob,
+  fetchChatConversation,
+  fetchChatConversations,
+  fetchChatJob,
+  fetchChatModels,
+  streamChatResponse,
+  updateChatConversation,
+} from "./chat/chat-service";
 import { ChatComposer } from "./chat/chat-composer";
 import { AssistantResponse } from "./chat/assistant-response";
 import { AssistantActivityTimeline } from "./chat/assistant-activity";
-import type { AssistantActivity } from "./chat/assistant-activity-types";
 import { finishRunningActivities } from "./chat/finish-running-activities";
 import { generateChatTitle } from "./chat/chat-title-service";
 import { toChatMessageInput } from "./chat/chat-message-input";
@@ -26,11 +33,16 @@ import {
   MobileHistorySwipeGesture,
 } from "./chat/mobile-history-swipe";
 import type {
-  ChatArtifact,
   ChatMessageInput,
   ChatModelId,
   ChatReasoningEffort,
 } from "../lib/chat-protocol";
+import type {
+  ChatConversation as Conversation,
+  ChatConversationTurn,
+  ChatHistoryMessage as Message,
+} from "../lib/chat-history";
+import { applyChatStreamEvent } from "../lib/chat-history";
 import { DEFAULT_CHAT_MODELS } from "../lib/chat-protocol";
 import {
   DEFAULT_CHAT_MODEL_PREFERENCE,
@@ -40,47 +52,19 @@ import {
   fetchChatModelPreferences,
   saveChatModelPreference,
 } from "./chat/chat-model-preference-service";
+import {
+  fetchChatUserPreferences,
+  saveChatUserPreferences,
+} from "./chat/chat-user-preferences-service";
+import type { ChatUserPreferences } from "../lib/chat-user-preferences";
 
-type Message = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  reasoning?: string;
-  activities?: AssistantActivity[];
-  artifacts?: ChatArtifact[];
-  thinkingEnabled?: boolean;
-  thinkingDurationMs?: number;
-  status?: "streaming" | "complete" | "error" | "cancelled";
-  error?: string;
-  jobId?: string;
-  lastSequence?: number;
-};
-
-type TurnVersion = {
-  id: string;
-  user: Message;
-  assistant: Message;
-};
-
-type ConversationTurn = {
-  id: string;
-  versions: TurnVersion[];
-  activeVersion: number;
-};
-
-type Conversation = {
-  id: string;
-  title: string;
-  turns: ConversationTurn[];
-};
+type ConversationTurn = ChatConversationTurn;
 
 type ChatSettings = {
   systemPrompt: string;
   userPresence: string;
 };
 
-const LEGACY_DEFAULT_SYSTEM_PROMPT =
-  "You are a helpful, thoughtful assistant. Always respond in English unless the user explicitly asks you to use another language. Be accurate, clear, and concise. If you are unsure, say so.";
 const DEFAULT_SYSTEM_PROMPT = `<bobert_behavior>
 
 bobert is the assistant’s name.
@@ -114,10 +98,6 @@ Above all, bobert aims to be useful, accurate, thoughtful, evenhanded, and pleas
 bobert may use Markdown for structure and readability, and LaTeX for mathematical notation when either meaningfully elevates the response. Use formatting selectively and keep it clear.
 
 </bobert_behavior>`;
-const settingsStorageKeyFor = (userId: string) => `local-chat-settings:${userId}`;
-
-const storageKeyFor = (userId: string) => `local-chat-conversations:${userId}`;
-const LEGACY_STORAGE_KEY = "local-chat-conversations";
 
 const makeId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -129,76 +109,6 @@ const createConversation = (): Conversation => ({
   title: "New conversation",
   turns: [],
 });
-
-function normalizeStoredMessage(message: Message): Message {
-  if (message.role !== "assistant") return message;
-  const loadedAt = Date.now();
-  const freezeDuration = (startedAt?: number, durationMs?: number) =>
-    durationMs ??
-    (typeof startedAt === "number" && Number.isFinite(startedAt)
-      ? Math.max(0, loadedAt - startedAt)
-      : undefined);
-
-  return {
-    ...message,
-    status: message.status,
-    activities: message.activities?.map((activity) => {
-      if (activity.kind === "reasoning" && activity.status === "running") {
-        return {
-          ...activity,
-          status: "complete",
-          durationMs: freezeDuration(activity.startedAt, activity.durationMs),
-        };
-      }
-      if (activity.kind === "python" && activity.status === "running") {
-        return {
-          ...activity,
-          status: "failed",
-          durationMs: freezeDuration(activity.startedAt, activity.durationMs),
-        };
-      }
-      return activity;
-    }),
-  };
-}
-
-function migrateConversation(value: unknown): Conversation | null {
-  if (!value || typeof value !== "object") return null;
-  const candidate = value as Partial<Conversation> & { messages?: Message[] };
-  if (typeof candidate.id !== "string" || typeof candidate.title !== "string") return null;
-  if (Array.isArray(candidate.turns)) {
-    return {
-      id: candidate.id,
-      title: candidate.title,
-      turns: candidate.turns.map((turn) => ({
-        ...turn,
-        versions: turn.versions.map((version) => ({
-          ...version,
-          user: normalizeStoredMessage(version.user),
-          assistant: normalizeStoredMessage(version.assistant),
-        })),
-      })),
-    };
-  }
-  if (!Array.isArray(candidate.messages)) return null;
-
-  const turns: ConversationTurn[] = [];
-  for (let index = 0; index < candidate.messages.length; index += 2) {
-    const user = candidate.messages[index];
-    const assistant = candidate.messages[index + 1];
-    if (!user || user.role !== "user" || !assistant || assistant.role !== "assistant") continue;
-    turns.push({
-      id: makeId(),
-      versions: [{
-        id: makeId(),
-        user: normalizeStoredMessage(user),
-        assistant: normalizeStoredMessage(assistant),
-      }],
-      activeVersion: 0,
-    });
-  }
-  return { id: candidate.id, title: candidate.title, turns };
-}
 
 export default function Home() {
   const {
@@ -285,53 +195,51 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   }>>({});
 
   useEffect(() => {
-    const loadStoredChats = window.setTimeout(() => {
+    let mounted = true;
+    const loadSupabaseHistory = async () => {
       try {
-        const userStorageKey = storageKeyFor(user.id);
-        const userStored = localStorage.getItem(userStorageKey);
-        const legacyStored = userStored ? null : localStorage.getItem(LEGACY_STORAGE_KEY);
-        const stored = userStored ?? legacyStored;
-        const parsed = stored ? (JSON.parse(stored) as unknown[]) : [];
-        const migrated = parsed.map(migrateConversation).filter((item): item is Conversation => item !== null);
-        const initial = migrated.length ? migrated : [createConversation()];
-        if (legacyStored) localStorage.setItem(userStorageKey, legacyStored);
-        setConversations(initial);
-        setActiveId(initial[0].id);
+        const token = await getAccessToken();
+        if (!token) throw new Error("Your session expired. Please sign in again.");
+        const summaries = await fetchChatConversations(token);
+        if (!mounted) return;
+        if (!summaries.length) {
+          const initial = createConversation();
+          setConversations([initial]);
+          setActiveId(initial.id);
+        } else {
+          const loaded = await Promise.all(
+            summaries.map((summary) => fetchChatConversation(summary.id, token)),
+          );
+          if (!mounted) return;
+          setConversations(loaded);
+          setActiveId(loaded[0]?.id ?? "");
+          setStreamingByConversation(Object.fromEntries(
+            summaries.filter((summary) => summary.isStreaming).map((summary) => [summary.id, "persisted"]),
+          ));
+        }
       } catch {
+        if (!mounted) return;
         const initial = createConversation();
         setConversations([initial]);
         setActiveId(initial.id);
+      } finally {
+        if (mounted) setReady(true);
       }
-      setReady(true);
-    }, 0);
-
-    return () => window.clearTimeout(loadStoredChats);
-  }, [user.id]);
-
-  useEffect(() => {
-    if (ready) {
-      localStorage.setItem(storageKeyFor(user.id), JSON.stringify(conversations));
-    }
-  }, [conversations, ready, user.id]);
+    };
+    void loadSupabaseHistory();
+    return () => { mounted = false; };
+  }, [getAccessToken]);
 
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(settingsStorageKeyFor(user.id));
-      if (!stored) return;
-      const parsed = JSON.parse(stored) as Partial<ChatSettings>;
-      setSettings({
-        systemPrompt:
-          parsed.systemPrompt === LEGACY_DEFAULT_SYSTEM_PROMPT
-            ? DEFAULT_SYSTEM_PROMPT
-            : typeof parsed.systemPrompt === "string" && parsed.systemPrompt.trim()
-              ? parsed.systemPrompt
-              : DEFAULT_SYSTEM_PROMPT,
-        userPresence: typeof parsed.userPresence === "string" ? parsed.userPresence : "",
-      });
-    } catch {
-      setSettings({ systemPrompt: DEFAULT_SYSTEM_PROMPT, userPresence: "" });
-    }
-  }, [user.id]);
+    let mounted = true;
+    void getAccessToken()
+      .then((token) => token ? fetchChatUserPreferences(token) : { userPresence: "" })
+      .then((preferences: ChatUserPreferences) => {
+        if (mounted) setSettings({ systemPrompt: DEFAULT_SYSTEM_PROMPT, userPresence: preferences.userPresence });
+      })
+      .catch(() => undefined);
+    return () => { mounted = false; };
+  }, [getAccessToken]);
 
   useEffect(() => {
     let mounted = true;
@@ -640,12 +548,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
           for (const event of snapshot.events) {
             if (event.sequence <= after) continue;
             after = event.sequence;
-            updateMessage(conversationId, message.id, (current) => ({
-              ...current,
-              lastSequence: event.sequence,
-              content: event.type === "content" ? `${current.content}${event.delta}` : current.content,
-              error: event.type === "error" ? event.message : current.error,
-            }));
+            updateMessage(conversationId, message.id, (current) => applyChatStreamEvent(current, event, event.sequence));
           }
           if (snapshot.status !== "queued" && snapshot.status !== "running") {
             updateMessage(conversationId, message.id, (current) => ({
@@ -654,6 +557,12 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
               status: snapshot.status === "completed" ? "complete" : snapshot.status === "cancelled" ? "cancelled" : "error",
               error: snapshot.error ?? current.error,
             }));
+            setStreamingByConversation((current) => {
+              if (!(conversationId in current)) return current;
+              const next = { ...current };
+              delete next[conversationId];
+              return next;
+            });
             return;
           }
           await new Promise((resolve) => window.setTimeout(resolve, 750));
@@ -736,6 +645,10 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
   };
 
   const selectVersion = (turnId: string, direction: -1 | 1) => {
+    const turn = active?.turns.find((candidate) => candidate.id === turnId);
+    if (!turn) return;
+    const nextIndex = Math.max(0, Math.min(turn.versions.length - 1, turn.activeVersion + direction));
+    const nextVersion = turn.versions[nextIndex];
     setConversations((current) =>
       current.map((conversation) =>
         conversation.id !== activeId
@@ -756,6 +669,9 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
             },
       ),
     );
+    void getAccessToken()
+      .then((token) => token ? updateChatConversation(activeId, { turnId, versionId: nextVersion.id }, token) : undefined)
+      .catch(() => undefined);
   };
 
   const cancelLongPress = () => {
@@ -780,6 +696,12 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
     if (!content || !activeId || activeRequestsRef.current[activeId] || !active) return;
 
     const userMessage: Message = { id: makeId(), role: "user", content };
+    const editingTurnIndex = editingTurnId
+      ? active.turns.findIndex((turn) => turn.id === editingTurnId)
+      : -1;
+    const turnId = editingTurnIndex >= 0 ? active.turns[editingTurnIndex].id : makeId();
+    const versionIndex = editingTurnIndex >= 0 ? active.turns[editingTurnIndex].versions.length : 0;
+    const versionId = makeId();
     const assistantMessage: Message = {
       id: makeId(),
       role: "assistant",
@@ -793,9 +715,6 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
       lastSequence: 0,
     };
     const conversationId = active.id;
-    const editingTurnIndex = editingTurnId
-      ? active.turns.findIndex((turn) => turn.id === editingTurnId)
-      : -1;
     const contextTurns = editingTurnIndex >= 0 ? active.turns.slice(0, editingTurnIndex) : active.turns;
     const requestMessages = contextTurns
       .flatMap((turn) => {
@@ -819,7 +738,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
                             ...turn,
                             versions: [
                               ...turn.versions,
-                              { id: makeId(), user: userMessage, assistant: assistantMessage },
+                              { id: versionId, user: userMessage, assistant: assistantMessage },
                             ],
                             activeVersion: turn.versions.length,
                           }
@@ -828,8 +747,8 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
                   : [
                       ...conversation.turns,
                       {
-                        id: makeId(),
-                        versions: [{ id: makeId(), user: userMessage, assistant: assistantMessage }],
+                        id: turnId,
+                        versions: [{ id: versionId, user: userMessage, assistant: assistantMessage }],
                         activeVersion: 0,
                       },
                     ],
@@ -873,7 +792,7 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
       const accessToken = await getAccessToken();
       if (!accessToken) throw new Error("Your session expired. Please sign in again.");
       if (active.turns.length === 0) {
-        void generateChatTitle(content, accessToken)
+        void generateChatTitle(content, conversationId, accessToken)
           .then((title) => setConversations((current) => current.map((conversation) =>
             conversation.id === conversationId ? { ...conversation, title } : conversation,
           )))
@@ -896,6 +815,14 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
         conversationId,
         jobId: assistantMessage.jobId,
         idempotencyKey: assistantMessage.jobId,
+        persistence: {
+          turnId,
+          versionId,
+          userMessageId: userMessage.id,
+          assistantMessageId: assistantMessage.id,
+          turnIndex: editingTurnIndex >= 0 ? editingTurnIndex : active.turns.length,
+          versionIndex,
+        },
       };
 
       setWaitingByMessage((current) => ({ ...current, [assistantMessage.id]: true }));
@@ -1207,12 +1134,11 @@ function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) 
           settings={settings}
           onClose={closeSettings}
           onSave={(nextSettings) => {
-            setSettings(nextSettings);
-            try {
-              localStorage.setItem(settingsStorageKeyFor(user.id), JSON.stringify(nextSettings));
-            } catch {
-              // Keep the setting active for this session if storage is unavailable.
-            }
+            const savedSettings = { systemPrompt: DEFAULT_SYSTEM_PROMPT, userPresence: nextSettings.userPresence };
+            setSettings(savedSettings);
+            void getAccessToken()
+              .then((token) => token ? saveChatUserPreferences({ userPresence: savedSettings.userPresence }, token) : undefined)
+              .catch(() => undefined);
             closeSettings();
           }}
         />
@@ -1471,9 +1397,9 @@ function SettingsModal({
         <label className="settings-field">
           <span>System prompt</span>
           <textarea
-            value={draft.systemPrompt}
-            maxLength={12000}
-            onChange={(event) => setDraft((current) => ({ ...current, systemPrompt: event.target.value }))}
+            value={settings.systemPrompt}
+            readOnly
+            aria-readonly="true"
             rows={7}
           />
         </label>
@@ -1492,9 +1418,8 @@ function SettingsModal({
           <button
             type="button"
             className="settings-save"
-            disabled={!draft.systemPrompt.trim()}
             onClick={() => onSave({
-              systemPrompt: draft.systemPrompt.trim(),
+              systemPrompt: settings.systemPrompt,
               userPresence: draft.userPresence.trim(),
             })}
           >
