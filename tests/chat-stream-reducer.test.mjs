@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createChatStreamState, reduceChatStreamEvent } from "../app/chat/chat-stream-reducer.ts";
+import { createChatStreamState, reduceChatStreamEvent, reduceChatStreamEvents } from "../app/chat/chat-stream-reducer.ts";
 
 const baseMessage = {
   id: "assistant-1",
@@ -64,3 +64,22 @@ test("first content event records thinking duration once", () => {
   assert.equal(state.thinkingFinished, true);
 });
 
+test("reduces a frame-sized event batch with one final message state", () => {
+  const state = reduceChatStreamEvents(createChatStreamState(baseMessage), [
+    event(1, { type: "content", delta: "Full " }),
+    event(2, { type: "content", delta: "speed" }),
+    event(3, { type: "done", usage: { completionTokens: 2 } }),
+  ]);
+  assert.equal(state.message.content, "Full speed");
+  assert.equal(state.message.lastSequence, 3);
+  assert.equal(state.message.status, "complete");
+});
+
+test("cancelled events finish the message without an error", () => {
+  const state = reduceChatStreamEvent(
+    createChatStreamState(baseMessage),
+    event(1, { type: "cancelled" }),
+  );
+  assert.equal(state.message.status, "cancelled");
+  assert.equal(state.waiting, false);
+});

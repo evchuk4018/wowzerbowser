@@ -7,6 +7,12 @@ import { ensureChatSubmission, finalizeChatJobMessage } from "./chat-history-sto
 const table = () => getServerClient();
 const CHAT_EVENT_BATCH_SIZE = 32;
 const CHAT_EVENT_FLUSH_INTERVAL_MS = 100;
+const CHAT_EVENT_PAGE_SIZE = 1000;
+
+export type PersistedChatJobEvent = {
+  eventIndex: number;
+  event: ChatStreamEvent;
+};
 
 export async function createOrGetChatJob(ownerId: string, request: ChatRequest) {
   const conversationId = request.conversationId!;
@@ -33,12 +39,18 @@ async function appendChatJobEvents(
   ownerId: string,
   conversationId: string,
   jobId: string,
-  events: readonly ChatStreamEvent[],
+  events: readonly PersistedChatJobEvent[],
 ): Promise<void> {
   if (!events.length) return;
   const client = table();
   const { error } = await client.from("chat_job_events").insert(
-    events.map((event) => ({ owner_id: ownerId, conversation_id: conversationId, job_id: jobId, event })),
+    events.map(({ eventIndex, event }) => ({
+      owner_id: ownerId,
+      conversation_id: conversationId,
+      job_id: jobId,
+      event_index: eventIndex,
+      event,
+    })),
   );
   // A deleted conversation removes its job row while a worker may still be
   // between cancellation polls. Treat the resulting foreign-key failure as
@@ -47,20 +59,13 @@ async function appendChatJobEvents(
     if (error.code === "23503") return;
     throw error;
   }
-  const { error: updateError } = await client
-    .from("chat_jobs")
-    .update({ updated_at: new Date().toISOString() })
-    .eq("owner_id", ownerId)
-    .eq("conversation_id", conversationId)
-    .eq("job_id", jobId);
-  if (updateError) throw updateError;
 }
 
 export function createChatJobEventWriter(
   ownerId: string,
   conversationId: string,
   jobId: string,
-): AsyncBatchWriter<ChatStreamEvent> {
+): AsyncBatchWriter<PersistedChatJobEvent> {
   return createAsyncBatchWriter(
     (events) => appendChatJobEvents(ownerId, conversationId, jobId, events),
     { batchSize: CHAT_EVENT_BATCH_SIZE, flushIntervalMs: CHAT_EVENT_FLUSH_INTERVAL_MS },
@@ -84,13 +89,19 @@ export async function getChatJob(ownerId: string, conversationId: string, jobId:
   const client = table();
   const [jobResult, eventsResult] = await Promise.all([
     client.from("chat_jobs").select("job_id,conversation_id,status,error,usage,final_output,created_at,updated_at").eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("job_id", jobId).maybeSingle(),
-    client.from("chat_job_events").select("sequence,event").eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("job_id", jobId).gt("sequence", after).order("sequence").limit(1000),
+    client.from("chat_job_events").select("event_index,event").eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("job_id", jobId).gt("event_index", after).order("event_index").limit(CHAT_EVENT_PAGE_SIZE + 1),
   ]);
   if (jobResult.error) throw jobResult.error;
   if (!jobResult.data) return null;
   if (eventsResult.error) throw eventsResult.error;
-  const events = (eventsResult.data ?? []).map((row) => ({ ...(row.event as ChatStreamEvent), sequence: Number(row.sequence), jobId }));
-  return { jobId, conversationId, status: jobResult.data.status as ChatJobStatus, events, lastSequence: events.at(-1)?.sequence ?? after, error: jobResult.data.error, usage: jobResult.data.usage as ChatUsage | null, finalOutput: jobResult.data.final_output, createdAt: jobResult.data.created_at, updatedAt: jobResult.data.updated_at };
+  const rows = eventsResult.data ?? [];
+  const hasMore = rows.length > CHAT_EVENT_PAGE_SIZE;
+  const events = rows.slice(0, CHAT_EVENT_PAGE_SIZE).map((row) => ({
+    ...(row.event as ChatStreamEvent),
+    sequence: Number(row.event_index),
+    jobId,
+  }));
+  return { jobId, conversationId, status: jobResult.data.status as ChatJobStatus, events, hasMore, lastSequence: events.at(-1)?.sequence ?? after, error: jobResult.data.error, usage: jobResult.data.usage as ChatUsage | null, finalOutput: jobResult.data.final_output, createdAt: jobResult.data.created_at, updatedAt: jobResult.data.updated_at };
 }
 
 export async function cancelChatJob(ownerId: string, conversationId: string, jobId: string) {

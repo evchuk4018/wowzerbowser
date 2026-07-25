@@ -3,10 +3,11 @@ import type {
   ChatModelInfo,
   ChatRequest,
   ChatJobResumeResponse,
-  ChatJobSubmissionResponse,
   SequencedChatStreamEvent,
 } from "../../lib/chat-protocol";
 import type { ChatConversation, ChatConversationSummary } from "../../lib/chat-history";
+import { readChatLiveStream } from "./read-chat-live-stream";
+import { chatTerminalEvents } from "./chat-terminal-events";
 
 const LIVE_CHAT_POLL_INTERVAL_MS = 100;
 
@@ -65,14 +66,15 @@ export async function fetchChatModels(accessToken: string): Promise<ChatModelInf
   return body.models ?? [];
 }
 
-export async function submitChatJob(request: ChatRequest, accessToken: string): Promise<ChatJobSubmissionResponse> {
+async function openChatStream(request: ChatRequest, accessToken: string, signal?: AbortSignal): Promise<Response> {
   const response = await fetch("/api/chat", {
     method: "POST",
     headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
     body: JSON.stringify(request),
+    signal,
   });
   if (!response.ok) throw new Error(await readError(response));
-  return response.json() as Promise<ChatJobSubmissionResponse>;
+  return response;
 }
 
 export async function fetchChatJob(conversationId: string, jobId: string, after: number, accessToken: string, signal?: AbortSignal): Promise<ChatJobResumeResponse> {
@@ -91,12 +93,50 @@ export async function* streamChatResponse(
   accessToken: string,
   signal?: AbortSignal,
 ): AsyncGenerator<SequencedChatStreamEvent> {
-  const submission = await submitChatJob(request, accessToken);
   let sequence = 0;
+  let streamCompleted = false;
+  let sawStreamError = false;
+  let sawDone = false;
+  let activeJobId = request.jobId!;
+  const response = await openChatStream(request, accessToken, signal);
+  try {
+    for await (const envelope of readChatLiveStream(response)) {
+      if (envelope.type === "submission") {
+        activeJobId = envelope.submission.jobId;
+      } else if (envelope.type === "event") {
+        if (envelope.event.sequence <= sequence) continue;
+        sequence = envelope.event.sequence;
+        if (envelope.event.type === "error") sawStreamError = true;
+        if (envelope.event.type === "done") sawDone = true;
+        yield envelope.event;
+      } else if (envelope.type === "terminal") {
+        const { terminal } = envelope;
+        for (const event of chatTerminalEvents({
+          jobId: terminal.jobId,
+          status: terminal.status,
+          error: terminal.error,
+          usage: terminal.usage,
+          after: sequence,
+          sawError: sawStreamError,
+          sawDone,
+        })) {
+          sequence = event.sequence;
+          yield event;
+        }
+        streamCompleted = true;
+      }
+    }
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    // The job is durable. Resume below from the last live event after a
+    // transport interruption.
+  }
+  if (streamCompleted || signal?.aborted) return;
+
   while (!signal?.aborted) {
     let snapshot: ChatJobResumeResponse;
     try {
-      snapshot = await fetchChatJob(request.conversationId!, submission.jobId, sequence, accessToken, signal);
+      snapshot = await fetchChatJob(request.conversationId!, activeJobId, sequence, accessToken, signal);
     } catch (error) {
       if (signal?.aborted) throw error;
       await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -105,9 +145,26 @@ export async function* streamChatResponse(
     for (const event of snapshot.events) {
       if (event.sequence <= sequence) continue;
       sequence = event.sequence;
+      if (event.type === "error") sawStreamError = true;
+      if (event.type === "done") sawDone = true;
       yield event;
     }
-    if (["completed", "failed", "cancelled"].includes(snapshot.status)) return;
+    if (snapshot.hasMore) continue;
+    if (["completed", "failed", "cancelled"].includes(snapshot.status)) {
+      for (const event of chatTerminalEvents({
+        jobId: snapshot.jobId,
+        status: snapshot.status,
+        error: snapshot.error,
+        usage: snapshot.usage,
+        after: sequence,
+        sawError: sawStreamError,
+        sawDone,
+      })) {
+        sequence = event.sequence;
+        yield event;
+      }
+      return;
+    }
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(resolve, LIVE_CHAT_POLL_INTERVAL_MS);
       signal?.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason); }, { once: true });

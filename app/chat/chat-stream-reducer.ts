@@ -69,6 +69,10 @@ export function reduceChatStreamEvent(
       streamError = true;
       message = { ...message, status: "error", error: event.message };
       break;
+    case "cancelled":
+      waiting = false;
+      message = { ...message, status: "cancelled" };
+      break;
     case "done":
       waiting = false;
       message = finalizeChatHistoryMessage(
@@ -103,3 +107,14 @@ export function reduceChatStreamEvent(
 }
 
 export const chatStreamReducer = reduceChatStreamEvent;
+
+export function reduceChatStreamEvents(
+  state: ChatStreamReducerState,
+  events: readonly SequencedChatStreamEvent[],
+  options: ChatStreamReducerOptions = {},
+): ChatStreamReducerState {
+  return events.reduce(
+    (current, event) => reduceChatStreamEvent(current, event, options),
+    state,
+  );
+}

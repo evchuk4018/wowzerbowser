@@ -165,6 +165,7 @@ export async function recoverPersistedJob({
       });
     }
 
+    if (snapshot.hasMore) continue;
     const terminal = terminalAction(candidate, snapshot);
     if (terminal) {
       if (!signal.aborted) {

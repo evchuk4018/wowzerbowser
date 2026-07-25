@@ -167,6 +167,9 @@ export function applyChatStreamEvent(
     next.error = event.message;
     next.status = "error";
     next.activities = finishRunningActivities(next.activities, true, now);
+  } else if (event.type === "cancelled") {
+    next.status = "cancelled";
+    next.activities = finishRunningActivities(next.activities, true, now);
   } else if (event.type === "done") {
     next.activities = finishRunningActivities(next.activities, true, now);
   }

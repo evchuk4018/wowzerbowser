@@ -11,6 +11,7 @@ import type {
   ChatModelId,
   ChatReasoningEffort,
   ChatRequest,
+  SequencedChatStreamEvent,
 } from "../../lib/chat-protocol";
 import {
   cancelChatJob,
@@ -27,7 +28,7 @@ import { makeId } from "./conversation-defaults";
 import type { ChatSettings, Conversation, Message } from "./conversation-types";
 import {
   createChatStreamState,
-  reduceChatStreamEvent,
+  reduceChatStreamEvents,
 } from "./chat-stream-reducer";
 
 export type ActiveChatRequest = {
@@ -265,6 +266,40 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     }
 
     let streamState = createChatStreamState(assistantMessage);
+    const pendingEvents: SequencedChatStreamEvent[] = [];
+    let streamFrame: number | null = null;
+    const flushPendingEvents = () => {
+      streamFrame = null;
+      const events = pendingEvents.splice(0);
+      if (!events.length) return;
+      streamState = reduceChatStreamEvents(streamState, events, { thinkingStartedAt });
+      inputRefDispatch(input, {
+        type: "UPDATE_MESSAGE",
+        conversationId: conversation.id,
+        messageId: assistantMessage.id,
+        patch: streamState.message,
+      });
+      if (!streamState.waiting) {
+        setWaitingByMessage((current) => {
+          if (!(assistantMessage.id in current)) return current;
+          const next = { ...current };
+          delete next[assistantMessage.id];
+          return next;
+        });
+      }
+      if (streamState.thinkingFinished) {
+        setThinkingByMessage((current) => {
+          if (!(assistantMessage.id in current)) return current;
+          const next = { ...current };
+          delete next[assistantMessage.id];
+          return next;
+        });
+      }
+    };
+    const flushPendingEventsNow = () => {
+      if (streamFrame !== null) cancelAnimationFrame(streamFrame);
+      flushPendingEvents();
+    };
     try {
       const accessToken = await input.getAccessToken();
       if (!accessToken) throw new Error("Your session expired. Please sign in again.");
@@ -293,35 +328,21 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         reasoningEffort: input.reasoningEffort,
       });
       for await (const event of streamChatResponse(request, accessToken, controller.signal)) {
-        if (event.sequence <= (streamState.message.lastSequence ?? 0)) continue;
-        streamState = reduceChatStreamEvent(streamState, event, {
-          thinkingStartedAt,
-        });
-        inputRefDispatch(input, {
-          type: "UPDATE_MESSAGE",
-          conversationId: conversation.id,
-          messageId: assistantMessage.id,
-          patch: streamState.message,
-        });
-        if (!streamState.waiting) {
-          setWaitingByMessage((current) => {
-            if (!(assistantMessage.id in current)) return current;
-            const next = { ...current };
-            delete next[assistantMessage.id];
-            return next;
-          });
-        }
-        if (streamState.thinkingFinished) {
-          setThinkingByMessage((current) => {
-            if (!(assistantMessage.id in current)) return current;
-            const next = { ...current };
-            delete next[assistantMessage.id];
-            return next;
-          });
-        }
+        const lastPendingSequence = pendingEvents.at(-1)?.sequence
+          ?? streamState.message.lastSequence
+          ?? 0;
+        if (event.sequence <= lastPendingSequence) continue;
+        pendingEvents.push(event);
+        if (streamFrame === null) streamFrame = requestAnimationFrame(flushPendingEvents);
       }
+      flushPendingEventsNow();
     } catch (error: unknown) {
-      if (!controller.signal.aborted) {
+      if (controller.signal.aborted) {
+        if (streamFrame !== null) cancelAnimationFrame(streamFrame);
+        streamFrame = null;
+        pendingEvents.length = 0;
+      } else {
+        flushPendingEventsNow();
         const message = error instanceof Error ? error.message : "The response failed.";
         inputRefDispatch(input, {
           type: "MARK_MESSAGE_ERROR",

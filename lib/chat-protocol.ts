@@ -142,6 +142,7 @@ export type ChatJobResumeResponse = {
   conversationId: string;
   status: ChatJobStatus;
   events: SequencedChatStreamEvent[];
+  hasMore: boolean;
   lastSequence: number;
   error: string | null;
   usage: ChatUsage | null;
@@ -150,6 +151,23 @@ export type ChatJobResumeResponse = {
   updatedAt: string;
 };
 export type ChatJobSubmissionResponse = { jobId: string; status: ChatJobStatus; resumed: boolean };
+export type ChatJobTerminalResponse = {
+  jobId: string;
+  status: ChatJobStatus;
+  error: string | null;
+  usage: ChatUsage | null;
+  finalOutput: string;
+  providerMetrics?: ChatStreamMetrics;
+};
+export type ChatStreamMetrics = {
+  completionTokens: number | null;
+  outputWindowMs: number | null;
+  outputTps: number | null;
+};
+export type ChatLiveStreamEnvelope =
+  | { type: "submission"; submission: ChatJobSubmissionResponse }
+  | { type: "event"; event: SequencedChatStreamEvent }
+  | { type: "terminal"; terminal: ChatJobTerminalResponse };
 
 export type ChatModelInfo = {
   id: ChatModelId;
@@ -174,6 +192,7 @@ export type ChatStreamEvent =
       tools?: string[];
     }
   | { type: "done"; usage: ChatUsage | null }
+  | { type: "cancelled" }
   | { type: "error"; message: string };
 
 export type ChatUsage = {

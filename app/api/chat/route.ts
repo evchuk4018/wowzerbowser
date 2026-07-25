@@ -5,6 +5,8 @@ import { parseChatRequest, ChatRequestValidationError } from "../../../lib/chat-
 import { assertDeepSeekConfigured, DeepSeekError } from "../../providers/deepseek/deepseek-adapter";
 import { createOrGetChatJob } from "../../server/chat/chat-job-store";
 import { runChatJob } from "../../server/chat/chat-job-runner";
+import { encodeChatLiveEnvelope } from "../../server/chat/encode-chat-live-envelope";
+import type { ChatLiveStreamEnvelope } from "../../../lib/chat-protocol";
 
 export const maxDuration = 300;
 const unauthorized = () => NextResponse.json({ error: "Unauthorized." }, { status: 401 });
@@ -22,8 +24,81 @@ export async function POST(request: Request) {
     }
     assertDeepSeekConfigured();
     const submission = await createOrGetChatJob(user.id, chatRequest);
-    if (submission.status === "queued") after(() => runChatJob(user.id, chatRequest.conversationId!, submission.jobId));
-    return NextResponse.json(submission, { status: submission.resumed ? 200 : 202 });
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    let deliveryOpen = true;
+    const failDelivery = (error: Error) => {
+      const controller = streamController;
+      deliveryOpen = false;
+      streamController = null;
+      try {
+        controller?.error(error);
+      } catch {
+        // The response was already closed by its consumer.
+      }
+    };
+    const send = (envelope: ChatLiveStreamEnvelope) => {
+      if (!deliveryOpen || !streamController) return;
+      if (streamController.desiredSize !== null && streamController.desiredSize <= 0) {
+        failDelivery(new Error("Live delivery fell behind; resuming from durable storage."));
+        return;
+      }
+      try {
+        streamController.enqueue(encodeChatLiveEnvelope(envelope));
+      } catch {
+        failDelivery(new Error("Live delivery closed; resuming from durable storage."));
+      }
+    };
+    const stream = new ReadableStream<Uint8Array>(
+      {
+        start(controller) {
+          streamController = controller;
+          send({ type: "submission", submission });
+        },
+        cancel() {
+          deliveryOpen = false;
+          streamController = null;
+        },
+      },
+      { highWaterMark: 64 },
+    );
+
+    const execution = submission.resumed
+      ? Promise.resolve()
+      : runChatJob(user.id, chatRequest.conversationId, submission.jobId, {
+          onEvent: (event) => send({ type: "event", event }),
+        })
+          .then((terminal) => {
+            if (terminal) send({ type: "terminal", terminal });
+          })
+          .catch((error: unknown) => {
+            send({
+              type: "terminal",
+              terminal: {
+                jobId: submission.jobId,
+                status: "failed",
+                error: error instanceof Error ? error.message : "Generation failed.",
+                usage: null,
+                finalOutput: "",
+              },
+            });
+          });
+    const completion = execution.finally(() => {
+      if (!deliveryOpen || !streamController) return;
+      deliveryOpen = false;
+      streamController.close();
+      streamController = null;
+    });
+    after(() => completion);
+
+    return new Response(stream, {
+      status: submission.resumed ? 200 : 202,
+      headers: {
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-cache, no-transform",
+        connection: "keep-alive",
+        "x-accel-buffering": "no",
+      },
+    });
   } catch (error) {
     if (error instanceof ChatRequestValidationError || error instanceof SyntaxError) return NextResponse.json({ error: error.message }, { status: 400 });
     const status = error instanceof DeepSeekError ? error.status : 503;

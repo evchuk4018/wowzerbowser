@@ -258,7 +258,7 @@ export async function getChatConversation(ownerId: string, conversationId: strin
   const jobIds = [...new Set(messages.map((message) => message.job_id).filter((jobId): jobId is string => Boolean(jobId)))];
   if (jobIds.length) {
     const [eventsResult, jobsResult] = await Promise.all([
-      db.from("chat_job_events").select("job_id,sequence,event").eq("owner_id", ownerId).eq("conversation_id", conversationId).in("job_id", jobIds).order("sequence"),
+      db.from("chat_job_events").select("job_id,event_index,event").eq("owner_id", ownerId).eq("conversation_id", conversationId).in("job_id", jobIds).order("event_index"),
       db.from("chat_jobs").select("job_id,status,error,final_output").eq("owner_id", ownerId).eq("conversation_id", conversationId).in("job_id", jobIds),
     ]);
     if (eventsResult.error) throw eventsResult.error;
@@ -266,7 +266,7 @@ export async function getChatConversation(ownerId: string, conversationId: strin
     const eventsByJob = new Map<string, Array<{ sequence: number; event: ChatStreamEvent }>>();
     for (const row of eventsResult.data ?? []) {
       const eventList = eventsByJob.get(row.job_id) ?? [];
-      eventList.push({ sequence: Number(row.sequence), event: row.event as ChatStreamEvent });
+      eventList.push({ sequence: Number(row.event_index), event: row.event as ChatStreamEvent });
       eventsByJob.set(row.job_id, eventList);
     }
     const jobsById = new Map((jobsResult.data ?? []).map((job) => [job.job_id, job]));
