@@ -1,0 +1,112 @@
+.auth-shell {
+  min-height: 100dvh;
+  background: var(--bg);
+}
+
+.auth-shell {
+  display: grid;
+  min-height: 100dvh;
+  place-items: center;
+  padding: calc(24px + env(safe-area-inset-top))
+    calc(24px + env(safe-area-inset-right))
+    calc(24px + env(safe-area-inset-bottom))
+    calc(24px + env(safe-area-inset-left));
+  background:
+    radial-gradient(circle at 50% 35%, rgba(212, 255, 112, .07), transparent 34%),
+    var(--bg);
+}
+
+.auth-card {
+  width: min(100%, 430px);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--sidebar);
+  padding: 38px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .28);
+}
+
+.auth-card .spark-mark {
+  margin: 0 0 18px;
+}
+
+.auth-card h1 {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 520;
+  letter-spacing: -.04em;
+}
+
+.auth-card > p {
+  margin: 10px 0 28px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.auth-form {
+  display: grid;
+  gap: 10px;
+}
+
+.auth-form label {
+  color: #d8d8d1;
+  font-size: 13px;
+  font-weight: 560;
+}
+
+.auth-form input {
+  width: 100%;
+  height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  outline: none;
+  background: var(--panel);
+  padding: 0 14px;
+  color: var(--text);
+  font-size: 16px;
+}
+
+.auth-form input:focus {
+  border-color: #676960;
+  box-shadow: 0 0 0 3px rgba(212, 255, 112, .08);
+}
+
+.auth-form button {
+  height: 48px;
+  margin-top: 5px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--accent);
+  color: #20211f;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.auth-form button:disabled {
+  cursor: default;
+  opacity: .5;
+}
+
+.auth-form .text-button {
+  height: auto;
+  margin-top: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: underline;
+}
+
+.auth-error {
+  margin: 2px 0 0;
+  color: #ff9c91;
+  font-size: 13px;
+}
+
+.auth-success {
+  border: 1px solid rgba(212, 255, 112, .24);
+  border-radius: 12px;
+  background: rgba(212, 255, 112, .07);
+  padding: 15px;
+  color: #e6f5c1;
+  line-height: 1.55;
+}

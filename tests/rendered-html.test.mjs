@@ -12,7 +12,52 @@ import { parseChatRequest } from "../lib/chat-protocol.ts";
 
 const nextCli = fileURLToPath(new URL("../node_modules/next/dist/bin/next", import.meta.url));
 
+const stylesheetPaths = [
+  "../app/globals.css",
+  "../app/styles/tokens.css",
+  "../app/styles/base.css",
+  "../app/styles/auth.css",
+  "../app/styles/app-shell.css",
+  "../app/styles/sidebar.css",
+  "../app/styles/settings.css",
+  "../app/styles/transcript.css",
+  "../app/styles/assistant-markdown.css",
+  "../app/styles/message-actions.css",
+  "../app/styles/reasoning.css",
+  "../app/styles/assistant-activity.css",
+  "../app/styles/artifacts.css",
+  "../app/styles/composer.css",
+  "../app/styles/responsive.css",
+  "../app/styles/reduced-motion.css",
+];
+
+async function readStyles() {
+  const styles = await Promise.all(
+    stylesheetPaths.map((path) => readFile(new URL(path, import.meta.url), "utf8")),
+  );
+  return styles.join("\n");
+}
+
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+test("loads feature stylesheets in deterministic cascade order", async () => {
+  const [layout, globals] = await Promise.all([
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  const imports = stylesheetPaths.map((path) => `./${path.replace("../app/", "")}`);
+  let previousIndex = -1;
+  for (const stylesheet of imports) {
+    const index = layout.indexOf(`import "${stylesheet}"`);
+    assert.notEqual(index, -1, `${stylesheet} should be imported by the root layout`);
+    assert.ok(index > previousIndex, `${stylesheet} should preserve the declared cascade order`);
+    previousIndex = index;
+  }
+
+  assert.match(globals, /^@import "tailwindcss";/);
+  assert.doesNotMatch(globals, /(?:^|\n)\s*[^/@\s][^\n]*\{/);
+});
 
 async function assertPngRoute(path, width, height) {
   const response = await fetch(`http://127.0.0.1:43123${path}`);
@@ -147,7 +192,7 @@ test("keeps PWA icon references and service worker behavior safe", async () => {
     readFile(new URL("../app/manifest.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/pwa/service-worker-registration.tsx", import.meta.url), "utf8"),
     readFile(new URL("../public/sw.js", import.meta.url), "utf8"),
-    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readStyles(),
   ]);
 
   for (const icon of ["/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-maskable-512.png"]) {
@@ -246,7 +291,7 @@ test("keeps composer model and thinking controls accessible and responsive", asy
     readFile(new URL("../app/chat/conversation-defaults.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/chat-protocol.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/chat-composer.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readStyles(),
   ]);
   const client = `${page}\n${workspace}\n${sidebar}\n${preferences}\n${storage}\n${settings}\n${defaults}\n${protocol}`;
 
@@ -286,7 +331,7 @@ test("shows call activity without a generic generation indicator", async () => {
     readFile(new URL("../app/chat/use-chat-generation.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/chat-stream-reducer.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/call-activity-indicator.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readStyles(),
   ]);
   const client = `${page}\n${workspace}\n${transcript}\n${turn}\n${generation}\n${stream}\n${indicator}`;
 
@@ -312,7 +357,7 @@ test("keeps mobile prompt actions prominent and ephemeral", async () => {
     readFile(new URL("../app/chat/chat-transcript.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/conversation-turn.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/message-actions.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readStyles(),
   ]);
   const client = `${page}\n${workspace}\n${transcript}\n${turn}\n${actions}`;
 
@@ -534,7 +579,7 @@ test("wires mobile history swipes without pointer capture", async () => {
     readFile(new URL("../app/chat/chat-workspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/use-mobile-history-navigation.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/chat-sidebar.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readStyles(),
     readFile(new URL("../app/chat/mobile-history-swipe.ts", import.meta.url), "utf8"),
   ]);
   const client = `${page}\n${workspace}\n${navigation}\n${sidebar}`;
@@ -606,7 +651,7 @@ test("does not retain removed hosting integrations", async () => {
 test("renders web activities inside thought-process disclosures", async () => {
   const [activity, styles, stream, history] = await Promise.all([
     readFile(new URL("../app/chat/assistant-activity.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readStyles(),
     readFile(new URL("../app/chat/chat-stream-reducer.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/chat-history.ts", import.meta.url), "utf8"),
   ]);

@@ -1,0 +1,57 @@
+.app-shell {
+  min-height: 100dvh;
+  background: var(--bg);
+}
+
+.app-shell {
+  display: grid;
+  height: 100dvh;
+  min-height: 0;
+  grid-template-columns: 300px minmax(0, 1fr);
+}
+
+.chat-area {
+  position: relative;
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 38%, rgba(255, 255, 255, .018), transparent 31%),
+    var(--bg);
+}
+
+.chat-area.chat-active {
+  justify-content: flex-start;
+}
+
+.empty-state {
+  margin-top: -115px;
+  text-align: center;
+}
+
+.spark-mark {
+  width: 44px;
+  height: 44px;
+  margin: 0 auto 21px;
+  color: var(--accent);
+  font-size: 38px;
+  line-height: 1;
+}
+
+.empty-state h1 {
+  margin: 0;
+  font-size: clamp(30px, 3vw, 43px);
+  font-weight: 430;
+  letter-spacing: -0.045em;
+}
+
+.empty-state p {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 15px;
+}

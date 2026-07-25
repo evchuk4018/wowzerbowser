@@ -2,6 +2,21 @@ import type { Metadata, Viewport } from "next";
 import { Geist } from "next/font/google";
 import "katex/dist/katex.min.css";
 import "./globals.css";
+import "./styles/tokens.css";
+import "./styles/base.css";
+import "./styles/auth.css";
+import "./styles/app-shell.css";
+import "./styles/sidebar.css";
+import "./styles/settings.css";
+import "./styles/transcript.css";
+import "./styles/assistant-markdown.css";
+import "./styles/message-actions.css";
+import "./styles/reasoning.css";
+import "./styles/assistant-activity.css";
+import "./styles/artifacts.css";
+import "./styles/composer.css";
+import "./styles/responsive.css";
+import "./styles/reduced-motion.css";
 import { ServiceWorkerRegistration } from "./pwa/service-worker-registration";
 
 const geist = Geist({

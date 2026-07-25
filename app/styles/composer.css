@@ -1,0 +1,209 @@
+.composer-wrap {
+  position: absolute;
+  bottom: 24px;
+  width: min(860px, calc(100% - 42px));
+}
+
+.chat-active .composer-wrap {
+  position: absolute;
+  right: 0;
+  bottom: 24px;
+  left: 0;
+  z-index: 5;
+  width: min(860px, calc(100% - 42px));
+  margin: 0 auto;
+}
+
+.composer {
+  min-height: 108px;
+  border: 1px solid #3b3c38;
+  border-radius: 20px;
+  background: var(--panel);
+  padding: 17px 18px 13px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .22);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.composer:focus-within {
+  border-color: #55564f;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .28), 0 0 0 1px rgba(212, 255, 112, .08);
+}
+
+.composer textarea {
+  display: block;
+  width: 100%;
+  height: 48px;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.composer-editing {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: -2px 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.composer-editing button {
+  border: 0;
+  background: transparent;
+  padding: 2px 4px;
+  color: var(--quiet);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.composer-editing button:hover {
+  color: var(--text);
+}
+
+.composer textarea::placeholder {
+  color: #92938c;
+}
+
+.composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.composer-action-spacer {
+  flex: 1;
+}
+
+.composer-menu {
+  position: relative;
+}
+
+.composer-menu-trigger {
+  display: inline-flex;
+  max-width: 150px;
+  height: 34px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #41423d;
+  border-radius: 9px;
+  background: #252623;
+  padding: 0 9px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.composer-menu-trigger:hover:not(:disabled),
+.composer-menu-trigger[aria-expanded="true"] {
+  border-color: #60625a;
+  background: #30312d;
+  color: var(--text);
+}
+
+.composer-menu-trigger:disabled,
+.composer-menu-option:disabled,
+.attach-button:disabled {
+  cursor: default;
+  opacity: .45;
+}
+
+.menu-trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-chevron {
+  color: var(--quiet);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.composer-menu-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  display: grid;
+  min-width: 156px;
+  gap: 2px;
+  border: 1px solid #4a4b45;
+  border-radius: 11px;
+  background: #242521;
+  padding: 5px;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, .38);
+}
+
+.composer-menu-option {
+  display: flex;
+  width: 100%;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  padding: 0 9px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+}
+
+.composer-menu-option:hover:not(:disabled),
+.composer-menu-option.selected {
+  background: #33342f;
+  color: var(--text);
+}
+
+.attach-button {
+  width: 31px;
+  height: 31px;
+  border-radius: 9px;
+  color: #d8d8d1;
+  font-size: 24px;
+  font-weight: 300;
+}
+
+.send-button {
+  width: 34px;
+  height: 34px;
+  margin-left: auto;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #20211f;
+  font-size: 22px;
+  font-weight: 600;
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+.stop-button {
+  padding: 0;
+}
+
+.stop-icon {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.send-button:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+.send-button:disabled {
+  cursor: default;
+  opacity: .22;
+}
+
+.helper-text {
+  margin: 9px 0 0;
+  color: #686963;
+  font-size: 11px;
+  text-align: center;
+}
