@@ -33,6 +33,7 @@ bobert may use Markdown for structure and readability, and LaTeX for mathematica
 </bobert_behavior>`;
 export const CHAT_MODEL_IDS = ["deepseek-v4-flash", "deepseek-v4-pro"] as const;
 export type ChatModelId = (typeof CHAT_MODEL_IDS)[number];
+
 const MAX_PROMPT_LENGTH = 12000;
 const MAX_TRACE_LENGTH = 128 * 1024;
 const MAX_MESSAGES = 100;
@@ -43,6 +44,8 @@ export type ChatReasoningEffort = "high" | "max";
 export type ChatMessageInput = {
   role: "user" | "assistant";
   content: string;
+  /** Persisted, provider-neutral metadata; image bytes never travel in this field. */
+  attachments?: ChatImageAttachment[];
   /** Provider-neutral replay information for prior assistant tool rounds. */
   reasoning?: string;
   toolCalls?: ChatToolCall[];
@@ -88,6 +91,14 @@ export type ChatArtifact = {
   size: number;
 };
 
+export type ChatImageToolResult = {
+  kind: "image";
+  imageId: string;
+  question: string;
+  answer: string;
+  model: string | null;
+};
+
 export type ChatToolResult = {
   id: string;
   name: string;
@@ -109,6 +120,7 @@ export type ChatToolResult = {
     | { kind: "date"; currentDate: string; timeZone: string }
     | { kind: "location"; available: true; location: string; source: "deployment_metadata" }
     | { kind: "location"; available: false; message: string };
+  image?: ChatImageToolResult;
 };
 
 export type ChatRequest = {
@@ -258,6 +270,187 @@ function readBoundedString(value: unknown, field: string, maximum: number): stri
   return result;
 }
 
+function readBoundedNonEmptyString(value: unknown, field: string, maximum: number): string {
+  const result = readNonEmptyString(value, field);
+  if (result.length > maximum) throw new ChatRequestValidationError(`${field} is too long.`);
+  return result;
+}
+
+function readNullableBoundedString(value: unknown, field: string, maximum: number): string | null {
+  if (value === null) return null;
+  return readBoundedString(value, field, maximum);
+}
+
+function readImageModel(value: unknown, field: string): string | null {
+  if (value === null) return null;
+  return readBoundedNonEmptyString(value, field, 256);
+}
+
+function readImageUsage(value: unknown, field: string): ChatUsage | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (!isRecord(value)) throw new ChatRequestValidationError(`${field} is invalid.`);
+  const usage: ChatUsage = {};
+  for (const key of [
+    "promptTokens",
+    "completionTokens",
+    "totalTokens",
+    "cachedPromptTokens",
+    "reasoningTokens",
+  ] as const) {
+    if (value[key] === undefined) continue;
+    if (typeof value[key] !== "number" || !Number.isInteger(value[key]) || value[key] < 0) {
+      throw new ChatRequestValidationError(`${field}.${key} is invalid.`);
+    }
+    usage[key] = value[key];
+  }
+  return usage;
+}
+
+function readImageAnalysis(value: unknown, field: string): ChatImageAnalysis {
+  if (!isRecord(value)) throw new ChatRequestValidationError(`${field} is invalid.`);
+  if (value.status !== "complete" && value.status !== "failed") {
+    throw new ChatRequestValidationError(`${field}.status is invalid.`);
+  }
+  const visibleText = readNullableBoundedString(
+    value.visibleText,
+    `${field}.visibleText`,
+    CHAT_IMAGE_MAX_ANALYSIS_RESPONSE_LENGTH,
+  );
+  const mainVisuals = readNullableBoundedString(
+    value.mainVisuals,
+    `${field}.mainVisuals`,
+    CHAT_IMAGE_MAX_ANALYSIS_RESPONSE_LENGTH,
+  );
+  const error = value.error === undefined
+    ? undefined
+    : readBoundedNonEmptyString(value.error, `${field}.error`, 2_000);
+  const textUsage = readImageUsage(value.textUsage, `${field}.textUsage`);
+  const visualUsage = readImageUsage(value.visualUsage, `${field}.visualUsage`);
+  if (value.status === "failed" && error === undefined) {
+    throw new ChatRequestValidationError(`${field}.error is required for failed analysis.`);
+  }
+  return {
+    status: value.status,
+    // The text-analysis adapter maps its sentinel response to null. Normalize
+    // persisted/replayed data as well so NONE never reaches a provider as text.
+    visibleText: visibleText === "NONE" ? null : visibleText,
+    mainVisuals,
+    textModel: readImageModel(value.textModel, `${field}.textModel`),
+    visualModel: readImageModel(value.visualModel, `${field}.visualModel`),
+    ...(textUsage === undefined ? {} : { textUsage }),
+    ...(visualUsage === undefined ? {} : { visualUsage }),
+    ...(error === undefined ? {} : { error }),
+  };
+}
+
+/** Parse one persisted attachment descriptor without accepting bytes or URLs. */
+export function parseChatImageAttachment(value: unknown, field = "attachment"): ChatImageAttachment {
+  if (!isRecord(value)) throw new ChatRequestValidationError(`${field} is invalid.`);
+  const id = readBoundedNonEmptyString(value.id, `${field}.id`, 128);
+  if (!/^[a-zA-Z0-9_-]+$/.test(id)) {
+    throw new ChatRequestValidationError(`${field}.id is invalid.`);
+  }
+  let name: string | null;
+  if (value.name === null) {
+    name = null;
+  } else {
+    name = readBoundedString(value.name, `${field}.name`, 512).trim() || null;
+    if (name && /[\u0000-\u001f\u007f]/u.test(name)) {
+      throw new ChatRequestValidationError(`${field}.name is invalid.`);
+    }
+  }
+  if (!CHAT_IMAGE_CONTENT_TYPES.includes(value.contentType as ChatImageContentType)) {
+    throw new ChatRequestValidationError(`${field}.contentType is invalid.`);
+  }
+  if (
+    typeof value.size !== "number" ||
+    !Number.isInteger(value.size) ||
+    value.size < 0 ||
+    value.size > CHAT_IMAGE_MAX_BYTES
+  ) {
+    throw new ChatRequestValidationError(`${field}.size is invalid.`);
+  }
+  const storagePath = readBoundedNonEmptyString(value.storagePath, `${field}.storagePath`, 1_024);
+  if (
+    storagePath.startsWith("/") ||
+    storagePath.includes("\\") ||
+    storagePath.includes("?") ||
+    storagePath.includes("#") ||
+    storagePath.split("/").some((segment) => !segment || segment === "." || segment === "..") ||
+    !/^[a-zA-Z0-9._/-]+$/.test(storagePath) ||
+    /^(?:data|https?):/i.test(storagePath)
+  ) {
+    throw new ChatRequestValidationError(`${field}.storagePath is invalid.`);
+  }
+  return {
+    id,
+    name,
+    contentType: value.contentType as ChatImageContentType,
+    size: value.size,
+    storagePath,
+    analysis: readImageAnalysis(value.analysis, `${field}.analysis`),
+  };
+}
+
+export function parseChatImageAttachments(value: unknown, field = "attachments"): ChatImageAttachment[] {
+  if (!Array.isArray(value) || value.length > CHAT_IMAGE_MAX_COUNT) {
+    throw new ChatRequestValidationError(
+      `${field} must be an array with at most ${CHAT_IMAGE_MAX_COUNT} images.`,
+    );
+  }
+  const ids = new Set<string>();
+  return value.map((attachment, index) => {
+    const parsed = parseChatImageAttachment(attachment, `${field}[${index}]`);
+    if (ids.has(parsed.id)) throw new ChatRequestValidationError(`${field} contains a duplicate image id.`);
+    ids.add(parsed.id);
+    return parsed;
+  });
+}
+
+/** Safely load legacy or database JSON without allowing malformed metadata to escape. */
+export function normalizeChatImageAttachments(value: unknown): ChatImageAttachment[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const attachments: ChatImageAttachment[] = [];
+  for (const [index, candidate] of value.entries()) {
+    try {
+      const attachment = parseChatImageAttachment(candidate, `attachments[${index}]`);
+      if (seen.has(attachment.id)) continue;
+      seen.add(attachment.id);
+      attachments.push(attachment);
+    } catch {
+      // A malformed old row should not make an otherwise readable transcript unavailable.
+    }
+  }
+  return attachments.slice(0, CHAT_IMAGE_MAX_COUNT);
+}
+
+function readImageToolResult(value: unknown, field: string): ChatImageToolResult {
+  if (!isRecord(value) || value.kind !== "image") {
+    throw new ChatRequestValidationError(`${field} is invalid.`);
+  }
+  return {
+    kind: "image",
+    imageId: readBoundedNonEmptyString(value.imageId, `${field}.imageId`, 128),
+    question: readBoundedNonEmptyString(
+      value.question,
+      `${field}.question`,
+      CHAT_IMAGE_MAX_FOLLOW_UP_QUESTION_LENGTH,
+    ),
+    answer: readBoundedNonEmptyString(
+      value.answer,
+      `${field}.answer`,
+      CHAT_IMAGE_MAX_ANALYSIS_RESPONSE_LENGTH,
+    ),
+    model: readImageModel(value.model, `${field}.model`),
+  };
+}
+
+export function parseChatImageToolResult(value: unknown, field = "image"): ChatImageToolResult {
+  return readImageToolResult(value, field);
+}
+
 function readLocationSource(value: unknown, field: string): "deployment_metadata" {
   if (value !== "deployment_metadata") throw new ChatRequestValidationError(`${field} is invalid.`);
   return value;
@@ -335,6 +528,9 @@ function readToolCalls(value: unknown, field: string): ChatToolCall[] | undefine
               : isRecord(call.result.utility) && call.result.utility.kind === "location" && call.result.utility.available === false
                 ? { utility: { kind: "location" as const, available: false as const, message: readBoundedString(call.result.utility.message, `${field}[${index}].result.utility.message`, 300) } }
                 : {}),
+        ...(call.result.image === undefined
+          ? {}
+          : { image: readImageToolResult(call.result.image, `${field}[${index}].result.image`) }),
       };
     }
     return {
@@ -388,14 +584,21 @@ export function parseChatRequest(value: unknown): ChatRequest {
     const reasoning = message.reasoning === undefined
       ? undefined
       : readString(message.reasoning, `messages[${index}].reasoning`);
+    const attachments = message.attachments === undefined
+      ? undefined
+      : parseChatImageAttachments(message.attachments, `messages[${index}].attachments`);
     const toolCalls = readToolCalls(message.toolCalls, `messages[${index}].toolCalls`);
     const rounds = readRounds(message.rounds, `messages[${index}].rounds`);
     if (message.role === "user" && (reasoning !== undefined || toolCalls !== undefined || rounds !== undefined)) {
       throw new ChatRequestValidationError(`messages[${index}] tool trace is only valid for assistant messages.`);
     }
+    if (message.role === "assistant" && attachments !== undefined) {
+      throw new ChatRequestValidationError(`messages[${index}].attachments are only valid for user messages.`);
+    }
     return {
       role: message.role,
       content: readNonEmptyString(message.content, `messages[${index}].content`),
+      ...(attachments === undefined ? {} : { attachments }),
       ...(reasoning === undefined ? {} : { reasoning }),
       ...(toolCalls === undefined ? {} : { toolCalls }),
       ...(rounds === undefined ? {} : { rounds }),
@@ -475,3 +678,37 @@ export function parseChatRequest(value: unknown): ChatRequest {
     persistence,
   };
 }
+import {
+  CHAT_IMAGE_CONTENT_TYPES,
+  MAX_CHAT_IMAGES_PER_TURN,
+  MAX_CHAT_IMAGE_BYTES,
+  CHAT_IMAGE_UPLOAD_TIMEOUT_MS,
+  OPENROUTER_IMAGE_TIMEOUT_MS,
+  MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH,
+  MAX_IMAGE_FOLLOWUP_QUESTION_LENGTH,
+} from "./chat-image";
+import type { ChatImageAnalysis, ChatImageAttachment, ChatImageContentType } from "./chat-image";
+
+export {
+  CHAT_IMAGE_CONTENT_TYPES,
+  MAX_CHAT_IMAGES_PER_TURN,
+  MAX_CHAT_IMAGE_BYTES,
+  CHAT_IMAGE_UPLOAD_TIMEOUT_MS,
+  OPENROUTER_IMAGE_TIMEOUT_MS,
+  MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH,
+  MAX_IMAGE_FOLLOWUP_QUESTION_LENGTH,
+};
+export type { ChatImageAnalysis, ChatImageAttachment, ChatImageContentType } from "./chat-image";
+export const CHAT_IMAGE_MAX_COUNT = MAX_CHAT_IMAGES_PER_TURN;
+export const CHAT_IMAGE_MAX_BYTES = MAX_CHAT_IMAGE_BYTES;
+export const CHAT_IMAGE_ANALYSIS_TIMEOUT_MS = OPENROUTER_IMAGE_TIMEOUT_MS;
+export const CHAT_IMAGE_MAX_ANALYSIS_RESPONSE_LENGTH = MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH;
+export const CHAT_IMAGE_MAX_FOLLOW_UP_QUESTION_LENGTH = MAX_IMAGE_FOLLOWUP_QUESTION_LENGTH;
+export const CHAT_IMAGE_LIMITS = {
+  maxImagesPerTurn: MAX_CHAT_IMAGES_PER_TURN,
+  maxBytesPerImage: MAX_CHAT_IMAGE_BYTES,
+  uploadTimeoutMs: CHAT_IMAGE_UPLOAD_TIMEOUT_MS,
+  analysisTimeoutMs: OPENROUTER_IMAGE_TIMEOUT_MS,
+  maxAnalysisResponseLength: MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH,
+  maxFollowUpQuestionLength: MAX_IMAGE_FOLLOWUP_QUESTION_LENGTH,
+} as const;

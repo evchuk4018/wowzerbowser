@@ -1,5 +1,6 @@
 import type {
   ChatArtifact,
+  ChatImageAttachment,
   ChatToolCall,
   ChatToolResult,
   ChatStreamEvent,
@@ -19,7 +20,7 @@ export type ChatReasoningActivity = {
 
 export type ChatToolActivity = {
   id: string;
-  kind: "python" | "web";
+  kind: "python" | "web" | "image";
   round: number;
   call: ChatToolCall;
   result?: ChatToolResult;
@@ -29,13 +30,18 @@ export type ChatToolActivity = {
 };
 
 export type ChatPythonActivity = Omit<ChatToolActivity, "kind"> & { kind: "python" };
-export type ChatWebActivity = Omit<ChatToolActivity, "kind"> & { kind: "web" };
-export type ChatAssistantActivity = ChatReasoningActivity | ChatPythonActivity | ChatWebActivity;
+/** Compatibility shape accepted by the existing activity timeline. */
+export type ChatWebActivity = Omit<ChatToolActivity, "kind"> & { kind: "web" | "image" };
+export type ChatImageActivity = Omit<ChatToolActivity, "kind"> & { kind: "image" };
+type ChatPersistedWebActivity = Omit<ChatToolActivity, "kind"> & { kind: "web" };
+export type ChatAssistantActivity = ChatReasoningActivity | ChatPythonActivity | ChatPersistedWebActivity | ChatImageActivity;
 
 export type ChatHistoryMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /** Private storage metadata only; never contains image bytes or URLs. */
+  attachments?: ChatImageAttachment[];
   reasoning?: string;
   activities?: ChatAssistantActivity[];
   artifacts?: ChatArtifact[];
@@ -92,15 +98,17 @@ const finishRunningActivities = (
   return failRunningTools ? { ...activity, status: "failed", durationMs } : activity;
 });
 
-function activityForTool(call: ChatToolCall, round: number, startedAt: number): ChatToolActivity {
-  return {
+function activityForTool(call: ChatToolCall, round: number, startedAt: number): ChatAssistantActivity {
+  const base = {
     id: call.id,
-    kind: call.name === "run_python" ? "python" : "web",
     round,
     call,
     status: "running",
     startedAt,
-  };
+  } as const;
+  if (call.name === "run_python") return { ...base, kind: "python" };
+  if (call.name === "inspect_image") return { ...base, kind: "image" };
+  return { ...base, kind: "web" };
 }
 
 export function applyChatStreamEvent(
@@ -141,7 +149,7 @@ export function applyChatStreamEvent(
     ];
   } else if (event.type === "tool_result") {
     next.activities = next.activities?.map((activity) =>
-      (activity.kind === "python" || activity.kind === "web") && activity.call.id === event.result.id
+      activity.kind !== "reasoning" && activity.call.id === event.result.id
         ? {
             ...activity,
             result: event.result,

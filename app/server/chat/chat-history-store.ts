@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { ChatJobStatus, ChatRequest, ChatStreamEvent } from "../../../lib/chat-protocol";
+import { normalizeChatImageAttachments, type ChatJobStatus, type ChatRequest, type ChatStreamEvent } from "../../../lib/chat-protocol";
 import {
   applyChatStreamEvent,
   finalizeChatHistoryMessage,
@@ -20,6 +20,7 @@ type MessageRow = {
   role: "user" | "assistant";
   content: string;
   reasoning: string | null;
+  attachments: unknown;
   activities: unknown;
   artifacts: unknown;
   thinking_enabled: boolean | null;
@@ -51,11 +52,13 @@ function arrayValue<T>(value: unknown): T[] {
 }
 
 function messageFromRow(row: MessageRow): ChatHistoryMessage {
+  const attachments = normalizeChatImageAttachments(row.attachments);
   return {
     id: row.message_id,
     role: row.role,
     content: row.content,
     ...(row.reasoning === null ? {} : { reasoning: row.reasoning }),
+    ...(attachments.length ? { attachments } : {}),
     activities: arrayValue(row.activities),
     artifacts: arrayValue(row.artifacts),
     ...(row.thinking_enabled === null ? {} : { thinkingEnabled: row.thinking_enabled }),
@@ -84,6 +87,7 @@ function messageRow(
     role: message.role,
     content: message.content,
     reasoning: message.reasoning ?? null,
+    attachments: message.attachments ?? [],
     activities: message.activities ?? [],
     artifacts: message.artifacts ?? [],
     thinking_enabled: message.thinkingEnabled ?? null,
@@ -117,6 +121,15 @@ export async function ensureChatSubmission(ownerId: string, request: ChatRequest
   if (!persistence || !conversationId || !jobId || !lastMessage || lastMessage.role !== "user") {
     throw new Error("Chat persistence metadata is incomplete.");
   }
+  for (const attachment of lastMessage.attachments ?? []) {
+    const expectedPrefix = `${ownerId}/${conversationId}/${persistence.userMessageId}/`;
+    if (
+      attachment.analysis.status !== "complete" ||
+      attachment.storagePath !== `${expectedPrefix}${attachment.id}`
+    ) {
+      throw new Error("Chat image metadata is invalid.");
+    }
+  }
 
   const now = new Date().toISOString();
   await insertIfAbsent("chat_conversations", {
@@ -145,6 +158,7 @@ export async function ensureChatSubmission(ownerId: string, request: ChatRequest
     id: persistence.userMessageId,
     role: "user",
     content: lastMessage.content,
+    ...(lastMessage.attachments?.length ? { attachments: lastMessage.attachments } : {}),
   };
   const assistantMessage: ChatHistoryMessage = {
     id: persistence.assistantMessageId,
