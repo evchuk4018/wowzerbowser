@@ -18,6 +18,7 @@ import {
   type PendingChatImage,
   validateChatImages,
 } from "./chat-image-attachments";
+import { validateChatDocument, type PendingChatDocument } from "./chat-document-attachments";
 
 export type ChatComposerProps = {
   draft: string;
@@ -46,7 +47,7 @@ export type ChatComposerProps = {
   isPreparingAttachments: boolean;
   submissionError?: string | null;
   onCancelEdit: () => void;
-  onSubmit: (event?: FormEvent<HTMLFormElement>, attachments?: readonly PendingChatImage[]) => void | Promise<void>;
+  onSubmit: (event?: FormEvent<HTMLFormElement>, attachments?: readonly PendingChatImage[], documents?: readonly PendingChatDocument[]) => void | Promise<void>;
   onPrepareAttachments?: (attachments: readonly PendingChatImage[]) => PendingChatImage[];
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onStop: () => void;
@@ -85,6 +86,7 @@ export function ChatComposer({
   onStop,
 }: ChatComposerProps) {
   const [attachments, setAttachments] = useState<PendingChatImage[]>([]);
+  const [documents, setDocuments] = useState<PendingChatDocument[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentsRef = useRef(attachments);
@@ -100,13 +102,15 @@ export function ChatComposer({
 
   const addFiles = (files: readonly File[]) => {
     if (!files.length) return;
-    const error = validateChatImages(files, attachments.length);
+    const pdfs=files.filter((file)=>file.type==="application/pdf"); const images=files.filter((file)=>file.type!=="application/pdf");
+    const error = pdfs.length > 1 || documents.length + pdfs.length > 1 ? "Attach one PDF per message." : (pdfs[0] ? validateChatDocument(pdfs[0]) : validateChatImages(images, attachments.length));
     if (error) {
       setAttachmentError(error);
       return;
     }
     setAttachmentError(null);
-    const next = files.map((file) => ({
+    if(pdfs.length)setDocuments((current)=>current.concat(pdfs.map((file)=>({id:crypto.randomUUID(),file}))));
+    const next = images.map((file) => ({
       id: crypto.randomUUID(),
       file,
       previewUrl: URL.createObjectURL(file),
@@ -131,7 +135,7 @@ export function ChatComposer({
   };
 
   return (
-    <form className="composer-wrap" onSubmit={(event) => void onSubmit(event, attachments)}>
+    <form className="composer-wrap" onSubmit={(event) => void onSubmit(event, attachments, documents)}>
       <div className="composer">
         {editing && (
           <div className="composer-editing">
@@ -158,6 +162,7 @@ export function ChatComposer({
             ))}
           </div>
         )}
+        {documents.map((document)=><div className="composer-attachment" key={document.id}><span>{document.file.name}</span><button type="button" aria-label={`Remove ${document.file.name}`} onClick={()=>setDocuments([])}>×</button></div>)}
         {preservedAttachments.length > 0 && (
           <div className="composer-attachments" aria-label="Attached images from the edited prompt">
             {preservedAttachments.map((image) => (
@@ -186,7 +191,7 @@ export function ChatComposer({
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && (attachments.length > 0 || preservedAttachments.length > 0)) {
               event.preventDefault();
-              void onSubmit(undefined, attachments);
+              void onSubmit(undefined, attachments, documents);
               return;
             }
             onKeyDown(event);
@@ -198,7 +203,7 @@ export function ChatComposer({
             ref={fileInputRef}
             className="composer-file-input"
             type="file"
-            accept={ACCEPTED_CHAT_IMAGE_TYPES.join(",")}
+            accept={`${ACCEPTED_CHAT_IMAGE_TYPES.join(",")},application/pdf`}
             multiple
             tabIndex={-1}
             aria-hidden="true"
@@ -210,7 +215,7 @@ export function ChatComposer({
           <button
             type="button"
             className="attach-button"
-            aria-label="Attach images"
+            aria-label="Attach images or PDF"
             disabled={disabled}
             onClick={() => fileInputRef.current?.click()}
           >
@@ -334,7 +339,7 @@ export function ChatComposer({
               type="submit"
               className="send-button"
               aria-label="Send message"
-              disabled={disabled || (!draft.trim() && attachments.length === 0 && preservedAttachments.length === 0)}
+              disabled={disabled || (!draft.trim() && attachments.length === 0 && documents.length === 0 && preservedAttachments.length === 0)}
             >
               ↑
             </button>

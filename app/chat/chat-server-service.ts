@@ -16,6 +16,10 @@ import {
 import { isModalConfigured, ModalPythonExecutor } from "../server/modal/modal-python-executor";
 import { getAuthoritativeChatImageIdsForRequest } from "../server/chat/chat-history-store";
 import { latestNonNullUsage, sumRoundUsage } from "./chat-usage";
+import { availablePdfTools, executePdfTool } from "../server/agent/pdf-tool";
+import { getAuthorizedDocument, getDocumentPages } from "../server/chat/chat-document-store";
+import { ingestPdf } from "../server/chat/chat-document-service";
+import { pdfContext } from "../../lib/chat-document";
 
 const MAX_RESPONSE_MS = 240_000;
 const MAX_TOOL_CALLS = 6;
@@ -47,8 +51,22 @@ export async function generateChatResponse(
   const pythonTools = availableChatTools();
   const webTools = availableWebTools();
   const allowedImageIds = await getAuthoritativeChatImageIdsForRequest(ownerId, chatRequest);
+  const requestedPdfIds = [...new Set(chatRequest.messages.flatMap((message) => message.documents?.map((item) => item.id) ?? []))];
+  const allowedPdfIds = new Set<string>();
+  const authoritativePdfs = new Map<string, NonNullable<Awaited<ReturnType<typeof getAuthorizedDocument>>>>();
+  for (const pdfId of requestedPdfIds) {
+    const document = await getAuthorizedDocument(ownerId, conversationId, pdfId);
+    if (document) { allowedPdfIds.add(pdfId); authoritativePdfs.set(pdfId, document); }
+  }
+  const contextualMessages = await Promise.all(chatRequest.messages.map(async (message) => {
+    const documents = (message.documents ?? []).filter((item) => allowedPdfIds.has(item.id));
+    if (!documents.length) return message;
+    const contexts = await Promise.all(documents.map(async ({ id }) => pdfContext(authoritativePdfs.get(id)!, await getDocumentPages(ownerId, conversationId, id))));
+    return { ...message, content: `${message.content}\n\n${contexts.join("\n\n")}` };
+  }));
+  chatRequest = { ...chatRequest, messages: contextualMessages };
   const imageTools = availableImageTools(allowedImageIds.length > 0);
-  const toolDefinitions = [...pythonTools, ...imageTools, ...webTools];
+  const baseToolDefinitions = [...pythonTools, ...imageTools, ...webTools];
   const imageToolAdvertised = imageTools.some((tool) => tool.function.name === INSPECT_IMAGE_TOOL_NAME);
 
   const enqueue = async (event: ChatStreamEvent) => {
@@ -60,7 +78,7 @@ export async function generateChatResponse(
         thinking: chatRequest.thinking,
         reasoningEffort: chatRequest.reasoningEffort,
         responseId,
-        ...(toolDefinitions.length ? { tools: toolDefinitions.map((tool) => tool.function.name) } : {}),
+        ...(baseToolDefinitions.length || allowedPdfIds.size ? { tools: [...baseToolDefinitions.map((tool) => tool.function.name), ...availablePdfTools(allowedPdfIds.size > 0).map((tool) => tool.function.name)] } : {}),
       });
 
       const deadline = AbortSignal.timeout(Math.max(0, responseDeadlineAt - Date.now()));
@@ -72,6 +90,7 @@ export async function generateChatResponse(
 
       try {
         for (let round = 1; round <= MAX_TOOL_CALLS + 1; round += 1) {
+          const toolDefinitions = [...baseToolDefinitions, ...availablePdfTools(allowedPdfIds.size > 0)];
           await enqueue({ type: "round", round });
           const canCallTools = totalToolCalls < MAX_TOOL_CALLS && round <= MAX_TOOL_CALLS;
           const systemInstructions = [
@@ -148,7 +167,11 @@ export async function generateChatResponse(
             if (call.name === "run_python") {
               if (!isModalConfigured()) throw new Error("Python execution is not configured.");
               if (!executor) executor = new ModalPythonExecutor(ownerId, conversationId, responseDeadlineAt);
-              result = await executePythonTool(call, executor, ownerId, conversationId);
+              result = await executePythonTool(call, executor, ownerId, conversationId, async (artifact, bytes) => {
+                const pdfId = artifact.id;
+                await ingestPdf({ ownerId, conversationId, pdfId, filename: artifact.name, bytes, jobId: responseId });
+                allowedPdfIds.add(pdfId);
+              });
             } else if (call.name === INSPECT_IMAGE_TOOL_NAME && imageToolAdvertised) {
               result = await executeInspectImageTool(call, {
                 ownerId,
@@ -159,6 +182,8 @@ export async function generateChatResponse(
               });
             } else if (webTools.some((tool) => tool.function.name === call.name)) {
               result = await executeWebTool(call);
+            } else if (availablePdfTools(allowedPdfIds.size > 0).some((tool) => tool.function.name === call.name)) {
+              result = await executePdfTool(call, { ownerId, conversationId, allowedPdfIds });
             } else {
               result = {
                 id: call.id,

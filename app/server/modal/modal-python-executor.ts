@@ -492,6 +492,13 @@ export class ModalPythonExecutor {
     };
   }
 
+  /** Read an artifact from the active response sandbox before it is closed. */
+  async readArtifact(pathValue: string): Promise<Uint8Array> {
+    const sandbox = this.sandbox;
+    if (!sandbox) throw new Error("The Python sandbox is not active.");
+    return readBoundedArtifactBytes(sandbox, relativeWorkspacePath(pathValue), this.responseDeadlineAt);
+  }
+
   async close(): Promise<void> {
     const sandbox = this.sandbox;
     this.sandbox = null;

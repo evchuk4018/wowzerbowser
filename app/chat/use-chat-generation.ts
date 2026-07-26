@@ -36,6 +36,8 @@ import {
   type UploadedChatImage,
   uploadChatImages,
 } from "./chat-image-attachments";
+import { uploadChatDocument, type PendingChatDocument } from "./chat-document-attachments";
+import type { ChatDocumentAttachment } from "../../lib/chat-document";
 
 export type ActiveChatRequest = {
   conversationId: string;
@@ -70,6 +72,7 @@ export type SendMessage = (
   editingTurnId?: string | null,
   attachments?: readonly PendingChatImage[],
   preservedAttachments?: readonly UploadedChatImage[],
+  documents?: readonly PendingChatDocument[],
 ) => Promise<void>;
 
 export type ChatGenerationResult = {
@@ -126,6 +129,7 @@ export function buildChatGenerationRequest(input: {
   thinking: boolean;
   reasoningEffort: ChatReasoningEffort;
   attachments?: UploadedChatImage[];
+  documents?: ChatDocumentAttachment[];
 }): ChatRequest {
   const contextTurns = input.editingTurnIndex >= 0
     ? input.conversation.turns.slice(0, input.editingTurnIndex)
@@ -135,6 +139,7 @@ export function buildChatGenerationRequest(input: {
     role: "user",
     content: input.content,
     ...(input.attachments?.length ? { attachments: input.attachments } : {}),
+    ...(input.documents?.length ? { documents: input.documents } : {}),
   } as Message;
   const requestMessages = contextTurns
     .flatMap((turn) => {
@@ -228,10 +233,11 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     editingTurnId = null,
     pendingImages = [],
     preservedAttachments = [],
+    pendingDocuments = [],
   ) => {
     const input = optionsRef.current;
     const authoredContent = rawContent.trim();
-    const content = authoredContent || (pendingImages.length || preservedAttachments.length ? "Image attached" : "");
+    const content = authoredContent || (pendingImages.length || preservedAttachments.length || pendingDocuments.length ? "Attachment added" : "");
     const conversation = activeConversation(input.state);
     if (
       !content ||
@@ -252,6 +258,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     const jobId = makeId();
     const effectiveJobId = imageContext?.jobId ?? jobId;
     let uploadedImages: UploadedChatImage[] = [...preservedAttachments];
+    let uploadedDocuments: ChatDocumentAttachment[] = [];
     setSubmissionError(null);
     if (pendingImages.length) {
       attachmentSubmissionRef.current = true;
@@ -280,11 +287,17 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         setIsSubmittingAttachments(false);
       }
     }
+    if (pendingDocuments.length) {
+      attachmentSubmissionRef.current = true; setIsSubmittingAttachments(true);
+      try { const accessToken=await input.getAccessToken(); if(!accessToken)throw new Error("Your session expired. Please sign in again."); uploadedDocuments=await Promise.all(pendingDocuments.map((document)=>uploadChatDocument({conversationId:conversation.id,userMessageId,jobId:effectiveJobId,document,accessToken,signal:new AbortController().signal}))); }
+      catch(error){setSubmissionError(error instanceof Error?error.message:"The PDF could not be uploaded.");return;} finally {attachmentSubmissionRef.current=false;setIsSubmittingAttachments(false);}
+    }
     const userMessage = {
       id: userMessageId,
       role: "user",
       content,
       ...(uploadedImages.length ? { attachments: uploadedImages } : {}),
+      ...(uploadedDocuments.length ? { documents: uploadedDocuments } : {}),
     } as Message;
     const assistantMessage: Message = {
       id: makeId(),
@@ -396,6 +409,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         thinking: input.thinking,
         reasoningEffort: input.reasoningEffort,
         attachments: uploadedImages,
+        documents: uploadedDocuments,
       });
       let submissionAccepted = false;
       for await (const event of streamChatResponse(request, accessToken, controller.signal)) {

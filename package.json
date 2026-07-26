@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start",
     "smoke:throughput": "node scripts/deepseek-throughput-smoke.mjs",
-    "test": "npm run build && tsx --conditions=react-server --test tests/rendered-html.test.mjs tests/server-behavior.test.mjs tests/durable-chat-jobs.test.mjs tests/chat-event-writer.test.mjs tests/chat-live-stream.test.mjs tests/chat-stream-reducer.test.mjs tests/chat-deletion.test.mjs tests/conversation-reducer.test.mjs tests/usage-tracking.test.mjs tests/normalize-latex-delimiters.test.mjs tests/chat-image-persistence.test.mjs tests/chat-image-provider.test.mjs tests/chat-image-routes.test.mjs",
+    "test": "npm run build && tsx --conditions=react-server --test tests/rendered-html.test.mjs tests/server-behavior.test.mjs tests/durable-chat-jobs.test.mjs tests/chat-event-writer.test.mjs tests/chat-live-stream.test.mjs tests/chat-stream-reducer.test.mjs tests/chat-deletion.test.mjs tests/conversation-reducer.test.mjs tests/usage-tracking.test.mjs tests/normalize-latex-delimiters.test.mjs tests/chat-image-persistence.test.mjs tests/chat-image-provider.test.mjs tests/chat-image-routes.test.mjs tests/chat-document-provider.test.mjs tests/chat-document-routes.test.mjs tests/pdf-tools.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
   },
   "dependencies": {

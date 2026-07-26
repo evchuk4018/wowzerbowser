@@ -1,6 +1,7 @@
 import type {
   ChatArtifact,
   ChatImageAttachment,
+  ChatDocumentAttachment,
   ChatToolCall,
   ChatToolResult,
   ChatStreamEvent,
@@ -40,6 +41,7 @@ export type ChatHistoryMessage = {
   content: string;
   /** Private storage metadata only; never contains image bytes or URLs. */
   attachments?: ChatImageAttachment[];
+  documents?: ChatDocumentAttachment[];
   reasoning?: string;
   activities?: ChatAssistantActivity[];
   artifacts?: ChatArtifact[];

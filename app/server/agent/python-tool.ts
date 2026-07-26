@@ -27,6 +27,7 @@ export async function executePythonTool(
   executor: ModalPythonExecutor,
   ownerId: string,
   conversationId: string,
+  onPdfArtifact?: (artifact: ChatArtifact, bytes: Uint8Array) => Promise<void>,
 ): Promise<ChatToolResult> {
   const startedAt = Date.now();
   if (call.name !== PYTHON_TOOL_NAME) {
@@ -52,6 +53,12 @@ export async function executePythonTool(
         contentType: contentTypeFor(item.path),
       }),
     );
+    if (onPdfArtifact) {
+      for (const artifact of artifacts.filter((item) => item.contentType === "application/pdf")) {
+        const source = result.artifacts?.find((item) => item.path.split("/").pop() === artifact.name);
+        if (source) await onPdfArtifact(artifact, await executor.readArtifact(source.path));
+      }
+    }
     return {
       id: call.id,
       name: call.name,
@@ -85,6 +92,7 @@ function contentTypeFor(path: string): string {
   if (extension === "csv") return "text/csv";
   if (extension === "txt" || extension === "md" || extension === "py") return "text/plain; charset=utf-8";
   if (extension === "png") return "image/png";
+  if (extension === "pdf") return "application/pdf";
   if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
   return "application/octet-stream";
 }

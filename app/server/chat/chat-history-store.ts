@@ -2,6 +2,7 @@ import "server-only";
 
 import { normalizeChatImageAttachments, type ChatJobStatus, type ChatRequest, type ChatStreamEvent } from "../../../lib/chat-protocol";
 import { ChatImageError, type ChatImageAttachment } from "../../../lib/chat-image";
+import type { ChatDocumentAttachment } from "../../../lib/chat-document";
 import {
   applyChatStreamEvent,
   finalizeChatHistoryMessage,
@@ -23,6 +24,7 @@ type MessageRow = {
   content: string;
   reasoning: string | null;
   attachments: unknown;
+  documents: unknown;
   activities: unknown;
   artifacts: unknown;
   thinking_enabled: boolean | null;
@@ -61,6 +63,7 @@ function messageFromRow(row: MessageRow): ChatHistoryMessage {
     content: row.content,
     ...(row.reasoning === null ? {} : { reasoning: row.reasoning }),
     ...(attachments.length ? { attachments } : {}),
+    ...(Array.isArray(row.documents) && row.documents.length ? { documents: row.documents as ChatDocumentAttachment[] } : {}),
     activities: arrayValue(row.activities),
     artifacts: arrayValue(row.artifacts),
     ...(row.thinking_enabled === null ? {} : { thinkingEnabled: row.thinking_enabled }),
@@ -90,6 +93,7 @@ function messageRow(
     content: message.content,
     reasoning: message.reasoning ?? null,
     attachments: message.attachments ?? [],
+    documents: message.documents ?? [],
     activities: message.activities ?? [],
     artifacts: message.artifacts ?? [],
     thinking_enabled: message.thinkingEnabled ?? null,
@@ -392,6 +396,7 @@ export async function ensureChatSubmission(ownerId: string, request: ChatRequest
     role: "user",
     content: lastMessage.content,
     ...(authoritativeAttachments.length ? { attachments: authoritativeAttachments } : {}),
+    ...(lastMessage.documents?.length ? { documents: lastMessage.documents } : {}),
   };
   const assistantMessage: ChatHistoryMessage = {
     id: persistence.assistantMessageId,

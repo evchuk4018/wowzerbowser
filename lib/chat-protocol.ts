@@ -46,6 +46,8 @@ export type ChatMessageInput = {
   content: string;
   /** Persisted, provider-neutral metadata; image bytes never travel in this field. */
   attachments?: ChatImageAttachment[];
+  /** Server-registered PDF descriptors; raw bytes and storage paths are excluded. */
+  documents?: ChatDocumentAttachment[];
   /** Provider-neutral replay information for prior assistant tool rounds. */
   reasoning?: string;
   toolCalls?: ChatToolCall[];
@@ -587,6 +589,13 @@ export function parseChatRequest(value: unknown): ChatRequest {
     const attachments = message.attachments === undefined
       ? undefined
       : parseChatImageAttachments(message.attachments, `messages[${index}].attachments`);
+    const documents = message.documents === undefined ? undefined : (() => {
+      if (!Array.isArray(message.documents) || message.documents.length > 10) throw new ChatRequestValidationError(`messages[${index}].documents is invalid.`);
+      return message.documents.map((item, documentIndex) => {
+        if (!isRecord(item) || typeof item.id !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(item.id) || typeof item.name !== "string" || item.contentType !== "application/pdf" || typeof item.size !== "number" || typeof item.pageCount !== "number" || typeof item.tokenEstimate !== "number") throw new ChatRequestValidationError(`messages[${index}].documents[${documentIndex}] is invalid.`);
+        return { id: item.id, name: item.name.slice(0, 512), contentType: "application/pdf" as const, size: item.size, pageCount: item.pageCount, tokenEstimate: item.tokenEstimate };
+      });
+    })();
     const toolCalls = readToolCalls(message.toolCalls, `messages[${index}].toolCalls`);
     const rounds = readRounds(message.rounds, `messages[${index}].rounds`);
     if (message.role === "user" && (reasoning !== undefined || toolCalls !== undefined || rounds !== undefined)) {
@@ -595,10 +604,12 @@ export function parseChatRequest(value: unknown): ChatRequest {
     if (message.role === "assistant" && attachments !== undefined) {
       throw new ChatRequestValidationError(`messages[${index}].attachments are only valid for user messages.`);
     }
+    if (message.role === "assistant" && documents !== undefined) throw new ChatRequestValidationError(`messages[${index}].documents are only valid for user messages.`);
     return {
       role: message.role,
       content: readNonEmptyString(message.content, `messages[${index}].content`),
       ...(attachments === undefined ? {} : { attachments }),
+      ...(documents === undefined ? {} : { documents }),
       ...(reasoning === undefined ? {} : { reasoning }),
       ...(toolCalls === undefined ? {} : { toolCalls }),
       ...(rounds === undefined ? {} : { rounds }),
@@ -688,6 +699,7 @@ import {
   MAX_IMAGE_FOLLOWUP_QUESTION_LENGTH,
 } from "./chat-image";
 import type { ChatImageAnalysis, ChatImageAttachment, ChatImageContentType } from "./chat-image";
+import type { ChatDocumentAttachment } from "./chat-document";
 
 export {
   CHAT_IMAGE_CONTENT_TYPES,
@@ -699,6 +711,7 @@ export {
   MAX_IMAGE_FOLLOWUP_QUESTION_LENGTH,
 };
 export type { ChatImageAnalysis, ChatImageAttachment, ChatImageContentType } from "./chat-image";
+export type { ChatDocumentAttachment } from "./chat-document";
 export const CHAT_IMAGE_MAX_COUNT = MAX_CHAT_IMAGES_PER_TURN;
 export const CHAT_IMAGE_MAX_BYTES = MAX_CHAT_IMAGE_BYTES;
 export const CHAT_IMAGE_ANALYSIS_TIMEOUT_MS = OPENROUTER_IMAGE_TIMEOUT_MS;
