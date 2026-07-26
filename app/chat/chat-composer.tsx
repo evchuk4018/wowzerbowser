@@ -115,7 +115,11 @@ export function ChatComposer({
 
   const addFiles = (files: readonly File[]) => {
     if (!files.length) return;
-    const pdfs=files.filter((file)=>DOCUMENT_CONTENT_TYPES.includes(file.type as never) || file.name.toLowerCase().endsWith(".doc")); const images=files.filter((file)=>!pdfs.includes(file));
+    const pdfs=files.filter((file) => {
+      const name = file.name.toLowerCase();
+      return DOCUMENT_CONTENT_TYPES.includes(file.type as never) || name.endsWith(".doc") || name.endsWith(".docx");
+    });
+    const images = files.filter((file) => !pdfs.includes(file));
     const error = pdfs.length > 1 || documents.length + pdfs.length > 1 ? "Attach one document per message." : (pdfs[0] ? validateChatDocument(pdfs[0]) : validateChatImages(images, attachments.length));
     if (error) {
       setAttachmentError(error);
@@ -146,11 +150,9 @@ export function ChatComposer({
   };
 
   const removeDocument = (id: string) => {
-    setDocuments((current) => {
-      const removed = current.find((document) => document.id === id);
-      if (removed) void onCancelDocumentPreparation(removed);
-      return current.filter((document) => document.id !== id);
-    });
+    const removed = documents.find((document) => document.id === id);
+    setDocuments((current) => current.filter((document) => document.id !== id));
+    if (removed) void onCancelDocumentPreparation(removed);
     setAttachmentError(null);
   };
 
@@ -211,7 +213,11 @@ export function ChatComposer({
               return (
                 <div className="composer-attachment" key={document.id}>
                   <span title={document.file.name}>{document.file.name}</span>
-                  {status && <span role="status">{status}</span>}
+                  {status && (
+                    <span role={document.preparationStatus === "error" ? "alert" : "status"}>
+                      {status}
+                    </span>
+                  )}
                   <button
                     type="button"
                     aria-label={`Remove ${document.file.name}`}
@@ -411,7 +417,7 @@ export function ChatComposer({
       {(attachmentError || submissionError) && (
         <p className="composer-error" role="alert">{attachmentError || submissionError}</p>
       )}
-      {isPreparingAttachments && !attachmentError && !submissionError && (
+      {isPreparingAttachments && documents.length === 0 && !attachmentError && !submissionError && (
         <p className="helper-text" role="status">Preparing image details…</p>
       )}
       <p className="helper-text">Press Enter to send · Shift + Enter for a new line</p>
