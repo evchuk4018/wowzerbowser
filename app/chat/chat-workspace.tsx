@@ -468,6 +468,8 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
           }}
           onSubmit={sendMessage}
           onPrepareAttachments={generation.prepareChatImageUploads}
+          onPrepareDocument={generation.prepareChatDocumentUpload}
+          onCancelDocumentPreparation={generation.cancelChatDocumentPreparation}
           onKeyDown={handleKeyDown}
           onStop={() => void generation.stopStreaming()}
         />

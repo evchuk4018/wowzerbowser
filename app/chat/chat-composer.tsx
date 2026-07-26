@@ -50,6 +50,8 @@ export type ChatComposerProps = {
   onCancelEdit: () => void;
   onSubmit: (event?: FormEvent<HTMLFormElement>, attachments?: readonly PendingChatImage[], documents?: readonly PendingChatDocument[]) => void | Promise<void>;
   onPrepareAttachments?: (attachments: readonly PendingChatImage[]) => PendingChatImage[];
+  onPrepareDocument: (document: PendingChatDocument) => PendingChatDocument;
+  onCancelDocumentPreparation: (document: PendingChatDocument) => Promise<void>;
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onStop: () => void;
 };
@@ -83,6 +85,8 @@ export function ChatComposer({
   onCancelEdit,
   onSubmit,
   onPrepareAttachments,
+  onPrepareDocument,
+  onCancelDocumentPreparation,
   onKeyDown,
   onStop,
 }: ChatComposerProps) {
@@ -91,15 +95,23 @@ export function ChatComposer({
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentsRef = useRef(attachments);
+  const documentsRef = useRef(documents);
   const disabled = isStreaming || isSubmittingAttachments;
 
   useEffect(() => {
     attachmentsRef.current = attachments;
   }, [attachments]);
 
+  useEffect(() => {
+    documentsRef.current = documents;
+  }, [documents]);
+
   useEffect(() => () => {
     attachmentsRef.current.forEach(({ previewUrl }) => URL.revokeObjectURL(previewUrl));
-  }, []);
+    documentsRef.current.forEach((document) => {
+      if (!document.consumed) void onCancelDocumentPreparation(document);
+    });
+  }, [onCancelDocumentPreparation]);
 
   const addFiles = (files: readonly File[]) => {
     if (!files.length) return;
@@ -110,7 +122,12 @@ export function ChatComposer({
       return;
     }
     setAttachmentError(null);
-    if(pdfs.length)setDocuments((current)=>current.concat(pdfs.map((file)=>({id:crypto.randomUUID(),file}))));
+    if (pdfs.length) {
+      const preparedDocuments = pdfs.map((file) =>
+        onPrepareDocument({ id: crypto.randomUUID(), file }),
+      );
+      setDocuments((current) => current.concat(preparedDocuments));
+    }
     const next = images.map((file) => ({
       id: crypto.randomUUID(),
       file,
@@ -126,6 +143,30 @@ export function ChatComposer({
       return current.filter((attachment) => attachment.id !== id);
     });
     setAttachmentError(null);
+  };
+
+  const removeDocument = (id: string) => {
+    setDocuments((current) => {
+      const removed = current.find((document) => document.id === id);
+      if (removed) void onCancelDocumentPreparation(removed);
+      return current.filter((document) => document.id !== id);
+    });
+    setAttachmentError(null);
+  };
+
+  const documentStatus = (document: PendingChatDocument) => {
+    switch (document.preparationStatus) {
+      case "uploading":
+        return "Uploading document…";
+      case "parsing":
+        return "Parsing document…";
+      case "ready":
+        return "Document ready";
+      case "error":
+        return document.preparationError || "The document could not be prepared.";
+      default:
+        return null;
+    }
   };
 
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -163,7 +204,27 @@ export function ChatComposer({
             ))}
           </div>
         )}
-        {documents.map((document)=><div className="composer-attachment" key={document.id}><span>{document.file.name}</span><button type="button" aria-label={`Remove ${document.file.name}`} onClick={()=>setDocuments([])}>×</button></div>)}
+        {documents.length > 0 && (
+          <div className="composer-attachments" aria-label="Attached documents">
+            {documents.map((document) => {
+              const status = documentStatus(document);
+              return (
+                <div className="composer-attachment" key={document.id}>
+                  <span title={document.file.name}>{document.file.name}</span>
+                  {status && <span role="status">{status}</span>}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${document.file.name}`}
+                    disabled={disabled}
+                    onClick={() => removeDocument(document.id)}
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
         {preservedAttachments.length > 0 && (
           <div className="composer-attachments" aria-label="Attached images from the edited prompt">
             {preservedAttachments.map((image) => (
@@ -187,10 +248,10 @@ export function ChatComposer({
           rows={1}
           aria-label="Message"
           placeholder="Message"
-          disabled={disabled}
+          disabled={isSubmittingAttachments}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey && (attachments.length > 0 || preservedAttachments.length > 0)) {
+            if (event.key === "Enter" && !event.shiftKey && (attachments.length > 0 || documents.length > 0 || preservedAttachments.length > 0)) {
               event.preventDefault();
               void onSubmit(undefined, attachments, documents);
               return;
