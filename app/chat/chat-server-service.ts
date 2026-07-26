@@ -18,8 +18,8 @@ import { getAuthoritativeChatImageIdsForRequest } from "../server/chat/chat-hist
 import { latestNonNullUsage, sumRoundUsage } from "./chat-usage";
 import { availablePdfTools, executePdfTool } from "../server/agent/pdf-tool";
 import { getAuthorizedDocument, getDocumentPages } from "../server/chat/chat-document-store";
-import { ingestPdf } from "../server/chat/chat-document-service";
-import { pdfContext } from "../../lib/chat-document";
+import { ingestDocx, ingestPdf } from "../server/chat/chat-document-service";
+import { DOCX_CONTENT_TYPE, documentContext } from "../../lib/chat-document";
 
 const MAX_RESPONSE_MS = 240_000;
 const MAX_TOOL_CALLS = 6;
@@ -61,7 +61,7 @@ export async function generateChatResponse(
   const contextualMessages = await Promise.all(chatRequest.messages.map(async (message) => {
     const documents = (message.documents ?? []).filter((item) => allowedPdfIds.has(item.id));
     if (!documents.length) return message;
-    const contexts = await Promise.all(documents.map(async ({ id }) => pdfContext(authoritativePdfs.get(id)!, await getDocumentPages(ownerId, conversationId, id))));
+    const contexts = await Promise.all(documents.map(async ({ id }) => documentContext(authoritativePdfs.get(id)!, await getDocumentPages(ownerId, conversationId, id))));
     return { ...message, content: `${message.content}\n\n${contexts.join("\n\n")}` };
   }));
   chatRequest = { ...chatRequest, messages: contextualMessages };
@@ -169,7 +169,8 @@ export async function generateChatResponse(
               if (!executor) executor = new ModalPythonExecutor(ownerId, conversationId, responseDeadlineAt);
               result = await executePythonTool(call, executor, ownerId, conversationId, async (artifact, bytes) => {
                 const pdfId = artifact.id;
-                await ingestPdf({ ownerId, conversationId, pdfId, filename: artifact.name, bytes, jobId: responseId });
+                if (artifact.contentType === DOCX_CONTENT_TYPE) await ingestDocx({ ownerId, conversationId, documentId: pdfId, filename: artifact.name, bytes, jobId: responseId, signal: roundSignal });
+                else await ingestPdf({ ownerId, conversationId, pdfId, filename: artifact.name, bytes, jobId: responseId });
                 allowedPdfIds.add(pdfId);
               });
             } else if (call.name === INSPECT_IMAGE_TOOL_NAME && imageToolAdvertised) {

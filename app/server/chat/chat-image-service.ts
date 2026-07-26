@@ -278,6 +278,18 @@ export function chatToolResultForImageError(callId: string, error: unknown): Cha
 
 export const chatImagePrompts = { VISIBLE_TEXT_PROMPT, MAIN_VISUALS_PROMPT, FOLLOWUP_SYSTEM_PROMPT } as const;
 
+export async function analyzeDocumentImage(bytes: Uint8Array, contentType: ChatImageContentType, signal?: AbortSignal): Promise<{ visibleText: string | null; mainVisuals: string | null }> {
+  const storedLimit = 2_000;
+  const [text, visuals] = await Promise.all([
+    askOpenRouterAboutImage(VISIBLE_TEXT_PROMPT, bytes, contentType, { signal }),
+    askOpenRouterAboutImage(MAIN_VISUALS_PROMPT, bytes, contentType, { signal }),
+  ]);
+  return {
+    visibleText: text.content.trim() === "NONE" ? null : text.content.slice(0, storedLimit),
+    mainVisuals: visuals.content.trim() ? visuals.content.slice(0, storedLimit) : null,
+  };
+}
+
 export const INSPECT_IMAGE_TOOL_NAME = "inspect_image";
 export const INSPECT_IMAGE_TOOL_DEFINITION = {
   type: "function" as const,

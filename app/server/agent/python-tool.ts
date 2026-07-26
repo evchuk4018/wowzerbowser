@@ -27,7 +27,7 @@ export async function executePythonTool(
   executor: ModalPythonExecutor,
   ownerId: string,
   conversationId: string,
-  onPdfArtifact?: (artifact: ChatArtifact, bytes: Uint8Array) => Promise<void>,
+  onDocumentArtifact?: (artifact: ChatArtifact, bytes: Uint8Array) => Promise<void>,
 ): Promise<ChatToolResult> {
   const startedAt = Date.now();
   if (call.name !== PYTHON_TOOL_NAME) {
@@ -53,10 +53,10 @@ export async function executePythonTool(
         contentType: contentTypeFor(item.path),
       }),
     );
-    if (onPdfArtifact) {
-      for (const artifact of artifacts.filter((item) => item.contentType === "application/pdf")) {
+    if (onDocumentArtifact) {
+      for (const artifact of artifacts.filter((item) => item.contentType === "application/pdf" || item.contentType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document")) {
         const source = result.artifacts?.find((item) => item.path.split("/").pop() === artifact.name);
-        if (source) await onPdfArtifact(artifact, await executor.readArtifact(source.path));
+        if (source) await onDocumentArtifact(artifact, await executor.readArtifact(source.path));
       }
     }
     return {
@@ -93,6 +93,7 @@ function contentTypeFor(path: string): string {
   if (extension === "txt" || extension === "md" || extension === "py") return "text/plain; charset=utf-8";
   if (extension === "png") return "image/png";
   if (extension === "pdf") return "application/pdf";
+  if (extension === "docx") return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
   if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
   return "application/octet-stream";
 }

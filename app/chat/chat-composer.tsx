@@ -19,6 +19,7 @@ import {
   validateChatImages,
 } from "./chat-image-attachments";
 import { validateChatDocument, type PendingChatDocument } from "./chat-document-attachments";
+import { DOCUMENT_CONTENT_TYPES } from "../../lib/chat-document";
 
 export type ChatComposerProps = {
   draft: string;
@@ -102,8 +103,8 @@ export function ChatComposer({
 
   const addFiles = (files: readonly File[]) => {
     if (!files.length) return;
-    const pdfs=files.filter((file)=>file.type==="application/pdf"); const images=files.filter((file)=>file.type!=="application/pdf");
-    const error = pdfs.length > 1 || documents.length + pdfs.length > 1 ? "Attach one PDF per message." : (pdfs[0] ? validateChatDocument(pdfs[0]) : validateChatImages(images, attachments.length));
+    const pdfs=files.filter((file)=>DOCUMENT_CONTENT_TYPES.includes(file.type as never) || file.name.toLowerCase().endsWith(".doc")); const images=files.filter((file)=>!pdfs.includes(file));
+    const error = pdfs.length > 1 || documents.length + pdfs.length > 1 ? "Attach one document per message." : (pdfs[0] ? validateChatDocument(pdfs[0]) : validateChatImages(images, attachments.length));
     if (error) {
       setAttachmentError(error);
       return;
@@ -203,7 +204,7 @@ export function ChatComposer({
             ref={fileInputRef}
             className="composer-file-input"
             type="file"
-            accept={`${ACCEPTED_CHAT_IMAGE_TYPES.join(",")},application/pdf`}
+            accept={`${ACCEPTED_CHAT_IMAGE_TYPES.join(",")},${DOCUMENT_CONTENT_TYPES.join(",")},.docx`}
             multiple
             tabIndex={-1}
             aria-hidden="true"
@@ -215,7 +216,7 @@ export function ChatComposer({
           <button
             type="button"
             className="attach-button"
-            aria-label="Attach images or PDF"
+            aria-label="Attach images, PDF, or DOCX"
             disabled={disabled}
             onClick={() => fileInputRef.current?.click()}
           >
