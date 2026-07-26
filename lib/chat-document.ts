@@ -23,6 +23,31 @@ export type ChatDocumentAttachment = {
 
 export type ChatDocumentPage = { pageNumber: number; text: string };
 
+export type ChatDocumentPageCandidate = ChatDocumentPage & {
+  textItemCount: number;
+  imageObjectCount: number;
+  pageWidth: number;
+  pageHeight: number;
+};
+
+export type PdfExtractionQuality = {
+  hasTextLayer: boolean;
+  pagesWithText: number;
+  pagesWithoutText: number;
+  pagesWithImages: number;
+  emptyPageCount: number;
+  textCharacterCount: number;
+  imageObjectCountAvailable: boolean;
+};
+
+export type NativePdfExtraction = {
+  pageCount: number;
+  textItemCount: number;
+  imageObjectCount: number;
+  pages: ChatDocumentPageCandidate[];
+  extractionQuality: PdfExtractionQuality;
+};
+
 export function estimatePdfTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
