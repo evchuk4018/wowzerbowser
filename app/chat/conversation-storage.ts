@@ -3,6 +3,7 @@ import type {
   ChatToolCall,
   ChatToolResult,
 } from "../../lib/chat-protocol";
+import { normalizeChatImageAttachments, parseChatImageToolResult } from "../../lib/chat-protocol";
 import type { ChatAssistantActivity } from "../../lib/chat-history";
 import {
   deleteChatConversation,
@@ -114,6 +115,9 @@ function normalizeToolResult(value: unknown): ChatToolResult | undefined {
   // the protocol layer when it is used, while malformed values are ignored.
   if (candidate.web && typeof candidate.web === "object") result.web = candidate.web as ChatToolResult["web"];
   if (candidate.utility && typeof candidate.utility === "object") result.utility = candidate.utility as ChatToolResult["utility"];
+  if (candidate.image && typeof candidate.image === "object") {
+    try { result.image = parseChatImageToolResult(candidate.image); } catch { /* malformed legacy activity */ }
+  }
   return result;
 }
 
@@ -147,10 +151,10 @@ function normalizeActivity(value: unknown, loadedAt: number, freezeRunning: bool
     return activity;
   }
 
-  if (candidate.kind !== "python" && candidate.kind !== "web") return null;
+  if (candidate.kind !== "python" && candidate.kind !== "web" && candidate.kind !== "image") return null;
   const call = normalizeToolCall(candidate.call);
   if (!call || (status !== "running" && status !== "completed" && status !== "failed")) return null;
-  const activity: Extract<ChatAssistantActivity, { kind: "python" | "web" }> = {
+  const activity: Extract<ChatAssistantActivity, { kind: "python" | "web" | "image" }> = {
     id,
     kind: candidate.kind,
     round,
@@ -202,6 +206,10 @@ export function normalizeStoredMessage(
   if (lastSequence !== undefined && lastSequence >= 0) message.lastSequence = lastSequence;
   const traceRound = finiteNumber(candidate.traceRound);
   if (traceRound !== undefined && traceRound >= 0) message.traceRound = traceRound;
+  if (Array.isArray(candidate.attachments)) {
+    const attachments = normalizeChatImageAttachments(candidate.attachments);
+    if (attachments.length) message.attachments = attachments;
+  }
   if (Array.isArray(candidate.artifacts)) {
     message.artifacts = candidate.artifacts
       .map(normalizeArtifact)

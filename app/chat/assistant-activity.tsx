@@ -7,6 +7,7 @@ import type {
 import { AssistantResponse } from "./assistant-response";
 import type {
   AssistantActivity,
+  ImageActivity,
   PythonActivity,
   ReasoningActivity,
   WebActivity,
@@ -127,7 +128,26 @@ function WebDisclosure({ activity }: { activity: WebActivity }) {
   const output = web?.kind === "search" ? web.results.map((item) => `${item.title}\n${item.url}\n${item.snippet}`).join("\n\n") : web?.kind === "page" ? web.markdown : utility?.kind === "time" ? `${utility.currentTime}\n${utility.timeZone}` : utility?.kind === "date" ? `${utility.currentDate}\n${utility.timeZone}` : utility?.kind === "location" ? utility.available ? `${utility.location}\nSource: deployment metadata` : utility.message : activity.result?.stderr ?? "Waiting for result…";
   return <div className={`web-nested web-nested-${activity.status}`}><button type="button" className="web-nested-summary" aria-expanded={open} onClick={() => setOpen((value) => !value)}><span className="python-nested-chevron">{open ? "⌄" : "›"}</span><span className="web-activity-label">{label}</span><span className="python-activity-status">{activity.status === "running" ? "Running" : activity.status === "completed" ? "Completed" : "Failed"}</span>{duration !== undefined && <span className="python-activity-duration">{formatDuration(duration)}</span>}</button>{open && <pre className="web-output">{output}</pre>}</div>;
 }
-function ReasoningCard({ activity, pythonActivities, webActivities }: { activity: ReasoningActivity; pythonActivities: PythonActivity[]; webActivities: WebActivity[] }) {
+function ImageDisclosure({ activity }: { activity: ImageActivity }) {
+  const [open, setOpen] = useState(false);
+  const image = activity.result?.image;
+  return (
+    <div className={`image-nested image-nested-${activity.status}`}>
+      <button type="button" className="web-nested-summary" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <span className="python-nested-chevron" aria-hidden="true">{open ? "⌄" : "›"}</span>
+        <span className="web-activity-label">Inspected image</span>
+        <span className="python-activity-status">{activity.status === "running" ? "Running" : activity.status === "completed" ? "Completed" : "Failed"}</span>
+      </button>
+      {open && (
+        <div className="image-output">
+          <p><strong>Question:</strong> {image?.question ?? "Waiting for question…"}</p>
+          <p><strong>Result:</strong> {image?.answer ?? activity.result?.stderr ?? "Waiting for result…"}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+function ReasoningCard({ activity, pythonActivities, webActivities, imageActivities }: { activity: ReasoningActivity; pythonActivities: PythonActivity[]; webActivities: WebActivity[]; imageActivities: ImageActivity[] }) {
   const [open, setOpen] = useState(false);
   const liveDuration = useLiveDuration(activity.startedAt, activity.status === "running");
   const duration = activity.durationMs ?? liveDuration;
@@ -156,6 +176,7 @@ function ReasoningCard({ activity, pythonActivities, webActivities }: { activity
             </div>
           )}
           {webActivities.map((web) => <WebDisclosure key={web.id} activity={web} />)}
+          {imageActivities.map((image) => <ImageDisclosure key={image.id} activity={image} />)}
         </div>
       )}
     </section>
@@ -215,12 +236,14 @@ export function AssistantActivityTimeline({
   artifacts: ChatArtifact[];
   getAccessToken: () => Promise<string | null>;
 }) {
-  const rounds = activities.reduce<Map<number, { reasoning?: ReasoningActivity; python: PythonActivity[]; web: WebActivity[] }>>((grouped, activity) => {
-    const round = grouped.get(activity.round) ?? { python: [], web: [] };
+  const rounds = activities.reduce<Map<number, { reasoning?: ReasoningActivity; python: PythonActivity[]; web: WebActivity[]; image: ImageActivity[] }>>((grouped, activity) => {
+    const round = grouped.get(activity.round) ?? { python: [], web: [], image: [] };
     if (activity.kind === "reasoning") round.reasoning = round.reasoning
       ? { ...round.reasoning, content: `${round.reasoning.content}${activity.content}`, status: activity.status }
       : activity;
-    else if (activity.kind === "python") round.python.push(activity); else round.web.push(activity);
+    else if (activity.kind === "python") round.python.push(activity);
+    else if (activity.kind === "web") round.web.push(activity);
+    else round.image.push(activity);
     grouped.set(activity.round, round);
     return grouped;
   }, new Map());
@@ -236,7 +259,7 @@ export function AssistantActivityTimeline({
             content: "",
             status: "complete" as const,
           };
-          return <ReasoningCard key={reasoning.id} activity={reasoning} pythonActivities={group.python} webActivities={group.web} />;
+          return <ReasoningCard key={reasoning.id} activity={reasoning} pythonActivities={group.python} webActivities={group.web} imageActivities={group.image} />;
         })}
       </div>
       {content && (

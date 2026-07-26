@@ -6,7 +6,13 @@ export type UsageRange = (typeof USAGE_RANGES)[number];
 export const USAGE_SOURCES = ["exact", "estimated"] as const;
 export type UsageSource = (typeof USAGE_SOURCES)[number];
 
-export const USAGE_REQUEST_KINDS = ["chat", "title"] as const;
+export const USAGE_REQUEST_KINDS = [
+  "chat",
+  "title",
+  "image_text_analysis",
+  "image_visual_analysis",
+  "image_followup",
+] as const;
 export type UsageRequestKind = (typeof USAGE_REQUEST_KINDS)[number];
 
 export type UsagePricing = {
@@ -92,4 +98,6 @@ export type UsageRecordInput = {
   usage: ChatUsage;
   source: UsageSource;
   recordedAt?: string;
+  conversationId?: string;
+  jobId?: string;
 };

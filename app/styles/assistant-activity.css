@@ -173,3 +173,13 @@
   border-top: 1px solid #292a27;
   color: #c9cac2;
 }
+.image-output {
+  border-top: 1px solid #3b3c38;
+  padding: 10px 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.image-output p { margin: 0 0 6px; }
+.image-output p:last-child { margin-bottom: 0; }

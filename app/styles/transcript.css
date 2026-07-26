@@ -113,3 +113,23 @@
   color: var(--quiet);
   font-size: 13px;
 }
+.message-image-attachments {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.message-image-attachment {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.message-image-attachment img {
+  display: block;
+  max-width: min(360px, 100%);
+  max-height: 260px;
+  border-radius: 10px;
+  object-fit: contain;
+}

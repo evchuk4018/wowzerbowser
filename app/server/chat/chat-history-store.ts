@@ -1,6 +1,7 @@
 import "server-only";
 
 import { normalizeChatImageAttachments, type ChatJobStatus, type ChatRequest, type ChatStreamEvent } from "../../../lib/chat-protocol";
+import { ChatImageError, type ChatImageAttachment } from "../../../lib/chat-image";
 import {
   applyChatStreamEvent,
   finalizeChatHistoryMessage,
@@ -10,6 +11,7 @@ import {
   type ChatMessageStatus,
 } from "../../../lib/chat-history";
 import { getServerClient } from "../../auth/supabase-server-adapter";
+import { attachmentFromUploadRecord, listChatImageUploadRecords } from "./chat-image-store";
 
 type MessageRow = {
   owner_id: string;
@@ -106,6 +108,183 @@ async function insertIfAbsent(tableName: "chat_conversations" | "chat_turns" | "
   if (error && error.code !== "23505") throw error;
 }
 
+function requestImageIds(request: ChatRequest): string[] {
+  const lastMessage = request.messages.at(-1);
+  return [...new Set(lastMessage?.attachments?.map((attachment) => attachment.id) ?? [])];
+}
+
+type ActiveImageMessage = {
+  turnId: string;
+  versionId: string;
+  position: number;
+  userMessageId: string;
+  jobId: string | null;
+};
+
+function requestUserImageRefs(request: ChatRequest): Array<{ userIndex: number; imageId: string }> {
+  let userIndex = -1;
+  const refs: Array<{ userIndex: number; imageId: string }> = [];
+  for (const message of request.messages) {
+    if (message.role !== "user") continue;
+    userIndex += 1;
+    for (const attachment of message.attachments ?? []) refs.push({ userIndex, imageId: attachment.id });
+  }
+  return refs;
+}
+
+async function activeImageMessages(ownerId: string, conversationId: string): Promise<ActiveImageMessage[]> {
+  const db = client();
+  const [turnsResult, versionsResult, messagesResult] = await Promise.all([
+    db.from("chat_turns")
+      .select("turn_id,position,active_version")
+      .eq("owner_id", ownerId)
+      .eq("conversation_id", conversationId)
+      .order("position"),
+    db.from("chat_message_versions")
+      .select("turn_id,version_id,version_index")
+      .eq("owner_id", ownerId)
+      .eq("conversation_id", conversationId),
+    db.from("chat_messages")
+      .select("message_id,turn_id,version_id,role,content,job_id")
+      .eq("owner_id", ownerId)
+      .eq("conversation_id", conversationId),
+  ]);
+  if (turnsResult.error || versionsResult.error || messagesResult.error) {
+    throw new ChatImageError("storage", "Chat image metadata is unavailable.", 503);
+  }
+  const versionsByTurn = new Map<string, Array<{ id: string; index: number }>>();
+  for (const row of versionsResult.data ?? []) {
+    const versions = versionsByTurn.get(row.turn_id) ?? [];
+    versions.push({ id: row.version_id, index: Number(row.version_index) });
+    versionsByTurn.set(row.turn_id, versions);
+  }
+  const messages = (messagesResult.data ?? []) as Array<{
+    message_id: string;
+    turn_id: string;
+    version_id: string;
+    role: "user" | "assistant";
+    content: string;
+    job_id: string | null;
+  }>;
+  return (turnsResult.data ?? []).flatMap((turn) => {
+    const version = versionsByTurn.get(turn.turn_id)?.find(({ index }) => index === Number(turn.active_version));
+    if (!version) return [];
+    const pair = messages.filter((message) => message.turn_id === turn.turn_id && message.version_id === version.id);
+    const user = pair.find((message) => message.role === "user");
+    const assistant = pair.find((message) => message.role === "assistant");
+    if (!user || !assistant) return [];
+    return [{
+      turnId: turn.turn_id,
+      versionId: version.id,
+      position: Number(turn.position),
+      userMessageId: user.message_id,
+      jobId: assistant.job_id,
+    }];
+  });
+}
+
+export async function getAuthoritativeChatImageIdsForRequest(ownerId: string, request: ChatRequest): Promise<string[]> {
+  const conversationId = request.conversationId;
+  const jobId = request.jobId;
+  const persistence = request.persistence;
+  const imageRefs = requestUserImageRefs(request);
+  if (!conversationId || !jobId || !persistence || !imageRefs.length) return [];
+
+  const db = client();
+  const [jobResult, messageResult] = await Promise.all([
+    db.from("chat_jobs")
+      .select("request")
+      .eq("owner_id", ownerId)
+      .eq("conversation_id", conversationId)
+      .eq("job_id", jobId)
+      .maybeSingle(),
+    db.from("chat_messages")
+      .select("turn_id,version_id")
+      .eq("owner_id", ownerId)
+      .eq("conversation_id", conversationId)
+      .eq("message_id", persistence.userMessageId)
+      .eq("role", "user")
+      .maybeSingle(),
+  ]);
+  if (jobResult.error || messageResult.error) throw new ChatImageError("storage", "Chat image metadata is unavailable.", 503);
+  const persistedRequest = jobResult.data?.request as ChatRequest | undefined;
+  const message = messageResult.data as { turn_id?: unknown; version_id?: unknown } | null;
+  if (
+    !persistedRequest
+    || persistedRequest.conversationId !== conversationId
+    || persistedRequest.jobId !== jobId
+    || persistedRequest.persistence?.turnId !== persistence.turnId
+    || persistedRequest.persistence?.versionId !== persistence.versionId
+    || persistedRequest.persistence?.userMessageId !== persistence.userMessageId
+    || !message
+    || message.turn_id !== persistence.turnId
+    || message.version_id !== persistence.versionId
+  ) return [];
+
+  const [versionResult, turnResult] = await Promise.all([
+    db.from("chat_message_versions")
+      .select("version_index")
+      .eq("owner_id", ownerId)
+      .eq("conversation_id", conversationId)
+      .eq("turn_id", persistence.turnId)
+      .eq("version_id", persistence.versionId)
+      .maybeSingle(),
+    db.from("chat_turns")
+      .select("active_version")
+      .eq("owner_id", ownerId)
+      .eq("conversation_id", conversationId)
+      .eq("turn_id", persistence.turnId)
+      .maybeSingle(),
+  ]);
+  if (versionResult.error || turnResult.error) throw new ChatImageError("storage", "Chat image metadata is unavailable.", 503);
+  if (
+    !versionResult.data
+    || !turnResult.data
+    || Number(versionResult.data.version_index) !== persistence.versionIndex
+    || Number(turnResult.data.active_version) !== persistence.versionIndex
+  ) return [];
+
+  const activeMessages = await activeImageMessages(ownerId, conversationId);
+  const currentIndex = activeMessages.findIndex((active) =>
+    active.turnId === persistence.turnId
+    && active.versionId === persistence.versionId
+    && active.userMessageId === persistence.userMessageId,
+  );
+  if (currentIndex < 0 || activeMessages[currentIndex].jobId !== jobId) return [];
+  const activeHistory = activeMessages.slice(0, currentIndex + 1);
+  const requestUsers = request.messages.filter((message) => message.role === "user");
+  if (requestUsers.length !== activeHistory.length) return [];
+
+  const refsByUserIndex = new Map<number, string[]>();
+  for (const ref of imageRefs) {
+    const ids = refsByUserIndex.get(ref.userIndex) ?? [];
+    if (!ids.includes(ref.imageId)) ids.push(ref.imageId);
+    refsByUserIndex.set(ref.userIndex, ids);
+  }
+  const recordsByImageId = new Map<string, ReturnType<typeof attachmentFromUploadRecord>>();
+  for (const [userIndex, imageIds] of refsByUserIndex) {
+    const active = activeHistory[userIndex];
+    if (!active?.jobId) continue;
+    const records = await listChatImageUploadRecords({
+      ownerId,
+      conversationId,
+      userMessageId: active.userMessageId,
+      jobId: active.jobId,
+      imageIds,
+      status: "complete",
+    });
+    const recordsById = new Map(records.map((record) => [record.imageId, record]));
+    for (const imageId of imageIds) {
+      const record = recordsById.get(imageId);
+      if (record) recordsByImageId.set(imageId, attachmentFromUploadRecord(record));
+    }
+  }
+  return imageRefs
+    .filter(({ imageId }) => Boolean(recordsByImageId.get(imageId)))
+    .map(({ imageId }) => imageId)
+    .filter((imageId, index, ids) => ids.indexOf(imageId) === index);
+}
+
 function messageStatusForJob(status: ChatJobStatus): ChatMessageStatus | null {
   if (status === "completed") return "complete";
   if (status === "failed") return "error";
@@ -121,15 +300,26 @@ export async function ensureChatSubmission(ownerId: string, request: ChatRequest
   if (!persistence || !conversationId || !jobId || !lastMessage || lastMessage.role !== "user") {
     throw new Error("Chat persistence metadata is incomplete.");
   }
-  for (const attachment of lastMessage.attachments ?? []) {
-    const expectedPrefix = `${ownerId}/${conversationId}/${persistence.userMessageId}/`;
-    if (
-      attachment.analysis.status !== "complete" ||
-      attachment.storagePath !== `${expectedPrefix}${attachment.id}`
-    ) {
-      throw new Error("Chat image metadata is invalid.");
-    }
+  const requestedImageIds = requestImageIds(request);
+  let authoritativeAttachments: ChatImageAttachment[] = [];
+  if (requestedImageIds.length) {
+    const records = await listChatImageUploadRecords({
+      ownerId,
+      conversationId,
+      userMessageId: persistence.userMessageId,
+      jobId,
+      imageIds: requestedImageIds,
+      status: "complete",
+    });
+    const recordsById = new Map(records.map((record) => [record.imageId, record]));
+    authoritativeAttachments = requestedImageIds.map((imageId) => {
+      const record = recordsById.get(imageId);
+      const attachment = record && attachmentFromUploadRecord(record);
+      if (!attachment) throw new ChatImageError("image_not_found", "Chat image metadata is invalid.", 400);
+      return attachment;
+    });
   }
+  /* Client attachment descriptors are only IDs at this boundary; all metadata comes from uploads. */
 
   const now = new Date().toISOString();
   await insertIfAbsent("chat_conversations", {
@@ -158,7 +348,7 @@ export async function ensureChatSubmission(ownerId: string, request: ChatRequest
     id: persistence.userMessageId,
     role: "user",
     content: lastMessage.content,
-    ...(lastMessage.attachments?.length ? { attachments: lastMessage.attachments } : {}),
+    ...(authoritativeAttachments.length ? { attachments: authoritativeAttachments } : {}),
   };
   const assistantMessage: ChatHistoryMessage = {
     id: persistence.assistantMessageId,

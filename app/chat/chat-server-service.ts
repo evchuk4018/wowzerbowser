@@ -14,6 +14,7 @@ import {
   INSPECT_IMAGE_TOOL_NAME,
 } from "../server/agent/image-tool";
 import { isModalConfigured, ModalPythonExecutor } from "../server/modal/modal-python-executor";
+import { getAuthoritativeChatImageIdsForRequest } from "../server/chat/chat-history-store";
 import { latestNonNullUsage, sumRoundUsage } from "./chat-usage";
 
 const MAX_RESPONSE_MS = 240_000;
@@ -33,12 +34,6 @@ function stableConversationId(request: ChatRequest): string {
     .slice(0, 32);
 }
 
-function imageIdsFromValidatedRequestHistory(request: ChatRequest): string[] {
-  return [...new Set(
-    request.messages.flatMap((message) => message.attachments?.map((image) => image.id) ?? []),
-  )];
-}
-
 export async function generateChatResponse(
   chatRequest: ChatRequest,
   ownerId: string,
@@ -51,7 +46,7 @@ export async function generateChatResponse(
   const conversationId = stableConversationId(chatRequest);
   const pythonTools = availableChatTools();
   const webTools = availableWebTools();
-  const allowedImageIds = imageIdsFromValidatedRequestHistory(chatRequest);
+  const allowedImageIds = await getAuthoritativeChatImageIdsForRequest(ownerId, chatRequest);
   const imageTools = availableImageTools(allowedImageIds.length > 0);
   const toolDefinitions = [...pythonTools, ...imageTools, ...webTools];
   const imageToolAdvertised = imageTools.some((tool) => tool.function.name === INSPECT_IMAGE_TOOL_NAME);

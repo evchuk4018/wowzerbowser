@@ -35,6 +35,7 @@ async function readError(response: Response): Promise<string> {
 export async function uploadChatImages(input: {
   conversationId: string;
   userMessageId: string;
+  jobId: string;
   images: readonly Pick<PendingChatImage, "id" | "file">[];
   accessToken: string;
   signal: AbortSignal;
@@ -42,6 +43,7 @@ export async function uploadChatImages(input: {
   const formData = new FormData();
   formData.set("conversationId", input.conversationId);
   formData.set("userMessageId", input.userMessageId);
+  formData.set("jobId", input.jobId);
   for (const image of input.images) {
     formData.append("imageIds", image.id);
     formData.append("images", image.file, image.file.name);

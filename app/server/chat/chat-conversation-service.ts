@@ -10,6 +10,7 @@ import {
   deleteChatConversationRecord,
 } from "./chat-history-store";
 import { deleteConversationWorkspace } from "../modal/modal-conversation-cleanup";
+import { deleteChatImagesForConversation } from "./chat-image-store";
 
 /**
  * Delete one owner's conversation and all app/provider-owned data attached to
@@ -21,6 +22,7 @@ export async function deleteChatConversation(ownerId: string, conversationId: st
 
   await cancelChatJobsForConversation(ownerId, conversationId);
   await deleteConversationWorkspace(ownerId, conversationId);
+  await deleteChatImagesForConversation(ownerId, conversationId);
   await deleteChatConversationRecord(ownerId, conversationId);
   await deleteChatModelPreference(ownerId, conversationId);
   await deleteChatJobsForConversation(ownerId, conversationId);

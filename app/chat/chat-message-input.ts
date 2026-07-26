@@ -4,6 +4,7 @@ import type {
   ChatMessageInput,
 } from "../../lib/chat-protocol";
 import type { AssistantActivity } from "./assistant-activity-types";
+import { imageContextForAttachment } from "../../lib/chat-image";
 
 type TranscriptMessage = {
   role: "user" | "assistant";
@@ -22,9 +23,10 @@ export function toChatMessageInput(
   if (!content) return null;
   if (message.role === "user") {
     const attachments = message.attachments ?? [];
+    const imageContext = attachments.map(imageContextForAttachment).join("\n\n");
     return {
       role: "user",
-      content,
+      content: imageContext ? `${content}\n\n${imageContext}` : content,
       ...(attachments.length ? { attachments } : {}),
     };
   }

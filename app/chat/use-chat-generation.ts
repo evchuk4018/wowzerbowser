@@ -235,6 +235,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     const turnId = editingTurnIndex >= 0 ? conversation.turns[editingTurnIndex].id : makeId();
     const versionId = makeId();
     const userMessageId = makeId();
+    const jobId = makeId();
     let uploadedImages: UploadedChatImage[] = [];
     setSubmissionError(null);
     if (pendingImages.length) {
@@ -246,6 +247,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         uploadedImages = await uploadChatImages({
           conversationId: conversation.id,
           userMessageId,
+          jobId,
           images: pendingImages,
           accessToken,
           signal: new AbortController().signal,
@@ -264,7 +266,6 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
       content,
       ...(uploadedImages.length ? { attachments: uploadedImages } : {}),
     } as Message;
-    const jobId = makeId();
     const assistantMessage: Message = {
       id: makeId(),
       role: "assistant",
@@ -296,10 +297,6 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         },
       });
     }
-    input.onDraftConsumed?.();
-    input.onEditingConsumed?.();
-    input.onAttachmentsConsumed?.();
-
     const controller = new AbortController();
     activeRequestsRef.current[conversation.id] = {
       conversationId: conversation.id,
@@ -380,7 +377,14 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         reasoningEffort: input.reasoningEffort,
         attachments: uploadedImages,
       });
+      let submissionAccepted = false;
       for await (const event of streamChatResponse(request, accessToken, controller.signal)) {
+        if (!submissionAccepted) {
+          submissionAccepted = true;
+          input.onDraftConsumed?.();
+          input.onEditingConsumed?.();
+          input.onAttachmentsConsumed?.();
+        }
         const lastPendingSequence = pendingEvents.at(-1)?.sequence
           ?? streamState.message.lastSequence
           ?? 0;

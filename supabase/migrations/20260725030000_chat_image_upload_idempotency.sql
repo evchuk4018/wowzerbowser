@@ -1,3 +1,10 @@
+-- The image ID is the idempotency key. This migration owns the upload table
+-- and its private storage bucket so it works on fresh databases as well as
+-- installs that received the earlier attachment-only migration.
+insert into storage.buckets (id, name, public)
+values ('chat-images', 'chat-images', false)
+on conflict (id) do update set public = false;
+
 create table if not exists public.chat_image_uploads (
   owner_id uuid not null,
   conversation_id text not null,
@@ -16,7 +23,11 @@ create table if not exists public.chat_image_uploads (
   primary key (owner_id, conversation_id, image_id),
   foreign key (owner_id, conversation_id) references public.chat_conversations(owner_id, conversation_id) on delete cascade
 );
-  alter table public.chat_image_uploads enable row level security;
+
+alter table public.chat_image_uploads enable row level security;
+
+create index if not exists chat_image_uploads_owner_conversation
+  on public.chat_image_uploads(owner_id, conversation_id, updated_at desc);
 
 -- The image ID is the idempotency key. These fields let one server request
 -- own processing and let a later request recover a worker that disappeared

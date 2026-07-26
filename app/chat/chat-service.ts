@@ -185,3 +185,16 @@ export async function fetchChatArtifact(
   if (!response.ok) throw new Error(await readError(response));
   return response.blob();
 }
+
+export async function fetchChatImage(
+  imageId: string,
+  conversationId: string,
+  accessToken: string,
+): Promise<Blob> {
+  const response = await fetch(
+    `/api/chat/images/${encodeURIComponent(imageId)}?conversationId=${encodeURIComponent(conversationId)}`,
+    { headers: { authorization: `Bearer ${accessToken}` } },
+  );
+  if (!response.ok) throw new Error(await readError(response));
+  return response.blob();
+}

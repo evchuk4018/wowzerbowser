@@ -7,10 +7,45 @@ import type { ConversationTurn as ConversationTurnType, Message } from "./conver
 import { MessageActions } from "./message-actions";
 import { ReasoningBlock } from "./reasoning-block";
 import { CallActivityIndicator } from "./call-activity-indicator";
+import type { ChatImageAttachment } from "../../lib/chat-protocol";
+import { fetchChatImage } from "./chat-service";
+import { useEffect, useState } from "react";
 
 export type ThinkingTiming = { startedAt: number; now: number };
 
+function UserImage({ image, conversationId, getAccessToken }: {
+  image: ChatImageAttachment;
+  conversationId: string;
+  getAccessToken: () => Promise<string | null>;
+}) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    let objectUrl: string | null = null;
+    void getAccessToken()
+      .then((token) => token ? fetchChatImage(image.id, conversationId, token) : null)
+      .then((blob) => {
+        if (!blob || !active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setPreviewUrl(objectUrl);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [conversationId, getAccessToken, image.id]);
+  return (
+    <div className="message-image-attachment">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      {previewUrl ? <img src={previewUrl} alt={image.name ?? "Attached image"} /> : <span>Loading image…</span>}
+      {image.name && <span>{image.name}</span>}
+    </div>
+  );
+}
+
 export type ConversationTurnProps = {
+  conversationId: string;
   turn: ConversationTurnType;
   actionsOpen: boolean;
   isStreamingConversation: boolean;
@@ -30,6 +65,7 @@ export type ConversationTurnProps = {
 
 /** Render one user prompt and its assistant response without owning state. */
 export function ConversationTurn({
+  conversationId,
   turn,
   actionsOpen,
   isStreamingConversation,
@@ -70,7 +106,16 @@ export function ConversationTurn({
       <div className="message-user-container">
         <article className="message user">
           <div className="message-label">You</div>
-          <div className="message-bubble">{userMessage.content}</div>
+          <div className="message-bubble">
+            {userMessage.attachments?.length ? (
+              <div className="message-image-attachments">
+                {userMessage.attachments.map((image) => (
+                  <UserImage key={image.id} image={image} conversationId={conversationId} getAccessToken={getAccessToken} />
+                ))}
+              </div>
+            ) : null}
+            {userMessage.content}
+          </div>
           {turn.versions.length > 1 && (
             <div className="version-controls" aria-label="Prompt versions">
               <button
@@ -145,4 +190,3 @@ export function ConversationTurn({
     </article>
   );
 }
-

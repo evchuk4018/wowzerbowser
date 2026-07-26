@@ -405,6 +405,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
           />
         )}
         <ChatTranscript
+          conversationId={active.id}
           turns={active.turns}
           openMessageActions={openMessageActions}
           isStreamingConversation={activeStreaming}

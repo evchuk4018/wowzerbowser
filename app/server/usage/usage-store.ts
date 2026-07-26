@@ -45,6 +45,8 @@ function usageColumns(input: UsageRecordInput) {
     reasoning_tokens: usage.reasoningTokens ?? 0,
     usage_source: input.source,
     recorded_at: input.recordedAt ?? new Date().toISOString(),
+    conversation_id: input.conversationId ?? null,
+    job_id: input.jobId ?? null,
   };
 }
 
@@ -79,6 +81,8 @@ async function writeUsageRecord(input: UsageRecordInput): Promise<void> {
     request_id: input.requestId,
     round: input.round,
     ...(input.recordedAt ? { recorded_at: input.recordedAt } : {}),
+    conversation_id: input.conversationId ?? null,
+    job_id: input.jobId ?? null,
     prompt_tokens: usage.promptTokens ?? 0,
     completion_tokens: usage.completionTokens ?? 0,
     total_tokens: usage.totalTokens ?? 0,
@@ -101,7 +105,7 @@ export async function flushUsageOutbox(ownerId: string): Promise<void> {
   while (true) {
     const { data, error } = await table()
       .from("chat_usage_outbox")
-      .select("id,provider,model,request_kind,request_id,round,prompt_tokens,completion_tokens,total_tokens,cached_prompt_tokens,reasoning_tokens,usage_source,recorded_at")
+      .select("id,provider,model,request_kind,request_id,round,prompt_tokens,completion_tokens,total_tokens,cached_prompt_tokens,reasoning_tokens,usage_source,recorded_at,conversation_id,job_id")
       .eq("owner_id", ownerId)
       .order("id")
       .limit(100);
@@ -126,6 +130,8 @@ export async function flushUsageOutbox(ownerId: string): Promise<void> {
       },
       source: value.usage_source as UsageRecordInput["source"],
       recordedAt: String(value.recorded_at),
+      conversationId: typeof value.conversation_id === "string" ? value.conversation_id : undefined,
+      jobId: typeof value.job_id === "string" ? value.job_id : undefined,
     };
     try {
       await writeUsageRecord(input);

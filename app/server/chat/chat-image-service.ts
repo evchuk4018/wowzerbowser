@@ -200,6 +200,9 @@ export async function analyzeAndStoreChatImages(
   if (inputs.length < 1 || inputs.length > MAX_CHAT_IMAGES_PER_TURN) {
     throw new ChatImageError("image_count", `Attach between 1 and ${MAX_CHAT_IMAGES_PER_TURN} images.`);
   }
+  if (!options.jobId) {
+    throw new ChatImageError("invalid_request", "Image uploads must be bound to a chat job.");
+  }
   const ids = new Set<string>();
   for (const input of inputs) {
     if (ids.has(input.id)) throw new ChatImageError("duplicate_image_id", "Each image ID may only appear once per turn.");

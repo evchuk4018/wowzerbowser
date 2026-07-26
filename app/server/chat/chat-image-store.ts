@@ -35,6 +35,19 @@ export type ChatImageUploadRecord = {
   updatedAt: string;
 };
 
+export type ChatImageUploadIdentity = {
+  ownerId: string;
+  conversationId: string;
+  imageId: string;
+  userMessageId: string;
+  jobId: string | null;
+  storagePath: string;
+  name: string | null;
+  contentType: ChatImageContentType;
+  size: number;
+  contentHash: string | null;
+};
+
 function recordFromRow(row: Record<string, unknown>): ChatImageUploadRecord {
   return {
     ownerId: String(row.owner_id),
@@ -57,7 +70,18 @@ function recordFromRow(row: Record<string, unknown>): ChatImageUploadRecord {
 }
 
 export function attachmentFromUploadRecord(record: ChatImageUploadRecord): ChatImageAttachment | null {
-  if (record.status !== "complete" || !record.analysis) return null;
+  let expectedStoragePath: string;
+  try {
+    expectedStoragePath = chatImageStoragePath(record.ownerId, record.conversationId, record.userMessageId, record.imageId);
+  } catch {
+    return null;
+  }
+  if (
+    record.status !== "complete"
+    || !record.analysis
+    || record.analysis.status !== "complete"
+    || record.storagePath !== expectedStoragePath
+  ) return null;
   return {
     id: record.imageId,
     name: record.name,
@@ -66,6 +90,22 @@ export function attachmentFromUploadRecord(record: ChatImageUploadRecord): ChatI
     storagePath: record.storagePath,
     analysis: record.analysis,
   };
+}
+
+export function chatImageUploadIdentityMatches(
+  record: ChatImageUploadRecord,
+  expected: ChatImageUploadIdentity,
+): boolean {
+  return record.ownerId === expected.ownerId
+    && record.conversationId === expected.conversationId
+    && record.imageId === expected.imageId
+    && record.userMessageId === expected.userMessageId
+    && record.jobId === expected.jobId
+    && record.storagePath === expected.storagePath
+    && record.name === expected.name
+    && record.contentType === expected.contentType
+    && record.size === expected.size
+    && record.contentHash === expected.contentHash;
 }
 
 function assertId(value: string, field: string): void {
@@ -103,6 +143,31 @@ export async function getChatImageUploadRecord(ownerId: string, conversationId: 
   return data ? recordFromRow(data as Record<string, unknown>) : null;
 }
 
+export async function listChatImageUploadRecords(input: {
+  ownerId: string;
+  conversationId: string;
+  userMessageId: string;
+  jobId: string;
+  imageIds?: readonly string[];
+  status?: ChatImageUploadRecord["status"];
+}): Promise<ChatImageUploadRecord[]> {
+  assertId(input.conversationId, "conversationId");
+  assertId(input.userMessageId, "userMessageId");
+  assertId(input.jobId, "jobId");
+  const db = getServerClient();
+  let query = db.from("chat_image_uploads")
+    .select("*")
+    .eq("owner_id", input.ownerId)
+    .eq("conversation_id", input.conversationId)
+    .eq("user_message_id", input.userMessageId)
+    .eq("job_id", input.jobId);
+  if (input.status) query = query.eq("status", input.status);
+  if (input.imageIds?.length) query = query.in("image_id", [...input.imageIds]);
+  const { data, error } = await query;
+  if (error) throw new ChatImageError("storage", "Image upload metadata is unavailable.", 503);
+  return (data ?? []).map((row) => recordFromRow(row as Record<string, unknown>));
+}
+
 export async function claimChatImageUpload(input: {
   ownerId: string;
   conversationId: string;
@@ -115,6 +180,26 @@ export async function claimChatImageUpload(input: {
   size: number;
   contentHash?: string;
 }): Promise<{ record: ChatImageUploadRecord; claimed: boolean }> {
+  assertId(input.conversationId, "conversationId");
+  assertId(input.userMessageId, "userMessageId");
+  assertId(input.imageId, "imageId");
+  if (input.jobId) assertId(input.jobId, "jobId");
+  const expectedStoragePath = chatImageStoragePath(input.ownerId, input.conversationId, input.userMessageId, input.imageId);
+  if (input.storagePath !== expectedStoragePath) {
+    throw new ChatImageError("image_id_conflict", "That image ID is bound to different storage.", 409);
+  }
+  const expectedIdentity: ChatImageUploadIdentity = {
+    ownerId: input.ownerId,
+    conversationId: input.conversationId,
+    imageId: input.imageId,
+    userMessageId: input.userMessageId,
+    jobId: input.jobId ?? null,
+    storagePath: input.storagePath,
+    name: input.name,
+    contentType: input.contentType,
+    size: input.size,
+    contentHash: input.contentHash ?? null,
+  };
   const db = getServerClient();
   const claimToken = randomUUID();
   const claimExpiresAt = new Date(Date.now() + CHAT_IMAGE_CLAIM_LEASE_MS).toISOString();
@@ -140,16 +225,39 @@ export async function claimChatImageUpload(input: {
   if (inserted.error?.code !== "23505") throw new ChatImageError("storage", "Image upload metadata could not be created.", 503);
   const existing = await getChatImageUploadRecord(input.ownerId, input.conversationId, input.imageId);
   if (!existing) throw new ChatImageError("storage", "Image upload metadata could not be loaded.", 503);
-  if (
-    (existing.contentHash && input.contentHash && existing.contentHash !== input.contentHash)
-    || (!existing.contentHash && (existing.contentType !== input.contentType || existing.size !== input.size))
-  ) {
+  if (!chatImageUploadIdentityMatches(existing, expectedIdentity)) {
     throw new ChatImageError("image_id_conflict", "That image ID already belongs to different image data.", 409);
+  }
+  if (existing.status === "complete") return { record: existing, claimed: false };
+  if (existing.status === "failed") {
+    let retryQuery = db.from("chat_image_uploads")
+      .update({
+        status: "processing",
+        analysis: null,
+        error: null,
+        claim_token: claimToken,
+        claim_expires_at: claimExpiresAt,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("owner_id", input.ownerId)
+      .eq("conversation_id", input.conversationId)
+      .eq("image_id", input.imageId)
+      .eq("user_message_id", input.userMessageId)
+      .eq("status", "failed")
+      .is("claim_token", null);
+    if (input.jobId) retryQuery = retryQuery.eq("job_id", input.jobId);
+    else retryQuery = retryQuery.is("job_id", null);
+    const retried = await retryQuery.select("*").maybeSingle();
+    if (retried.error) throw new ChatImageError("storage", "Image upload metadata could not be claimed for retry.", 503);
+    if (retried.data) return { record: recordFromRow(retried.data as Record<string, unknown>), claimed: true };
+    const current = await getChatImageUploadRecord(input.ownerId, input.conversationId, input.imageId);
+    if (!current) throw new ChatImageError("storage", "Image upload metadata could not be claimed.", 503);
+    return { record: current, claimed: false };
   }
   if (existing.status !== "processing") return { record: existing, claimed: false };
   const claimExpired = !existing.claimExpiresAt || Date.parse(existing.claimExpiresAt) <= Date.now();
   if (!claimExpired) return { record: existing, claimed: false };
-  const reclaimed = await db.from("chat_image_uploads")
+  let reclaimedQuery = db.from("chat_image_uploads")
     .update({
       status: "processing",
       content_hash: input.contentHash ?? existing.contentHash,
@@ -162,10 +270,14 @@ export async function claimChatImageUpload(input: {
     .eq("owner_id", input.ownerId)
     .eq("conversation_id", input.conversationId)
     .eq("image_id", input.imageId)
+    .eq("user_message_id", input.userMessageId)
     .eq("status", "processing")
-    .or(`claim_expires_at.is.null,claim_expires_at.lte.${new Date().toISOString()}`)
-    .select("*")
-    .maybeSingle();
+    .or(`claim_expires_at.is.null,claim_expires_at.lte.${new Date().toISOString()}`);
+  if (input.jobId) reclaimedQuery = reclaimedQuery.eq("job_id", input.jobId);
+  else reclaimedQuery = reclaimedQuery.is("job_id", null);
+  if (existing.claimToken) reclaimedQuery = reclaimedQuery.eq("claim_token", existing.claimToken);
+  else reclaimedQuery = reclaimedQuery.is("claim_token", null);
+  const reclaimed = await reclaimedQuery.select("*").maybeSingle();
   if (reclaimed.error) throw new ChatImageError("storage", "Image upload metadata could not be claimed.", 503);
   if (!reclaimed.data) {
     const current = await getChatImageUploadRecord(input.ownerId, input.conversationId, input.imageId);
@@ -222,6 +334,74 @@ export async function failChatImageUpload(ownerId: string, conversationId: strin
   if (error) throw new ChatImageError("storage", "Image failure metadata could not be saved.", 503);
 }
 
+async function isActiveChatImageUpload(record: ChatImageUploadRecord): Promise<boolean> {
+  if (!record.jobId) return false;
+  const db = getServerClient();
+  const [messageResult, jobResult] = await Promise.all([
+    db.from("chat_messages")
+      .select("turn_id,version_id")
+      .eq("owner_id", record.ownerId)
+      .eq("conversation_id", record.conversationId)
+      .eq("message_id", record.userMessageId)
+      .eq("role", "user")
+      .maybeSingle(),
+    db.from("chat_jobs")
+      .select("request")
+      .eq("owner_id", record.ownerId)
+      .eq("conversation_id", record.conversationId)
+      .eq("job_id", record.jobId)
+      .maybeSingle(),
+  ]);
+  if (messageResult.error || jobResult.error) throw new ChatImageError("storage", "Image metadata is unavailable.", 503);
+  const message = messageResult.data as { turn_id?: unknown; version_id?: unknown } | null;
+  const jobRequest = jobResult.data?.request as {
+    conversationId?: unknown;
+    jobId?: unknown;
+    persistence?: { turnId?: unknown; versionId?: unknown; userMessageId?: unknown };
+  } | undefined;
+  if (
+    !message
+    || jobRequest?.conversationId !== record.conversationId
+    || jobRequest.jobId !== record.jobId
+    || jobRequest.persistence?.userMessageId !== record.userMessageId
+    || jobRequest.persistence?.turnId !== message.turn_id
+    || jobRequest.persistence?.versionId !== message.version_id
+  ) return false;
+
+  const [versionResult, turnResult, assistantResult] = await Promise.all([
+    db.from("chat_message_versions")
+      .select("version_index")
+      .eq("owner_id", record.ownerId)
+      .eq("conversation_id", record.conversationId)
+      .eq("turn_id", message.turn_id)
+      .eq("version_id", message.version_id)
+      .maybeSingle(),
+    db.from("chat_turns")
+      .select("active_version")
+      .eq("owner_id", record.ownerId)
+      .eq("conversation_id", record.conversationId)
+      .eq("turn_id", message.turn_id)
+      .maybeSingle(),
+    db.from("chat_messages")
+      .select("message_id")
+      .eq("owner_id", record.ownerId)
+      .eq("conversation_id", record.conversationId)
+      .eq("version_id", message.version_id)
+      .eq("role", "assistant")
+      .eq("job_id", record.jobId)
+      .maybeSingle(),
+  ]);
+  if (versionResult.error || turnResult.error || assistantResult.error) {
+    throw new ChatImageError("storage", "Image metadata is unavailable.", 503);
+  }
+  return Boolean(
+    versionResult.data
+    && turnResult.data
+    && Number(versionResult.data.version_index) === Number(turnResult.data.active_version)
+    && assistantResult.data,
+  );
+}
+
 export async function waitForChatImageUpload(ownerId: string, conversationId: string, imageId: string, signal?: AbortSignal): Promise<ChatImageUploadRecord | null> {
   for (let attempt = 0; attempt < 240; attempt += 1) {
     if (signal?.aborted) throw new ChatImageError("cancelled", "Image analysis was cancelled.", 499);
@@ -266,20 +446,9 @@ export async function uploadChatImageObject(
 export async function findChatImageAttachment(ownerId: string, conversationId: string, imageId: string): Promise<ChatImageAttachment> {
   assertId(conversationId, "conversationId");
   assertId(imageId, "imageId");
-  const { data, error } = await getServerClient()
-    .from("chat_messages")
-    .select("attachments")
-    .eq("owner_id", ownerId)
-    .eq("conversation_id", conversationId)
-    .eq("role", "user");
-  if (error) throw new ChatImageError("storage", "Image metadata is unavailable.", 503);
-  for (const row of data ?? []) {
-    const attachments = Array.isArray((row as { attachments?: unknown }).attachments)
-      ? (row as { attachments: unknown[] }).attachments
-      : [];
-    const value = attachments.find((item) => item && typeof item === "object" && (item as { id?: unknown }).id === imageId);
-    if (value && typeof value === "object") return value as ChatImageAttachment;
-  }
+  const record = await getChatImageUploadRecord(ownerId, conversationId, imageId);
+  const attachment = record && attachmentFromUploadRecord(record);
+  if (attachment && await isActiveChatImageUpload(record)) return attachment;
   throw new ChatImageError("image_not_found", "The image was not found in this conversation.", 404);
 }
 

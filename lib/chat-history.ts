@@ -30,11 +30,9 @@ export type ChatToolActivity = {
 };
 
 export type ChatPythonActivity = Omit<ChatToolActivity, "kind"> & { kind: "python" };
-/** Compatibility shape accepted by the existing activity timeline. */
-export type ChatWebActivity = Omit<ChatToolActivity, "kind"> & { kind: "web" | "image" };
+export type ChatWebActivity = Omit<ChatToolActivity, "kind"> & { kind: "web" };
 export type ChatImageActivity = Omit<ChatToolActivity, "kind"> & { kind: "image" };
-type ChatPersistedWebActivity = Omit<ChatToolActivity, "kind"> & { kind: "web" };
-export type ChatAssistantActivity = ChatReasoningActivity | ChatPythonActivity | ChatPersistedWebActivity | ChatImageActivity;
+export type ChatAssistantActivity = ChatReasoningActivity | ChatPythonActivity | ChatWebActivity | ChatImageActivity;
 
 export type ChatHistoryMessage = {
   id: string;
@@ -108,7 +106,11 @@ function activityForTool(call: ChatToolCall, round: number, startedAt: number): 
   } as const;
   if (call.name === "run_python") return { ...base, kind: "python" };
   if (call.name === "inspect_image") return { ...base, kind: "image" };
-  return { ...base, kind: "web" };
+  return { ...base, kind: legacyToolKind(call) };
+}
+
+function legacyToolKind(call: ChatToolCall): "python" | "web" {
+  return ({ kind: call.name === "run_python" ? "python" : "web" } as const).kind;
 }
 
 export function applyChatStreamEvent(

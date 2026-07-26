@@ -5,6 +5,7 @@ import { ConversationTurn, type ThinkingTiming } from "./conversation-turn";
 import type { ConversationTurn as ConversationTurnType, Message } from "./conversation-types";
 
 export type ChatTranscriptProps = {
+  conversationId: string;
   turns: ConversationTurnType[];
   openMessageActions: string | null;
   isStreamingConversation: boolean;
@@ -24,6 +25,7 @@ export type ChatTranscriptProps = {
 
 /** Transcript and empty state; state and network behavior stay in workspace. */
 export function ChatTranscript({
+  conversationId,
   turns,
   openMessageActions,
   isStreamingConversation,
@@ -55,6 +57,7 @@ export function ChatTranscript({
       {turns.map((turn) => (
         <ConversationTurn
           key={turn.id}
+          conversationId={conversationId}
           turn={turn}
           actionsOpen={openMessageActions === turn.id}
           isStreamingConversation={isStreamingConversation}
@@ -76,4 +79,3 @@ export function ChatTranscript({
     </div>
   );
 }
-

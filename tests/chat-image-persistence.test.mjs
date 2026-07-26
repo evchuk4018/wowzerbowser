@@ -10,6 +10,11 @@ import {
   parseChatRequest,
 } from "../lib/chat-protocol.ts";
 import { applyChatStreamEvent } from "../lib/chat-history.ts";
+import {
+  attachmentFromUploadRecord,
+  chatImageStoragePath,
+  chatImageUploadIdentityMatches,
+} from "../app/server/chat/chat-image-store.ts";
 
 const attachment = (overrides = {}) => ({
   id: "img_123",
@@ -179,8 +184,74 @@ test("message-version persistence stores attachment metadata on the owning versi
   ]);
   assert.match(store, /attachments: unknown/);
   assert.match(store, /attachments: message\.attachments \?\? \[\]/);
-  assert.match(store, /lastMessage\.attachments/);
+  assert.match(store, /requestImageIds\(request\)/);
   assert.match(store, /version_id: versionId/);
   assert.match(migration, /add column if not exists attachments jsonb/i);
   assert.match(migration, /jsonb_typeof\(attachments\) = 'array'/i);
+});
+
+function uploadRecord(overrides = {}) {
+  return {
+    ownerId: "owner-1",
+    conversationId: "conversation-1",
+    imageId: "img_123",
+    userMessageId: "message-1",
+    jobId: "job-1",
+    storagePath: "owner-1/conversation-1/message-1/img_123",
+    name: "screen.png",
+    contentType: "image/png",
+    size: 128,
+    contentHash: "hash-1",
+    status: "complete",
+    analysis: attachment().analysis,
+    error: null,
+    claimToken: null,
+    claimExpiresAt: null,
+    updatedAt: new Date(0).toISOString(),
+    ...overrides,
+  };
+}
+
+test("authoritative upload records reject forged paths and inactive analysis", () => {
+  const record = uploadRecord();
+  assert.equal(chatImageStoragePath(record.ownerId, record.conversationId, record.userMessageId, record.imageId), record.storagePath);
+  assert.ok(attachmentFromUploadRecord(record));
+  assert.equal(attachmentFromUploadRecord({ ...record, storagePath: "owner-1/conversation-1/other-message/img_123" }), null);
+  assert.equal(attachmentFromUploadRecord({ ...record, analysis: { ...record.analysis, status: "failed" } }), null);
+});
+
+test("image ID reuse is bound to message, job, storage, and content identity", () => {
+  const record = uploadRecord();
+  const expected = { ...record };
+  assert.equal(chatImageUploadIdentityMatches(record, expected), true);
+  for (const field of ["userMessageId", "jobId", "storagePath", "contentType", "size", "contentHash"]) {
+    const changed = { ...expected, [field]: field === "size" ? 129 : `${expected[field]}-changed` };
+    assert.equal(chatImageUploadIdentityMatches(record, changed), false, field);
+  }
+});
+
+test("server image authorization uses upload rows and claim-token retries", async () => {
+  const [store, service, history, orchestration] = await Promise.all([
+    readFile(new URL("../app/server/chat/chat-image-store.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/server/chat/chat-image-service.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/server/chat/chat-history-store.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/chat-server-service.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(store, /\.eq\("user_message_id", input\.userMessageId\)/);
+  assert.match(store, /\.eq\("job_id", input\.jobId\)/);
+  assert.match(store, /\.eq\("status", "failed"\)/);
+  assert.match(store, /\.is\("claim_token", null\)/);
+  assert.match(store, /\.eq\("claim_token", existing\.claimToken\)/);
+  assert.match(store, /existing\.status === "complete"/);
+  assert.match(service, /Promise\.all\(\[/);
+  assert.match(service, /await waitForChatImageUpload/);
+  assert.match(history, /listChatImageUploadRecords/);
+  assert.match(history, /active_version/);
+  assert.match(history, /requestUserImageRefs/);
+  assert.match(history, /activeImageMessages/);
+  assert.match(history, /const activeHistory = activeMessages\.slice\(0, currentIndex \+ 1\)/);
+  assert.match(history, /activeMessages\[currentIndex\]\.jobId !== jobId/);
+  assert.match(history, /requestUsers\.length !== activeHistory\.length/);
+  assert.match(orchestration, /await getAuthoritativeChatImageIdsForRequest/);
+  assert.doesNotMatch(orchestration, /imageIdsFromValidatedRequestHistory/);
 });
