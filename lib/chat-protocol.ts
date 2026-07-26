@@ -592,8 +592,12 @@ export function parseChatRequest(value: unknown): ChatRequest {
     const documents = message.documents === undefined ? undefined : (() => {
       if (!Array.isArray(message.documents) || message.documents.length > 10) throw new ChatRequestValidationError(`messages[${index}].documents is invalid.`);
       return message.documents.map((item, documentIndex) => {
-        if (!isRecord(item) || typeof item.id !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(item.id) || typeof item.name !== "string" || item.contentType !== "application/pdf" || typeof item.size !== "number" || typeof item.pageCount !== "number" || typeof item.tokenEstimate !== "number") throw new ChatRequestValidationError(`messages[${index}].documents[${documentIndex}] is invalid.`);
-        return { id: item.id, name: item.name.slice(0, 512), contentType: "application/pdf" as const, size: item.size, pageCount: item.pageCount, tokenEstimate: item.tokenEstimate };
+        if (!isRecord(item) || typeof item.id !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(item.id) || typeof item.name !== "string" || !DOCUMENT_CONTENT_TYPES.includes(item.contentType as never) || typeof item.size !== "number" || typeof item.pageCount !== "number" || typeof item.tokenEstimate !== "number") throw new ChatRequestValidationError(`messages[${index}].documents[${documentIndex}] is invalid.`);
+        const legacyPdf = item.contentType === "application/pdf" && item.hasImages === undefined;
+        if (!legacyPdf && (typeof item.hasImages !== "boolean" || typeof item.imageCount !== "number" || typeof item.analyzedImageCount !== "number" || !Array.isArray(item.imageAnalyses))) throw new ChatRequestValidationError(`messages[${index}].documents[${documentIndex}] image metadata is invalid.`);
+        const rawAnalyses = Array.isArray(item.imageAnalyses) ? item.imageAnalyses : [];
+        const imageAnalyses = rawAnalyses.slice(0, 4).map((analysis) => { if (!isRecord(analysis) || typeof analysis.imageNumber !== "number" || !(analysis.visibleText === null || typeof analysis.visibleText === "string") || !(analysis.mainVisuals === null || typeof analysis.mainVisuals === "string")) throw new ChatRequestValidationError(`messages[${index}].documents[${documentIndex}].imageAnalyses is invalid.`); return { imageNumber: analysis.imageNumber, visibleText: analysis.visibleText?.slice(0, 2000) ?? null, mainVisuals: analysis.mainVisuals?.slice(0, 2000) ?? null }; });
+        return { id: item.id, name: item.name.slice(0, 512), contentType: item.contentType as ChatDocumentAttachment["contentType"], size: item.size, pageCount: item.pageCount, tokenEstimate: item.tokenEstimate, hasImages: legacyPdf ? false : item.hasImages as boolean, imageCount: legacyPdf ? 0 : item.imageCount as number, analyzedImageCount: legacyPdf ? 0 : item.analyzedImageCount as number, imageAnalyses };
       });
     })();
     const toolCalls = readToolCalls(message.toolCalls, `messages[${index}].toolCalls`);
@@ -699,7 +703,7 @@ import {
   MAX_IMAGE_FOLLOWUP_QUESTION_LENGTH,
 } from "./chat-image";
 import type { ChatImageAnalysis, ChatImageAttachment, ChatImageContentType } from "./chat-image";
-import type { ChatDocumentAttachment } from "./chat-document";
+import { DOCUMENT_CONTENT_TYPES, type ChatDocumentAttachment } from "./chat-document";
 
 export {
   CHAT_IMAGE_CONTENT_TYPES,
