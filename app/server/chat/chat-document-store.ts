@@ -1,7 +1,15 @@
 import "server-only";
-import { CHAT_DOCUMENT_BUCKET, DOCX_CONTENT_TYPE, type ChatDocumentAttachment, type ChatDocumentPage } from "../../../lib/chat-document";
+import { CHAT_DOCUMENT_BUCKET, DOCX_CONTENT_TYPE, ChatDocumentError, type ChatDocumentAttachment, type ChatDocumentPage } from "../../../lib/chat-document";
 import { getServerClient } from "../../auth/supabase-server-adapter";
 import { DOCUMENT_INGESTION_STAGES, type DocumentIngestionTiming } from "./document-ingestion-timing";
+
+export const CHAT_DOCUMENT_DOWNLOAD_URL_EXPIRATION_SECONDS = 60;
+
+function configuredSupabaseOrigin(): string | null {
+  const configuredUrl = process.env.SUPABASE_URL?.trim() || process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  if (!configuredUrl) return null;
+  try { return new URL(configuredUrl).origin; } catch { return null; }
+}
 
 export const documentStoragePath = (ownerId: string, conversationId: string, documentId: string, contentType: ChatDocumentAttachment["contentType"]) => `${ownerId}/${conversationId}/${documentId}.${contentType === DOCX_CONTENT_TYPE ? "docx" : "pdf"}`;
 
@@ -10,6 +18,34 @@ export async function createSignedDocumentUpload(input: { ownerId: string; conve
   const { data, error } = await getServerClient().storage.from(CHAT_DOCUMENT_BUCKET).createSignedUploadUrl(path);
   if (error) throw error;
   return { path, token: data.token, signedUrl: data.signedUrl };
+}
+
+function validateSignedDocumentDownloadUrl(signedUrl: string, path: string): string {
+  try {
+    const url = new URL(signedUrl);
+    const pathname = decodeURIComponent(url.pathname);
+    const expectedPath = `/storage/v1/object/sign/${CHAT_DOCUMENT_BUCKET}/${path}`;
+    const expectedOrigin = configuredSupabaseOrigin();
+    if (url.protocol !== "https:" || (expectedOrigin && url.origin !== expectedOrigin) || url.username || url.password || url.hash || !url.searchParams.has("token") || pathname !== expectedPath) throw new Error();
+    return signedUrl;
+  } catch {
+    throw new ChatDocumentError("document_storage_invalid_url", "The document download URL is invalid.", 502);
+  }
+}
+
+export function assertSignedDocumentDownloadUrl(input: { ownerId: string; conversationId: string; documentId: string; contentType: ChatDocumentAttachment["contentType"]; signedUrl: string }): string {
+  return validateSignedDocumentDownloadUrl(input.signedUrl, documentStoragePath(input.ownerId, input.conversationId, input.documentId, input.contentType));
+}
+
+export async function createSignedDocumentDownloadUrl(
+  input: { ownerId: string; conversationId: string; documentId: string; contentType: ChatDocumentAttachment["contentType"] },
+  db: ReturnType<typeof getServerClient> = getServerClient(),
+): Promise<string> {
+  const path = documentStoragePath(input.ownerId, input.conversationId, input.documentId, input.contentType);
+  const { data, error } = await db.storage.from(CHAT_DOCUMENT_BUCKET).createSignedUrl(path, CHAT_DOCUMENT_DOWNLOAD_URL_EXPIRATION_SECONDS);
+  if (error) throw error;
+  if (!data || typeof data.signedUrl !== "string") throw new ChatDocumentError("document_storage_invalid_url", "The document download URL is invalid.", 502);
+  return assertSignedDocumentDownloadUrl({ ...input, signedUrl: data.signedUrl });
 }
 
 export async function registerDocument(input: { ownerId: string; conversationId: string; userMessageId: string | null; jobId: string | null; document: ChatDocumentAttachment; pages: ChatDocumentPage[]; timing?: DocumentIngestionTiming }) {

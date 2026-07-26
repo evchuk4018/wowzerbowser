@@ -1,7 +1,7 @@
 import "server-only";
-import { DOCX_CONTENT_TYPE, estimatePdfTokens, MAX_PDF_BYTES, type ChatDocumentAttachment } from "../../../lib/chat-document";
+import { ChatDocumentError, DOCX_CONTENT_TYPE, estimatePdfTokens, MAX_PDF_BYTES, type ChatDocumentAttachment } from "../../../lib/chat-document";
 import { parsePdfWithOpenRouter } from "../../providers/openrouter/openrouter-document-adapter";
-import { documentStoragePath, registerDocument, uploadDocumentBytes } from "./chat-document-store";
+import { assertSignedDocumentDownloadUrl, createSignedDocumentDownloadUrl, documentStoragePath, registerDocument, uploadDocumentBytes } from "./chat-document-store";
 import { parseDocx } from "./docx-parser";
 import { analyzeDocumentImage } from "./chat-image-service";
 import { DOCUMENT_INGESTION_STAGES, DocumentIngestionTiming, type DocumentIngestionStage } from "./document-ingestion-timing";
@@ -20,7 +20,16 @@ function createTiming(input: { documentType: string; byteSize: number; alreadyUp
   return input.timing ?? new DocumentIngestionTiming({ documentType: input.documentType, byteSize: input.byteSize, cacheStatus: input.alreadyUploaded ? "bypass" : "unknown" });
 }
 
-export async function ingestPdf(input: { ownerId: string; conversationId: string; pdfId: string; filename: string; bytes: Uint8Array; userMessageId?: string; jobId?: string; alreadyUploaded?: boolean; signal?: AbortSignal; timing?: DocumentIngestionTiming }): Promise<ChatDocumentAttachment> {
+async function createPdfDownloadUrl(input: { ownerId: string; conversationId: string; documentId: string }): Promise<string> {
+  try {
+    return await createSignedDocumentDownloadUrl({ ...input, contentType: "application/pdf" });
+  } catch (error) {
+    if (error instanceof ChatDocumentError) throw error;
+    throw new ChatDocumentError("parser_unavailable", "The free PDF parser could not access the uploaded document.", 502);
+  }
+}
+
+export async function ingestPdf(input: { ownerId: string; conversationId: string; pdfId: string; filename: string; bytes: Uint8Array; downloadUrl?: string; userMessageId?: string; jobId?: string; alreadyUploaded?: boolean; signal?: AbortSignal; timing?: DocumentIngestionTiming }): Promise<ChatDocumentAttachment> {
   const timing = createTiming({ documentType: "application/pdf", byteSize: input.bytes.length, alreadyUploaded: input.alreadyUploaded, timing: input.timing });
   const ownsTiming = !input.timing;
   try {
@@ -29,7 +38,12 @@ export async function ingestPdf(input: { ownerId: string; conversationId: string
       if (input.bytes.length < 5 || new TextDecoder().decode(input.bytes.slice(0, 5)) !== "%PDF-") throw new Error("The uploaded file is not a valid PDF.");
     });
     if (!input.alreadyUploaded) await timing.measure(DOCUMENT_INGESTION_STAGES.SUPABASE_UPLOAD, () => uploadDocumentBytes(documentStoragePath(input.ownerId, input.conversationId, input.pdfId, "application/pdf"), input.bytes, "application/pdf"));
-    const pages = await parsePdfWithOpenRouter(input.bytes, input.filename, input.signal, timing);
+    const pages = await timing.measure(DOCUMENT_INGESTION_STAGES.EXTERNAL_PARSING, async () => {
+      const downloadUrl = input.downloadUrl
+        ? assertSignedDocumentDownloadUrl({ ownerId: input.ownerId, conversationId: input.conversationId, documentId: input.pdfId, contentType: "application/pdf", signedUrl: input.downloadUrl })
+        : await createPdfDownloadUrl({ ownerId: input.ownerId, conversationId: input.conversationId, documentId: input.pdfId });
+      return parsePdfWithOpenRouter(downloadUrl, input.filename, input.signal);
+    });
     timing.updateMetadata({ pageCount: pages.length, ocrPageCount: 0 });
     const document: ChatDocumentAttachment = { id: input.pdfId, name: input.filename, contentType: "application/pdf", size: input.bytes.length, pageCount: pages.length, tokenEstimate: estimatePdfTokens(pages.map((p) => p.text).join("")), hasImages: false, imageCount: 0, analyzedImageCount: 0, imageAnalyses: [] };
     await registerDocument({ ownerId: input.ownerId, conversationId: input.conversationId, userMessageId: input.userMessageId ?? null, jobId: input.jobId ?? null, document, pages, timing });
