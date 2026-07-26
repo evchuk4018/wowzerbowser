@@ -90,3 +90,6 @@ then returns a clear "not configured" result.
 
 - [Next.js Documentation](https://nextjs.org/docs)
 - [Vercel Documentation](https://vercel.com/docs)
+
+### PDF attachments
+PDFs (up to 25 MiB) upload directly from the browser to the private `chat-documents` Supabase bucket through a signed upload URL. The server registers page text using OpenRouter's free Cloudflare AI parser only (`cloudflare-ai`); there is no paid OCR fallback. Configure `OPENROUTER_API_KEY` and apply the Supabase migrations. Small PDFs are included verbatim in context, while large PDFs are available through gated `search_pdf` and `read_pdf_pages` tools.

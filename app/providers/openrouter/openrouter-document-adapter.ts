@@ -1,0 +1,31 @@
+import "server-only";
+
+import type { ChatDocumentPage } from "../../../lib/chat-document";
+import { ChatDocumentError } from "../../../lib/chat-document";
+
+export async function parsePdfWithOpenRouter(bytes: Uint8Array, filename: string, signal?: AbortSignal): Promise<ChatDocumentPage[]> {
+  const key = process.env.OPENROUTER_API_KEY?.trim();
+  if (!key) throw new ChatDocumentError("parser_unavailable", "The free PDF parser is not configured.", 503);
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST", signal,
+    headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: "openrouter/free",
+      messages: [{ role: "user", content: [
+        { type: "file", file: { filename, file_data: `data:application/pdf;base64,${Buffer.from(bytes).toString("base64")}` } },
+        { type: "text", text: "Return the extracted PDF verbatim as JSON only: {\"pages\":[{\"pageNumber\":1,\"text\":\"...\"}]}. Preserve every page and do not summarize." },
+      ] }],
+      plugins: [{ id: "file-parser", pdf: { engine: "cloudflare-ai" } }],
+    }),
+  });
+  if (!response.ok) throw new ChatDocumentError("parser_unavailable", `The free Cloudflare PDF parser is unavailable (${response.status}); no paid fallback was used.`, 502);
+  const body = await response.json() as { choices?: Array<{ message?: { content?: unknown } }> };
+  const content = body.choices?.[0]?.message?.content;
+  if (typeof content !== "string") throw new ChatDocumentError("parser_failed", "The free PDF parser returned no extracted text.", 502);
+  try {
+    const clean = content.replace(/^```(?:json)?\s*|\s*```$/g, "");
+    const parsed = JSON.parse(clean) as { pages?: Array<{ pageNumber?: unknown; text?: unknown }> };
+    if (!Array.isArray(parsed.pages) || !parsed.pages.length) throw new Error();
+    return parsed.pages.map((page, index) => ({ pageNumber: index + 1, text: typeof page.text === "string" ? page.text : "" }));
+  } catch { throw new ChatDocumentError("parser_failed", "The free PDF parser returned invalid page data.", 502); }
+}

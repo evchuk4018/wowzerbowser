@@ -14,6 +14,7 @@ import type { AuthUser } from "../auth/types";
 import { SettingsModal } from "../settings/settings-modal";
 import { ChatComposer } from "./chat-composer";
 import type { PendingChatImage } from "./chat-image-attachments";
+import type { PendingChatDocument } from "./chat-document-attachments";
 import { ChatSidebar } from "./chat-sidebar";
 import { ChatTranscript } from "./chat-transcript";
 import { fetchChatUsage } from "./chat-usage-service";
@@ -335,9 +336,10 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
   const sendMessage = (
     event?: FormEvent<HTMLFormElement>,
     attachments: readonly PendingChatImage[] = [],
+    documents: readonly PendingChatDocument[] = [],
   ) => {
     event?.preventDefault();
-    return generation.sendMessage(draft, editingTurnId, attachments, editingAttachments);
+    return generation.sendMessage(draft, editingTurnId, attachments, editingAttachments, documents);
   };
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
