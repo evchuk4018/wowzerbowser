@@ -423,7 +423,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
           onShare={sharePrompt}
         />
         <ChatComposer
-          key={attachmentResetKey}
+          key={`${active.id}:${attachmentResetKey}`}
           draft={draft}
           setDraft={setDraft}
           textareaRef={textareaRef}
@@ -445,12 +445,14 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
           effectiveEffort={preferences.effectiveEffort}
           editing={Boolean(editingTurnId)}
           isSubmittingAttachments={generation.isSubmittingAttachments}
+          isPreparingAttachments={generation.isPreparingAttachments}
           submissionError={generation.submissionError}
           onCancelEdit={() => {
             setEditingTurnId(null);
             setDraft("");
           }}
           onSubmit={sendMessage}
+          onPrepareAttachments={generation.prepareChatImageUploads}
           onKeyDown={handleKeyDown}
           onStop={() => void generation.stopStreaming()}
         />

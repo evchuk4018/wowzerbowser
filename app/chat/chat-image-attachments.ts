@@ -11,7 +11,14 @@ export const ACCEPTED_CHAT_IMAGE_TYPES = CHAT_IMAGE_CONTENT_TYPES;
 export const MAX_CHAT_IMAGES_PER_TURN = CHAT_IMAGE_MAX_COUNT;
 export const MAX_CHAT_IMAGE_BYTES = CHAT_IMAGE_MAX_BYTES;
 
-export type PendingChatImage = { id: string; file: File; previewUrl: string };
+export type ChatImageUploadContext = { conversationId: string; userMessageId: string; jobId: string };
+export type PendingChatImage = {
+  id: string;
+  file: File;
+  previewUrl: string;
+  uploadContext?: ChatImageUploadContext;
+  uploadPromise?: Promise<UploadedChatImage>;
+};
 export type UploadedChatImage = ChatImageAttachment;
 
 export function validateChatImages(files: readonly File[], currentCount = 0): string | null {
@@ -37,7 +44,7 @@ export async function uploadChatImages(input: {
   userMessageId: string;
   jobId: string;
   images: readonly Pick<PendingChatImage, "id" | "file">[];
-  accessToken: string;
+  accessToken: string | Promise<string>;
   signal: AbortSignal;
 }): Promise<UploadedChatImage[]> {
   const formData = new FormData();
@@ -50,7 +57,7 @@ export async function uploadChatImages(input: {
   }
   const response = await fetch("/api/chat/images", {
     method: "POST",
-    headers: { authorization: `Bearer ${input.accessToken}` },
+    headers: { authorization: `Bearer ${await input.accessToken}` },
     body: formData,
     signal: input.signal,
   });

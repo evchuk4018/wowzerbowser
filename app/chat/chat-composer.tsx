@@ -41,9 +41,11 @@ export type ChatComposerProps = {
   effectiveEffort: ChatReasoningEffort;
   editing: boolean;
   isSubmittingAttachments: boolean;
+  isPreparingAttachments: boolean;
   submissionError?: string | null;
   onCancelEdit: () => void;
   onSubmit: (event?: FormEvent<HTMLFormElement>, attachments?: readonly PendingChatImage[]) => void | Promise<void>;
+  onPrepareAttachments?: (attachments: readonly PendingChatImage[]) => PendingChatImage[];
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onStop: () => void;
 };
@@ -70,9 +72,11 @@ export function ChatComposer({
   effectiveEffort,
   editing,
   isSubmittingAttachments,
+  isPreparingAttachments,
   submissionError,
   onCancelEdit,
   onSubmit,
+  onPrepareAttachments,
   onKeyDown,
   onStop,
 }: ChatComposerProps) {
@@ -98,11 +102,12 @@ export function ChatComposer({
       return;
     }
     setAttachmentError(null);
-    setAttachments((current) => current.concat(files.map((file) => ({
+    const next = files.map((file) => ({
       id: crypto.randomUUID(),
       file,
       previewUrl: URL.createObjectURL(file),
-    }))));
+    }));
+    setAttachments((current) => current.concat(onPrepareAttachments?.(next) ?? next));
   };
 
   const removeAttachment = (id: string) => {
@@ -317,6 +322,9 @@ export function ChatComposer({
       </div>
       {(attachmentError || submissionError) && (
         <p className="composer-error" role="alert">{attachmentError || submissionError}</p>
+      )}
+      {isPreparingAttachments && !attachmentError && !submissionError && (
+        <p className="helper-text" role="status">Preparing image details…</p>
       )}
       <p className="helper-text">Press Enter to send · Shift + Enter for a new line</p>
     </form>

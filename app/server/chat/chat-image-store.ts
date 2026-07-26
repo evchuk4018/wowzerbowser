@@ -13,6 +13,7 @@ import { getServerClient } from "../../auth/supabase-server-adapter";
 
 const ID_PATTERN = /^[a-zA-Z0-9_-]{1,128}$/;
 const CHAT_IMAGE_CLAIM_LEASE_MS = 5 * 60 * 1_000;
+export const CHAT_IMAGE_PRE_SEND_RETENTION_MS = 30 * 60 * 1_000;
 const STORAGE_PAGE_SIZE = 1_000;
 const storage = () => getServerClient().storage.from(CHAT_IMAGE_BUCKET);
 
@@ -400,6 +401,33 @@ async function isActiveChatImageUpload(record: ChatImageUploadRecord): Promise<b
     && Number(versionResult.data.version_index) === Number(turnResult.data.active_version)
     && assistantResult.data,
   );
+}
+
+export async function cleanupExpiredChatImageUploads(ownerId: string, conversationId: string): Promise<void> {
+  assertId(conversationId, "conversationId");
+  const cutoff = new Date(Date.now() - CHAT_IMAGE_PRE_SEND_RETENTION_MS).toISOString();
+  const { data, error } = await getServerClient()
+    .from("chat_image_uploads")
+    .select("*")
+    .eq("owner_id", ownerId)
+    .eq("conversation_id", conversationId)
+    .lt("updated_at", cutoff)
+    .neq("status", "processing")
+    .limit(STORAGE_PAGE_SIZE);
+  if (error) throw new ChatImageError("cleanup_failed", "Expired image uploads could not be listed.", 503);
+
+  for (const row of data ?? []) {
+    const record = recordFromRow(row as Record<string, unknown>);
+    if (await isActiveChatImageUpload(record)) continue;
+    await deleteStoredChatImages([record.storagePath]);
+    const deleted = await getServerClient()
+      .from("chat_image_uploads")
+      .delete()
+      .eq("owner_id", ownerId)
+      .eq("conversation_id", conversationId)
+      .eq("image_id", record.imageId);
+    if (deleted.error) throw new ChatImageError("cleanup_failed", "Expired image upload metadata could not be removed.", 503);
+  }
 }
 
 export async function waitForChatImageUpload(ownerId: string, conversationId: string, imageId: string, signal?: AbortSignal): Promise<ChatImageUploadRecord | null> {

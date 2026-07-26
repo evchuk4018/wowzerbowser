@@ -31,6 +31,7 @@ import {
   reduceChatStreamEvents,
 } from "./chat-stream-reducer";
 import {
+  type ChatImageUploadContext,
   type PendingChatImage,
   type UploadedChatImage,
   uploadChatImages,
@@ -79,7 +80,9 @@ export type ChatGenerationResult = {
   thinkingByMessage: Record<string, ThinkingTiming>;
   isStreaming: boolean;
   isSubmittingAttachments: boolean;
+  isPreparingAttachments: boolean;
   submissionError: string | null;
+  prepareChatImageUploads: (images: readonly PendingChatImage[]) => PendingChatImage[];
 };
 
 type GenerationInput = {
@@ -173,10 +176,12 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
   const stateRef = useRef(options.state);
   const activeRequestsRef = useRef<Record<string, ActiveChatRequest>>({});
   const attachmentSubmissionRef = useRef(false);
+  const imageDraftRef = useRef<{ conversationId: string; context: ChatImageUploadContext } | null>(null);
   const [streamingByConversation, setStreamingByConversation] = useState<Record<string, string>>({});
   const [waitingByMessage, setWaitingByMessage] = useState<Record<string, boolean>>({});
   const [thinkingByMessage, setThinkingByMessage] = useState<Record<string, ThinkingTiming>>({});
   const [isSubmittingAttachments, setIsSubmittingAttachments] = useState(false);
+  const [preparingAttachmentCount, setPreparingAttachmentCount] = useState(0);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -234,8 +239,12 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
       : -1;
     const turnId = editingTurnIndex >= 0 ? conversation.turns[editingTurnIndex].id : makeId();
     const versionId = makeId();
-    const userMessageId = makeId();
+    const imageContext = pendingImages[0]?.uploadContext?.conversationId === conversation.id
+      ? pendingImages[0].uploadContext
+      : undefined;
+    const userMessageId = imageContext?.userMessageId ?? makeId();
     const jobId = makeId();
+    const effectiveJobId = imageContext?.jobId ?? jobId;
     let uploadedImages: UploadedChatImage[] = [];
     setSubmissionError(null);
     if (pendingImages.length) {
@@ -244,14 +253,19 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
       try {
         const accessToken = await input.getAccessToken();
         if (!accessToken) throw new Error("Your session expired. Please sign in again.");
-        uploadedImages = await uploadChatImages({
-          conversationId: conversation.id,
-          userMessageId,
-          jobId,
-          images: pendingImages,
-          accessToken,
-          signal: new AbortController().signal,
-        });
+        const prepared = imageContext ? pendingImages.map((image) => image.uploadPromise) : [];
+        if (prepared.every((promise): promise is Promise<UploadedChatImage> => Boolean(promise))) {
+          uploadedImages = await Promise.all(prepared);
+        } else {
+          uploadedImages = await uploadChatImages({
+            conversationId: conversation.id,
+            userMessageId,
+            jobId: effectiveJobId,
+            images: pendingImages,
+            accessToken,
+            signal: new AbortController().signal,
+          });
+        }
       } catch (error) {
         setSubmissionError(error instanceof Error ? error.message : "The images could not be uploaded.");
         return;
@@ -275,7 +289,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
       artifacts: [],
       thinkingEnabled: input.thinking,
       status: "streaming",
-      jobId,
+      jobId: effectiveJobId,
       lastSequence: 0,
     };
 
@@ -301,7 +315,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     activeRequestsRef.current[conversation.id] = {
       conversationId: conversation.id,
       messageId: assistantMessage.id,
-      jobId,
+      jobId: effectiveJobId,
       controller,
     };
     setStreamingByConversation((current) => ({ ...current, [conversation.id]: assistantMessage.id }));
@@ -370,7 +384,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         versionId,
         userMessageId: userMessage.id,
         assistantMessageId: assistantMessage.id,
-        jobId,
+        jobId: effectiveJobId,
         settings: input.settings,
         model: input.model,
         thinking: input.thinking,
@@ -384,6 +398,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
           input.onDraftConsumed?.();
           input.onEditingConsumed?.();
           input.onAttachmentsConsumed?.();
+          imageDraftRef.current = null;
         }
         const lastPendingSequence = pendingEvents.at(-1)?.sequence
           ?? streamState.message.lastSequence
@@ -422,6 +437,39 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     }
   }, [clearRequestState]);
 
+  const prepareChatImageUploads = useCallback((images: readonly PendingChatImage[]): PendingChatImage[] => {
+    const input = optionsRef.current;
+    const conversation = activeConversation(input.state);
+    if (!conversation || !images.length) return [...images];
+    const existing = imageDraftRef.current;
+    const context = existing?.conversationId === conversation.id
+      ? existing.context
+      : { conversationId: conversation.id, userMessageId: makeId(), jobId: makeId() };
+    imageDraftRef.current = { conversationId: conversation.id, context };
+    const accessTokenPromise = input.getAccessToken();
+    setPreparingAttachmentCount((count) => count + images.length);
+    const uploadPromise = uploadChatImages({
+      conversationId: conversation.id,
+      userMessageId: context.userMessageId,
+      jobId: context.jobId,
+      images,
+      accessToken: accessTokenPromise.then((token) => token ?? ""),
+      signal: new AbortController().signal,
+    }).finally(() => {
+      setPreparingAttachmentCount((count) => Math.max(0, count - images.length));
+    });
+    const trackedUploadPromise = uploadPromise.catch((error: unknown) => {
+      setSubmissionError(error instanceof Error ? error.message : "The images could not be prepared for chat.");
+      throw error;
+    });
+    void trackedUploadPromise.catch(() => undefined);
+    return images.map((image, index) => ({
+      ...image,
+      uploadContext: context,
+      uploadPromise: trackedUploadPromise.then((uploaded) => uploaded[index]),
+    }));
+  }, []);
+
   const stopStreaming = useCallback(async (conversationId = optionsRef.current.state.activeId) => {
     const request = activeRequestsRef.current[conversationId];
     if (!request) return;
@@ -456,7 +504,9 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     thinkingByMessage,
     isStreaming: Object.keys(streamingByConversation).length > 0,
     isSubmittingAttachments,
+    isPreparingAttachments: preparingAttachmentCount > 0,
     submissionError,
+    prepareChatImageUploads,
   };
 }
 

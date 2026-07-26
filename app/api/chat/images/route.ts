@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { NextResponse } from "next/server";
 import { authorizeOwnerSession } from "../../../auth/owner-auth-service";
 import {
@@ -8,6 +9,7 @@ import {
   isValidChatImageId,
 } from "../../../../lib/chat-image";
 import { analyzeAndStoreChatImages, type ChatImageUpload } from "../../../server/chat/chat-image-service";
+import { cleanupExpiredChatImageUploads } from "../../../server/chat/chat-image-store";
 
 export const runtime = "nodejs";
 export const maxDuration = 180;
@@ -103,6 +105,7 @@ export function hasDuplicateImageIds(ids: unknown[]): boolean {
 export function createChatImageUploadHandler(dependencies = {
   authorizeOwnerSession,
   analyzeAndStoreChatImages,
+  cleanupExpiredChatImageUploads,
 }) {
   return async function POST(request: Request) {
     const authorization = request.headers.get("authorization");
@@ -148,6 +151,9 @@ export function createChatImageUploadHandler(dependencies = {
         });
       }
       const attachments = await dependencies.analyzeAndStoreChatImages(owner.id, conversationId, userMessageId, uploads, { jobId });
+      if (dependencies.cleanupExpiredChatImageUploads) {
+        after(() => dependencies.cleanupExpiredChatImageUploads?.(owner.id, conversationId)?.catch(() => undefined));
+      }
       return NextResponse.json({ attachments });
     } catch (error) {
       if (error instanceof ChatImageError) {
