@@ -36,7 +36,12 @@ import {
   type UploadedChatImage,
   uploadChatImages,
 } from "./chat-image-attachments";
-import { uploadChatDocument, type PendingChatDocument } from "./chat-document-attachments";
+import {
+  deleteChatDocument,
+  type ChatDocumentUploadContext,
+  uploadChatDocument,
+  type PendingChatDocument,
+} from "./chat-document-attachments";
 import type { ChatDocumentAttachment } from "../../lib/chat-document";
 
 export type ActiveChatRequest = {
@@ -87,6 +92,8 @@ export type ChatGenerationResult = {
   isPreparingAttachments: boolean;
   submissionError: string | null;
   prepareChatImageUploads: (images: readonly PendingChatImage[]) => PendingChatImage[];
+  prepareChatDocumentUpload: (document: PendingChatDocument) => PendingChatDocument;
+  cancelChatDocumentPreparation: (document: PendingChatDocument) => Promise<void>;
 };
 
 type GenerationInput = {
@@ -112,6 +119,11 @@ function messageById(state: ConversationState, conversationId: string, messageId
     .flatMap((turn) => turn.versions)
     .map((version) => version.assistant)
     .find(({ id }) => id === messageId);
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError"
+    || error instanceof Error && error.name === "AbortError";
 }
 
 /** Build the durable request context used by both normal and edited prompts. */
@@ -183,11 +195,14 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
   const activeRequestsRef = useRef<Record<string, ActiveChatRequest>>({});
   const attachmentSubmissionRef = useRef(false);
   const imageDraftRef = useRef<{ conversationId: string; context: ChatImageUploadContext } | null>(null);
+  const documentDraftRef = useRef<{ conversationId: string; context: ChatDocumentUploadContext } | null>(null);
   const [streamingByConversation, setStreamingByConversation] = useState<Record<string, string>>({});
   const [waitingByMessage, setWaitingByMessage] = useState<Record<string, boolean>>({});
   const [thinkingByMessage, setThinkingByMessage] = useState<Record<string, ThinkingTiming>>({});
   const [isSubmittingAttachments, setIsSubmittingAttachments] = useState(false);
-  const [preparingAttachmentCount, setPreparingAttachmentCount] = useState(0);
+  const [preparingImageCount, setPreparingImageCount] = useState(0);
+  const [, setPreparingDocumentCount] = useState(0);
+  const [, setDocumentPreparationRevision] = useState(0);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -254,9 +269,16 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     const imageContext = pendingImages[0]?.uploadContext?.conversationId === conversation.id
       ? pendingImages[0].uploadContext
       : undefined;
-    const userMessageId = imageContext?.userMessageId ?? makeId();
+    const documentContext = pendingDocuments[0]?.uploadContext?.conversationId === conversation.id
+      ? pendingDocuments[0].uploadContext
+      : undefined;
+    if (pendingDocuments.some((document) => document.uploadContext && document.uploadContext.conversationId !== conversation.id)) {
+      setSubmissionError("This document is no longer attached to the active conversation.");
+      return;
+    }
+    const userMessageId = imageContext?.userMessageId ?? documentContext?.userMessageId ?? makeId();
     const jobId = makeId();
-    const effectiveJobId = imageContext?.jobId ?? jobId;
+    const effectiveJobId = imageContext?.jobId ?? documentContext?.jobId ?? jobId;
     let uploadedImages: UploadedChatImage[] = [...preservedAttachments];
     let uploadedDocuments: ChatDocumentAttachment[] = [];
     setSubmissionError(null);
@@ -288,9 +310,28 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
       }
     }
     if (pendingDocuments.length) {
-      attachmentSubmissionRef.current = true; setIsSubmittingAttachments(true);
-      try { const accessToken=await input.getAccessToken(); if(!accessToken)throw new Error("Your session expired. Please sign in again."); uploadedDocuments=await Promise.all(pendingDocuments.map((document)=>uploadChatDocument({conversationId:conversation.id,userMessageId,jobId:effectiveJobId,document,accessToken,signal:new AbortController().signal}))); }
-      catch(error){setSubmissionError(error instanceof Error?error.message:"The PDF could not be uploaded.");return;} finally {attachmentSubmissionRef.current=false;setIsSubmittingAttachments(false);}
+      attachmentSubmissionRef.current = true;
+      setIsSubmittingAttachments(true);
+      try {
+        const accessToken = await input.getAccessToken();
+        if (!accessToken) throw new Error("Your session expired. Please sign in again.");
+        const prepared = pendingDocuments.map((document) => document.preparationPromise ?? uploadChatDocument({
+          conversationId: conversation.id,
+          userMessageId,
+          jobId: effectiveJobId,
+          document,
+          accessToken,
+          signal: document.abortController?.signal ?? new AbortController().signal,
+        }));
+        uploadedDocuments = await Promise.all(prepared);
+      } catch (error) {
+        if (pendingDocuments.some((document) => document.abortController?.signal.aborted)) return;
+        setSubmissionError(error instanceof Error ? error.message : "The document could not be prepared.");
+        return;
+      } finally {
+        attachmentSubmissionRef.current = false;
+        setIsSubmittingAttachments(false);
+      }
     }
     const userMessage = {
       id: userMessageId,
@@ -415,10 +456,14 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
       for await (const event of streamChatResponse(request, accessToken, controller.signal)) {
         if (!submissionAccepted) {
           submissionAccepted = true;
-          input.onDraftConsumed?.();
-          input.onEditingConsumed?.();
-          input.onAttachmentsConsumed?.();
+          pendingDocuments.forEach((document) => { document.consumed = true; });
+          if (stateRef.current.activeId === conversation.id) {
+            input.onDraftConsumed?.();
+            input.onEditingConsumed?.();
+            input.onAttachmentsConsumed?.();
+          }
           imageDraftRef.current = null;
+          documentDraftRef.current = null;
         }
         const lastPendingSequence = pendingEvents.at(-1)?.sequence
           ?? streamState.message.lastSequence
@@ -462,12 +507,16 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     const conversation = activeConversation(input.state);
     if (!conversation || !images.length) return [...images];
     const existing = imageDraftRef.current;
+    const documentDraft = documentDraftRef.current;
     const context = existing?.conversationId === conversation.id
       ? existing.context
-      : { conversationId: conversation.id, userMessageId: makeId(), jobId: makeId() };
+      : documentDraft?.conversationId === conversation.id
+        ? documentDraft.context
+        : { conversationId: conversation.id, userMessageId: makeId(), jobId: makeId() };
     imageDraftRef.current = { conversationId: conversation.id, context };
+    documentDraftRef.current = { conversationId: conversation.id, context };
     const accessTokenPromise = input.getAccessToken();
-    setPreparingAttachmentCount((count) => count + images.length);
+    setPreparingImageCount((count) => count + images.length);
     const uploadPromise = uploadChatImages({
       conversationId: conversation.id,
       userMessageId: context.userMessageId,
@@ -476,7 +525,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
       accessToken: accessTokenPromise.then((token) => token ?? ""),
       signal: new AbortController().signal,
     }).finally(() => {
-      setPreparingAttachmentCount((count) => Math.max(0, count - images.length));
+      setPreparingImageCount((count) => Math.max(0, count - images.length));
     });
     const trackedUploadPromise = uploadPromise.catch((error: unknown) => {
       setSubmissionError(error instanceof Error ? error.message : "The images could not be prepared for chat.");
@@ -488,6 +537,103 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
       uploadContext: context,
       uploadPromise: trackedUploadPromise.then((uploaded) => uploaded[index]),
     }));
+  }, []);
+
+  const prepareChatDocumentUpload = useCallback((document: PendingChatDocument): PendingChatDocument => {
+    const input = optionsRef.current;
+    const conversation = activeConversation(input.state);
+    if (!conversation) return document;
+    if (document.preparationPromise && document.uploadContext?.conversationId === conversation.id) return document;
+
+    const existingImage = imageDraftRef.current;
+    const existingDocument = documentDraftRef.current;
+    const context = existingImage?.conversationId === conversation.id
+      ? existingImage.context
+      : existingDocument?.conversationId === conversation.id
+        ? existingDocument.context
+        : { conversationId: conversation.id, userMessageId: makeId(), jobId: makeId() };
+    imageDraftRef.current = { conversationId: conversation.id, context };
+    documentDraftRef.current = { conversationId: conversation.id, context };
+
+    const abortController = new AbortController();
+    const prepared: PendingChatDocument = {
+      ...document,
+      uploadContext: context,
+      abortController,
+      preparationStatus: "uploading",
+      preparationError: undefined,
+      consumed: false,
+    };
+    const updatePreparation = (patch: Partial<Pick<PendingChatDocument, "preparationStatus" | "preparationError">>) => {
+      Object.assign(prepared, patch);
+      setDocumentPreparationRevision((revision) => revision + 1);
+    };
+    const setStage = (stage: "uploading" | "parsing") => updatePreparation({ preparationStatus: stage });
+
+    setPreparingDocumentCount((count) => count + 1);
+    const preparation = input.getAccessToken()
+      .then((accessToken) => {
+        if (!accessToken) throw new Error("Your session expired. Please sign in again.");
+        return uploadChatDocument({
+          conversationId: conversation.id,
+          userMessageId: context.userMessageId,
+          jobId: context.jobId,
+          document: prepared,
+          accessToken,
+          signal: abortController.signal,
+          onStageChange: setStage,
+        });
+      })
+      .then((uploaded) => {
+        if (!abortController.signal.aborted) updatePreparation({ preparationStatus: "ready", preparationError: undefined });
+        return uploaded;
+      })
+      .catch((error: unknown) => {
+        if (abortController.signal.aborted || isAbortError(error)) {
+          updatePreparation({ preparationStatus: "cancelled", preparationError: undefined });
+        } else {
+          updatePreparation({
+            preparationStatus: "error",
+            preparationError: error instanceof Error ? error.message : "The document could not be prepared.",
+          });
+        }
+        throw error;
+      });
+    const trackedPreparation = preparation.finally(() => {
+      setPreparingDocumentCount((count) => Math.max(0, count - 1));
+    });
+    prepared.preparationPromise = trackedPreparation;
+    void trackedPreparation.catch(() => undefined);
+    return prepared;
+  }, []);
+
+  const cancelChatDocumentPreparation = useCallback(async (document: PendingChatDocument): Promise<void> => {
+    if (document.consumed) return;
+    const previousPreparationError = document.preparationError;
+    document.abortController?.abort();
+    document.preparationStatus = "cancelled";
+    document.preparationError = undefined;
+    if (previousPreparationError) {
+      setSubmissionError((current) => current === previousPreparationError ? null : current);
+    }
+    setDocumentPreparationRevision((revision) => revision + 1);
+    if (document.cleanupPromise) return document.cleanupPromise;
+
+    const cleanup = (async () => {
+      const context = document.uploadContext;
+      if (!context) return;
+      const accessToken = await optionsRef.current.getAccessToken();
+      if (!accessToken) return;
+      await deleteChatDocument({
+        conversationId: context.conversationId,
+        document,
+        accessToken,
+      });
+    })();
+    document.cleanupPromise = cleanup.catch(() => {
+      document.cleanupPromise = undefined;
+    });
+    await document.cleanupPromise;
   }, []);
 
   const stopStreaming = useCallback(async (conversationId = optionsRef.current.state.activeId) => {
@@ -524,9 +670,11 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     thinkingByMessage,
     isStreaming: Object.keys(streamingByConversation).length > 0,
     isSubmittingAttachments,
-    isPreparingAttachments: preparingAttachmentCount > 0,
+    isPreparingAttachments: preparingImageCount > 0,
     submissionError,
     prepareChatImageUploads,
+    prepareChatDocumentUpload,
+    cancelChatDocumentPreparation,
   };
 }
 

@@ -15,6 +15,13 @@ export async function createSignedDocumentUpload(input: { ownerId: string; conve
 export async function registerDocument(input: { ownerId: string; conversationId: string; userMessageId: string | null; jobId: string | null; document: ChatDocumentAttachment; pages: ChatDocumentPage[]; timing?: DocumentIngestionTiming }) {
   const register = async () => {
     const db = getServerClient();
+    const { error: conversationError } = await db.from("chat_conversations").upsert({
+      owner_id: input.ownerId,
+      conversation_id: input.conversationId,
+      title: "New conversation",
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "owner_id,conversation_id", ignoreDuplicates: true });
+    if (conversationError) throw conversationError;
     const { error } = await db.from("chat_documents").insert({ owner_id: input.ownerId, conversation_id: input.conversationId, document_id: input.document.id, user_message_id: input.userMessageId, job_id: input.jobId, storage_path: documentStoragePath(input.ownerId, input.conversationId, input.document.id, input.document.contentType), filename: input.document.name, content_type: input.document.contentType, size: input.document.size, page_count: input.document.pageCount, token_estimate: input.document.tokenEstimate, has_images: input.document.hasImages, image_count: input.document.imageCount, analyzed_image_count: input.document.analyzedImageCount, image_analyses: input.document.imageAnalyses, status: "complete" });
     if (error) throw error;
     const { error: pageError } = await db.from("chat_document_pages").insert(input.pages.map((page) => ({ owner_id: input.ownerId, conversation_id: input.conversationId, document_id: input.document.id, page_number: page.pageNumber, text: page.text })));
@@ -37,4 +44,36 @@ export async function getDocumentPages(ownerId: string, conversationId: string, 
 
 export async function uploadDocumentBytes(path: string, bytes: Uint8Array, contentType: ChatDocumentAttachment["contentType"]) {
   const { error } = await getServerClient().storage.from(CHAT_DOCUMENT_BUCKET).upload(path, bytes, { contentType, upsert: false }); if (error) throw error;
+}
+
+export async function deleteDocument(input: {
+  ownerId: string;
+  conversationId: string;
+  documentId: string;
+  contentType: ChatDocumentAttachment["contentType"];
+}) {
+  const db = getServerClient();
+  const { data: metadata, error: lookupError } = await db
+    .from("chat_documents")
+    .select("content_type")
+    .eq("owner_id", input.ownerId)
+    .eq("conversation_id", input.conversationId)
+    .eq("document_id", input.documentId)
+    .maybeSingle();
+  if (lookupError) throw lookupError;
+  const contentType = metadata?.content_type === DOCX_CONTENT_TYPE ? DOCX_CONTENT_TYPE : input.contentType;
+  const path = documentStoragePath(input.ownerId, input.conversationId, input.documentId, contentType);
+  const { error: storageError } = await db.storage.from(CHAT_DOCUMENT_BUCKET).remove([path]);
+  const { error: metadataError } = await db
+    .from("chat_documents")
+    .delete()
+    .eq("owner_id", input.ownerId)
+    .eq("conversation_id", input.conversationId)
+    .eq("document_id", input.documentId);
+
+  // Metadata cleanup must still happen if an already-removed object caused the
+  // storage call to fail. Surface the storage failure after the database work
+  // so callers can retry cleanup without leaving a registered document behind.
+  if (metadataError) throw metadataError;
+  if (storageError) throw storageError;
 }
