@@ -2,8 +2,10 @@ import "server-only";
 
 import type { ChatDocumentPage } from "../../../lib/chat-document";
 import { ChatDocumentError } from "../../../lib/chat-document";
+import { DOCUMENT_INGESTION_STAGES, type DocumentIngestionTiming } from "../../server/chat/document-ingestion-timing";
 
-export async function parsePdfWithOpenRouter(bytes: Uint8Array, filename: string, signal?: AbortSignal): Promise<ChatDocumentPage[]> {
+export async function parsePdfWithOpenRouter(bytes: Uint8Array, filename: string, signal?: AbortSignal, timing?: DocumentIngestionTiming): Promise<ChatDocumentPage[]> {
+ const parse = async (): Promise<ChatDocumentPage[]> => {
   const key = process.env.OPENROUTER_API_KEY?.trim();
   if (!key) throw new ChatDocumentError("parser_unavailable", "The free PDF parser is not configured.", 503);
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -28,4 +30,6 @@ export async function parsePdfWithOpenRouter(bytes: Uint8Array, filename: string
     if (!Array.isArray(parsed.pages) || !parsed.pages.length) throw new Error();
     return parsed.pages.map((page, index) => ({ pageNumber: index + 1, text: typeof page.text === "string" ? page.text : "" }));
   } catch { throw new ChatDocumentError("parser_failed", "The free PDF parser returned invalid page data.", 502); }
+ };
+ return timing ? timing.measure(DOCUMENT_INGESTION_STAGES.EXTERNAL_PARSING, parse) : parse();
 }

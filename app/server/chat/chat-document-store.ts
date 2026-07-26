@@ -1,6 +1,7 @@
 import "server-only";
 import { CHAT_DOCUMENT_BUCKET, DOCX_CONTENT_TYPE, type ChatDocumentAttachment, type ChatDocumentPage } from "../../../lib/chat-document";
 import { getServerClient } from "../../auth/supabase-server-adapter";
+import { DOCUMENT_INGESTION_STAGES, type DocumentIngestionTiming } from "./document-ingestion-timing";
 
 export const documentStoragePath = (ownerId: string, conversationId: string, documentId: string, contentType: ChatDocumentAttachment["contentType"]) => `${ownerId}/${conversationId}/${documentId}.${contentType === DOCX_CONTENT_TYPE ? "docx" : "pdf"}`;
 
@@ -11,12 +12,16 @@ export async function createSignedDocumentUpload(input: { ownerId: string; conve
   return { path, token: data.token, signedUrl: data.signedUrl };
 }
 
-export async function registerDocument(input: { ownerId: string; conversationId: string; userMessageId: string | null; jobId: string | null; document: ChatDocumentAttachment; pages: ChatDocumentPage[] }) {
-  const db = getServerClient();
-  const { error } = await db.from("chat_documents").insert({ owner_id: input.ownerId, conversation_id: input.conversationId, document_id: input.document.id, user_message_id: input.userMessageId, job_id: input.jobId, storage_path: documentStoragePath(input.ownerId, input.conversationId, input.document.id, input.document.contentType), filename: input.document.name, content_type: input.document.contentType, size: input.document.size, page_count: input.document.pageCount, token_estimate: input.document.tokenEstimate, has_images: input.document.hasImages, image_count: input.document.imageCount, analyzed_image_count: input.document.analyzedImageCount, image_analyses: input.document.imageAnalyses, status: "complete" });
-  if (error) throw error;
-  const { error: pageError } = await db.from("chat_document_pages").insert(input.pages.map((page) => ({ owner_id: input.ownerId, conversation_id: input.conversationId, document_id: input.document.id, page_number: page.pageNumber, text: page.text })));
-  if (pageError) throw pageError;
+export async function registerDocument(input: { ownerId: string; conversationId: string; userMessageId: string | null; jobId: string | null; document: ChatDocumentAttachment; pages: ChatDocumentPage[]; timing?: DocumentIngestionTiming }) {
+  const register = async () => {
+    const db = getServerClient();
+    const { error } = await db.from("chat_documents").insert({ owner_id: input.ownerId, conversation_id: input.conversationId, document_id: input.document.id, user_message_id: input.userMessageId, job_id: input.jobId, storage_path: documentStoragePath(input.ownerId, input.conversationId, input.document.id, input.document.contentType), filename: input.document.name, content_type: input.document.contentType, size: input.document.size, page_count: input.document.pageCount, token_estimate: input.document.tokenEstimate, has_images: input.document.hasImages, image_count: input.document.imageCount, analyzed_image_count: input.document.analyzedImageCount, image_analyses: input.document.imageAnalyses, status: "complete" });
+    if (error) throw error;
+    const { error: pageError } = await db.from("chat_document_pages").insert(input.pages.map((page) => ({ owner_id: input.ownerId, conversation_id: input.conversationId, document_id: input.document.id, page_number: page.pageNumber, text: page.text })));
+    if (pageError) throw pageError;
+  };
+  if (input.timing) await input.timing.measure(DOCUMENT_INGESTION_STAGES.DATABASE_REGISTRATION, register);
+  else await register();
 }
 
 export async function getAuthorizedDocument(ownerId: string, conversationId: string, pdfId: string): Promise<ChatDocumentAttachment | null> {
