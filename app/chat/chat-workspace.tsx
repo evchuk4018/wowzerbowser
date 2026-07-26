@@ -13,6 +13,7 @@ import {
 import type { AuthUser } from "../auth/types";
 import { SettingsModal } from "../settings/settings-modal";
 import { ChatComposer } from "./chat-composer";
+import type { PendingChatImage } from "./chat-image-attachments";
 import { ChatSidebar } from "./chat-sidebar";
 import { ChatTranscript } from "./chat-transcript";
 import { fetchChatUsage } from "./chat-usage-service";
@@ -44,6 +45,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
   const [state, dispatch] = useReducer(conversationReducer, undefined, createInitialConversationState);
   const [ready, setReady] = useState(false);
   const [draft, setDraft] = useState("");
+  const [attachmentResetKey, setAttachmentResetKey] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_CHAT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -116,6 +118,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
     dispatch,
     onDraftConsumed: () => setDraft(""),
     onEditingConsumed: () => setEditingTurnId(null),
+    onAttachmentsConsumed: () => setAttachmentResetKey((current) => current + 1),
   });
 
   usePersistedJobRecovery({
@@ -321,9 +324,12 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
       longPressTimerRef.current = null;
     }, 500);
   };
-  const sendMessage = (event?: FormEvent<HTMLFormElement>) => {
+  const sendMessage = (
+    event?: FormEvent<HTMLFormElement>,
+    attachments: readonly PendingChatImage[] = [],
+  ) => {
     event?.preventDefault();
-    return generation.sendMessage(draft, editingTurnId);
+    return generation.sendMessage(draft, editingTurnId, attachments);
   };
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -416,6 +422,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
           onShare={sharePrompt}
         />
         <ChatComposer
+          key={attachmentResetKey}
           draft={draft}
           setDraft={setDraft}
           textareaRef={textareaRef}
@@ -436,6 +443,8 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
           effectiveThinking={preferences.effectiveThinking}
           effectiveEffort={preferences.effectiveEffort}
           editing={Boolean(editingTurnId)}
+          isSubmittingAttachments={generation.isSubmittingAttachments}
+          submissionError={generation.submissionError}
           onCancelEdit={() => {
             setEditingTurnId(null);
             setDraft("");

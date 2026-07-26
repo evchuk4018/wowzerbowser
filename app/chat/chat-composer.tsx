@@ -1,8 +1,23 @@
 "use client";
 
-import type { Dispatch, FormEvent, KeyboardEvent, RefObject, SetStateAction } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type Dispatch,
+  type FormEvent,
+  type KeyboardEvent,
+  type RefObject,
+  type SetStateAction,
+} from "react";
 import type { ChatModelId, ChatModelInfo, ChatReasoningEffort } from "../../lib/chat-protocol";
 import type { ChatModelPreference } from "../../lib/chat-model-preference";
+import {
+  ACCEPTED_CHAT_IMAGE_TYPES,
+  type PendingChatImage,
+  validateChatImages,
+} from "./chat-image-attachments";
 
 export type ChatComposerProps = {
   draft: string;
@@ -25,8 +40,10 @@ export type ChatComposerProps = {
   effectiveThinking: boolean;
   effectiveEffort: ChatReasoningEffort;
   editing: boolean;
+  isSubmittingAttachments: boolean;
+  submissionError?: string | null;
   onCancelEdit: () => void;
-  onSubmit: (event?: FormEvent<HTMLFormElement>) => void | Promise<void>;
+  onSubmit: (event?: FormEvent<HTMLFormElement>, attachments?: readonly PendingChatImage[]) => void | Promise<void>;
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onStop: () => void;
 };
@@ -52,18 +69,84 @@ export function ChatComposer({
   effectiveThinking,
   effectiveEffort,
   editing,
+  isSubmittingAttachments,
+  submissionError,
   onCancelEdit,
   onSubmit,
   onKeyDown,
   onStop,
 }: ChatComposerProps) {
+  const [attachments, setAttachments] = useState<PendingChatImage[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachmentsRef = useRef(attachments);
+  const disabled = isStreaming || isSubmittingAttachments;
+
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
+
+  useEffect(() => () => {
+    attachmentsRef.current.forEach(({ previewUrl }) => URL.revokeObjectURL(previewUrl));
+  }, []);
+
+  const addFiles = (files: readonly File[]) => {
+    if (!files.length) return;
+    const error = validateChatImages(files, attachments.length);
+    if (error) {
+      setAttachmentError(error);
+      return;
+    }
+    setAttachmentError(null);
+    setAttachments((current) => current.concat(files.map((file) => ({
+      id: crypto.randomUUID(),
+      file,
+      previewUrl: URL.createObjectURL(file),
+    }))));
+  };
+
+  const removeAttachment = (id: string) => {
+    setAttachments((current) => {
+      const removed = current.find((attachment) => attachment.id === id);
+      if (removed) URL.revokeObjectURL(removed.previewUrl);
+      return current.filter((attachment) => attachment.id !== id);
+    });
+    setAttachmentError(null);
+  };
+
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
+    if (!images.length) return;
+    event.preventDefault();
+    addFiles(images);
+  };
+
   return (
-    <form className="composer-wrap" onSubmit={(event) => void onSubmit(event)}>
+    <form className="composer-wrap" onSubmit={(event) => void onSubmit(event, attachments)}>
       <div className="composer">
         {editing && (
           <div className="composer-editing">
             <span>Editing prompt</span>
             <button type="button" onClick={onCancelEdit}>Cancel</button>
+          </div>
+        )}
+        {attachments.length > 0 && (
+          <div className="composer-attachments" aria-label="Attached images">
+            {attachments.map((attachment) => (
+              <div className="composer-attachment" key={attachment.id}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={attachment.previewUrl} alt="" />
+                <span title={attachment.file.name}>{attachment.file.name || "Pasted image"}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${attachment.file.name || "pasted image"}`}
+                  disabled={disabled}
+                  onClick={() => removeAttachment(attachment.id)}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
           </div>
         )}
         <textarea
@@ -72,12 +155,41 @@ export function ChatComposer({
           rows={1}
           aria-label="Message"
           placeholder="Message"
-          disabled={isStreaming}
+          disabled={disabled}
           onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={onKeyDown}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey && attachments.length > 0) {
+              event.preventDefault();
+              void onSubmit(undefined, attachments);
+              return;
+            }
+            onKeyDown(event);
+          }}
+          onPaste={handlePaste}
         />
         <div className="composer-actions">
-          <button type="button" className="attach-button" aria-label="Attach a file" disabled={isStreaming}>+</button>
+          <input
+            ref={fileInputRef}
+            className="composer-file-input"
+            type="file"
+            accept={ACCEPTED_CHAT_IMAGE_TYPES.join(",")}
+            multiple
+            tabIndex={-1}
+            aria-hidden="true"
+            onChange={(event) => {
+              addFiles(Array.from(event.target.files ?? []));
+              event.target.value = "";
+            }}
+          />
+          <button
+            type="button"
+            className="attach-button"
+            aria-label="Attach images"
+            disabled={disabled}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            +
+          </button>
           <div className="composer-action-spacer" />
           <div className="composer-menu">
             <button
@@ -86,7 +198,7 @@ export function ChatComposer({
               aria-label="Choose model"
               aria-controls="model-options"
               aria-expanded={openMenu === "model"}
-              disabled={isStreaming || !models.length}
+              disabled={disabled || !models.length}
               onClick={() => setOpenMenu((current) => (current === "model" ? null : "model"))}
             >
               <span className="menu-trigger-label">{selectedModel?.label ?? "Model"}</span>
@@ -132,7 +244,7 @@ export function ChatComposer({
               aria-label="Choose thinking mode"
               aria-controls="thinking-options"
               aria-expanded={openMenu === "thinking"}
-              disabled={isStreaming || !canThink}
+              disabled={disabled || !canThink}
               onClick={() => setOpenMenu((current) => (current === "thinking" ? null : "thinking"))}
             >
               <span className="menu-trigger-label">Thinking: {effectiveThinking ? effectiveEffort : "Off"}</span>
@@ -192,10 +304,20 @@ export function ChatComposer({
               </svg>
             </button>
           ) : (
-            <button type="submit" className="send-button" aria-label="Send message" disabled={!draft.trim()}>↑</button>
+            <button
+              type="submit"
+              className="send-button"
+              aria-label="Send message"
+              disabled={disabled || (!draft.trim() && attachments.length === 0)}
+            >
+              ↑
+            </button>
           )}
         </div>
       </div>
+      {(attachmentError || submissionError) && (
+        <p className="composer-error" role="alert">{attachmentError || submissionError}</p>
+      )}
       <p className="helper-text">Press Enter to send · Shift + Enter for a new line</p>
     </form>
   );

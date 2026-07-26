@@ -1,5 +1,6 @@
 import type {
   ChatAssistantRound,
+  ChatImageAttachment,
   ChatMessageInput,
 } from "../../lib/chat-protocol";
 import type { AssistantActivity } from "./assistant-activity-types";
@@ -7,6 +8,7 @@ import type { AssistantActivity } from "./assistant-activity-types";
 type TranscriptMessage = {
   role: "user" | "assistant";
   content: string;
+  attachments?: ChatImageAttachment[];
   activities?: AssistantActivity[];
 };
 
@@ -18,8 +20,16 @@ export function toChatMessageInput(
 ): ChatMessageInput | null {
   const content = message.content.trim();
   if (!content) return null;
-  if (message.role === "user" || !message.activities?.length) {
-    return { role: message.role, content };
+  if (message.role === "user") {
+    const attachments = message.attachments ?? [];
+    return {
+      role: "user",
+      content,
+      ...(attachments.length ? { attachments } : {}),
+    };
+  }
+  if (!message.activities?.length) {
+    return { role: "assistant", content };
   }
 
   const rounds: ChatAssistantRound[] = [];

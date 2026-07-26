@@ -30,6 +30,11 @@ import {
   createChatStreamState,
   reduceChatStreamEvents,
 } from "./chat-stream-reducer";
+import {
+  type PendingChatImage,
+  type UploadedChatImage,
+  uploadChatImages,
+} from "./chat-image-attachments";
 
 export type ActiveChatRequest = {
   conversationId: string;
@@ -55,11 +60,14 @@ export type ChatGenerationOptions = {
   onDraftConsumed?: () => void;
   /** Clear edit mode after a prompt is accepted. */
   onEditingConsumed?: () => void;
+  /** Clear local attachment previews after upload and analysis are accepted. */
+  onAttachmentsConsumed?: () => void;
 };
 
 export type SendMessage = (
   content: string,
   editingTurnId?: string | null,
+  attachments?: readonly PendingChatImage[],
 ) => Promise<void>;
 
 export type ChatGenerationResult = {
@@ -70,6 +78,8 @@ export type ChatGenerationResult = {
   waitingByMessage: Record<string, boolean>;
   thinkingByMessage: Record<string, ThinkingTiming>;
   isStreaming: boolean;
+  isSubmittingAttachments: boolean;
+  submissionError: string | null;
 };
 
 type GenerationInput = {
@@ -82,6 +92,7 @@ type GenerationInput = {
   dispatch: Dispatch<ConversationAction>;
   onDraftConsumed?: () => void;
   onEditingConsumed?: () => void;
+  onAttachmentsConsumed?: () => void;
 };
 
 function activeConversation(state: ConversationState): Conversation | undefined {
@@ -110,15 +121,17 @@ export function buildChatGenerationRequest(input: {
   model: ChatModelId;
   thinking: boolean;
   reasoningEffort: ChatReasoningEffort;
+  attachments?: UploadedChatImage[];
 }): ChatRequest {
   const contextTurns = input.editingTurnIndex >= 0
     ? input.conversation.turns.slice(0, input.editingTurnIndex)
     : input.conversation.turns;
-  const userMessage: Message = {
+  const userMessage = {
     id: input.userMessageId,
     role: "user",
     content: input.content,
-  };
+    ...(input.attachments?.length ? { attachments: input.attachments } : {}),
+  } as Message;
   const requestMessages = contextTurns
     .flatMap((turn) => {
       const version = turn.versions[turn.activeVersion];
@@ -159,9 +172,12 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
   const optionsRef = useRef<GenerationInput>(options);
   const stateRef = useRef(options.state);
   const activeRequestsRef = useRef<Record<string, ActiveChatRequest>>({});
+  const attachmentSubmissionRef = useRef(false);
   const [streamingByConversation, setStreamingByConversation] = useState<Record<string, string>>({});
   const [waitingByMessage, setWaitingByMessage] = useState<Record<string, boolean>>({});
   const [thinkingByMessage, setThinkingByMessage] = useState<Record<string, ThinkingTiming>>({});
+  const [isSubmittingAttachments, setIsSubmittingAttachments] = useState(false);
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
 
   useEffect(() => {
     optionsRef.current = options;
@@ -201,18 +217,53 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     });
   }, []);
 
-  const sendMessage = useCallback<SendMessage>(async (rawContent, editingTurnId = null) => {
+  const sendMessage = useCallback<SendMessage>(async (rawContent, editingTurnId = null, pendingImages = []) => {
     const input = optionsRef.current;
-    const content = rawContent.trim();
+    const authoredContent = rawContent.trim();
+    const content = authoredContent || (pendingImages.length ? "Image attached" : "");
     const conversation = activeConversation(input.state);
-    if (!content || !conversation || activeRequestsRef.current[conversation.id]) return;
+    if (
+      !content ||
+      !conversation ||
+      activeRequestsRef.current[conversation.id] ||
+      attachmentSubmissionRef.current
+    ) return;
 
     const editingTurnIndex = editingTurnId
       ? conversation.turns.findIndex((turn) => turn.id === editingTurnId)
       : -1;
     const turnId = editingTurnIndex >= 0 ? conversation.turns[editingTurnIndex].id : makeId();
     const versionId = makeId();
-    const userMessage: Message = { id: makeId(), role: "user", content };
+    const userMessageId = makeId();
+    let uploadedImages: UploadedChatImage[] = [];
+    setSubmissionError(null);
+    if (pendingImages.length) {
+      attachmentSubmissionRef.current = true;
+      setIsSubmittingAttachments(true);
+      try {
+        const accessToken = await input.getAccessToken();
+        if (!accessToken) throw new Error("Your session expired. Please sign in again.");
+        uploadedImages = await uploadChatImages({
+          conversationId: conversation.id,
+          userMessageId,
+          images: pendingImages,
+          accessToken,
+          signal: new AbortController().signal,
+        });
+      } catch (error) {
+        setSubmissionError(error instanceof Error ? error.message : "The images could not be uploaded.");
+        return;
+      } finally {
+        attachmentSubmissionRef.current = false;
+        setIsSubmittingAttachments(false);
+      }
+    }
+    const userMessage = {
+      id: userMessageId,
+      role: "user",
+      content,
+      ...(uploadedImages.length ? { attachments: uploadedImages } : {}),
+    } as Message;
     const jobId = makeId();
     const assistantMessage: Message = {
       id: makeId(),
@@ -247,6 +298,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     }
     input.onDraftConsumed?.();
     input.onEditingConsumed?.();
+    input.onAttachmentsConsumed?.();
 
     const controller = new AbortController();
     activeRequestsRef.current[conversation.id] = {
@@ -326,6 +378,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         model: input.model,
         thinking: input.thinking,
         reasoningEffort: input.reasoningEffort,
+        attachments: uploadedImages,
       });
       for await (const event of streamChatResponse(request, accessToken, controller.signal)) {
         const lastPendingSequence = pendingEvents.at(-1)?.sequence
@@ -398,6 +451,8 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     waitingByMessage,
     thinkingByMessage,
     isStreaming: Object.keys(streamingByConversation).length > 0,
+    isSubmittingAttachments,
+    submissionError,
   };
 }
 

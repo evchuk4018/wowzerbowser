@@ -68,6 +68,73 @@
   color: #92938c;
 }
 
+.composer-attachments {
+  display: flex;
+  overflow-x: auto;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 1px;
+}
+
+.composer-attachment {
+  position: relative;
+  display: grid;
+  width: 116px;
+  flex: 0 0 116px;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #41423d;
+  border-radius: 10px;
+  background: #252623;
+  padding: 5px 24px 5px 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.composer-attachment img {
+  width: 38px;
+  height: 38px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.composer-attachment span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-attachment button {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--quiet);
+  cursor: pointer;
+  font-size: 17px;
+  line-height: 1;
+}
+
+.composer-attachment button:hover:not(:disabled) {
+  background: #3a3b36;
+  color: var(--text);
+}
+
+.composer-file-input {
+  display: none;
+}
+
+.composer-error {
+  margin: 8px 4px 0;
+  color: #ffaaa4;
+  font-size: 12px;
+}
+
 .composer-actions {
   display: flex;
   align-items: center;
