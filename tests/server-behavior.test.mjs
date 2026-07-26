@@ -26,6 +26,10 @@ import {
   executeWebTool,
   WEB_TOOL_DEFINITIONS,
 } from "../app/server/agent/web-tools.ts";
+import {
+  availableImageTools,
+  executeInspectImageTool,
+} from "../app/server/agent/image-tool.ts";
 import { parseChatRequest } from "../lib/chat-protocol.ts";
 import { applyChatStreamEvent } from "../lib/chat-history.ts";
 
@@ -275,6 +279,37 @@ test("chat orchestration reserves one usage slot per round", async () => {
   assert.match(source, /roundUsages\[roundUsageIndex\] = latestNonNullUsage/);
   assert.doesNotMatch(source, /roundUsages\.push\(roundUsage\)/);
   assert.match(source, /new ModalPythonExecutor\(ownerId, conversationId, responseDeadlineAt\)/);
+});
+
+test("inspect_image is allowlisted by validated request images before storage access", async () => {
+  assert.equal(availableImageTools(false).length, 0);
+  assert.equal(availableImageTools(true)[0].function.name, "inspect_image");
+
+  const inactiveVersionImage = await executeInspectImageTool(
+    { id: "inspect-1", name: "inspect_image", arguments: JSON.stringify({ imageId: "old-image", question: "Is it blue?" }) },
+    {
+      ownerId: "owner-1",
+      conversationId: "conversation-1",
+      allowedImageIds: ["current-image"],
+      signal: new AbortController().signal,
+      responseDeadlineAt: Date.now() + 10_000,
+    },
+  );
+  assert.equal(inactiveVersionImage.ok, false);
+  assert.match(inactiveVersionImage.stderr, /not available in the current request/i);
+
+  const invalidArguments = await executeInspectImageTool(
+    { id: "inspect-2", name: "inspect_image", arguments: JSON.stringify({ imageId: "../old-image", question: "Is it blue?" }) },
+    {
+      ownerId: "owner-1",
+      conversationId: "conversation-1",
+      allowedImageIds: ["../old-image"],
+      signal: new AbortController().signal,
+      responseDeadlineAt: Date.now() + 10_000,
+    },
+  );
+  assert.equal(invalidArguments.ok, false);
+  assert.match(invalidArguments.stderr, /imageId is invalid/i);
 });
 
 test("persisted trace projection keeps reasoning, tools, artifacts, and final output ordered", () => {

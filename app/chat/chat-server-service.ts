@@ -8,6 +8,11 @@ import { availableChatTools, executePythonTool } from "../server/agent/python-to
 import { runPythonInstructionsFor } from "../server/agent/python-tool-instructions";
 import { availableWebTools, executeWebTool } from "../server/agent/web-tools";
 import { webToolInstructionsFor } from "../server/agent/web-tool-instructions";
+import {
+  availableImageTools,
+  executeInspectImageTool,
+  INSPECT_IMAGE_TOOL_NAME,
+} from "../server/agent/image-tool";
 import { isModalConfigured, ModalPythonExecutor } from "../server/modal/modal-python-executor";
 import { latestNonNullUsage, sumRoundUsage } from "./chat-usage";
 
@@ -28,6 +33,12 @@ function stableConversationId(request: ChatRequest): string {
     .slice(0, 32);
 }
 
+function imageIdsFromValidatedRequestHistory(request: ChatRequest): string[] {
+  return [...new Set(
+    request.messages.flatMap((message) => message.attachments?.map((image) => image.id) ?? []),
+  )];
+}
+
 export async function generateChatResponse(
   chatRequest: ChatRequest,
   ownerId: string,
@@ -40,7 +51,10 @@ export async function generateChatResponse(
   const conversationId = stableConversationId(chatRequest);
   const pythonTools = availableChatTools();
   const webTools = availableWebTools();
-  const toolDefinitions = [...pythonTools, ...webTools];
+  const allowedImageIds = imageIdsFromValidatedRequestHistory(chatRequest);
+  const imageTools = availableImageTools(allowedImageIds.length > 0);
+  const toolDefinitions = [...pythonTools, ...imageTools, ...webTools];
+  const imageToolAdvertised = imageTools.some((tool) => tool.function.name === INSPECT_IMAGE_TOOL_NAME);
 
   const enqueue = async (event: ChatStreamEvent) => {
     if (!signal.aborted) await persistEvent(event);
@@ -140,8 +154,24 @@ export async function generateChatResponse(
               if (!isModalConfigured()) throw new Error("Python execution is not configured.");
               if (!executor) executor = new ModalPythonExecutor(ownerId, conversationId, responseDeadlineAt);
               result = await executePythonTool(call, executor, ownerId, conversationId);
-            } else {
+            } else if (call.name === INSPECT_IMAGE_TOOL_NAME && imageToolAdvertised) {
+              result = await executeInspectImageTool(call, {
+                ownerId,
+                conversationId,
+                allowedImageIds,
+                signal: roundSignal,
+                responseDeadlineAt,
+              });
+            } else if (webTools.some((tool) => tool.function.name === call.name)) {
               result = await executeWebTool(call);
+            } else {
+              result = {
+                id: call.id,
+                name: call.name,
+                ok: false,
+                stdout: "",
+                stderr: `Unknown tool: ${call.name}`,
+              };
             }
             call.result = result;
             await enqueue({ type: "tool_result", result });
