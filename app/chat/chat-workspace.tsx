@@ -34,6 +34,7 @@ import { useChatPreferences } from "./use-chat-preferences";
 import { useChatShortcuts } from "./use-chat-shortcuts";
 import { useMobileHistoryNavigation } from "./use-mobile-history-navigation";
 import { usePersistedJobRecovery } from "./use-persisted-job-recovery";
+import type { ChatImageAttachment } from "../../lib/chat-protocol";
 
 export type ChatWorkspaceProps = {
   user: AuthUser;
@@ -55,6 +56,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
   const [deleteConversationError, setDeleteConversationError] = useState<string | null>(null);
   const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
   const [editingTurnId, setEditingTurnId] = useState<string | null>(null);
+  const [editingAttachments, setEditingAttachments] = useState<ChatImageAttachment[]>([]);
   const [openMessageActions, setOpenMessageActions] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [recoveredStreaming, setRecoveredStreaming] = useState<Record<string, string>>({});
@@ -117,7 +119,10 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
     getAccessToken,
     dispatch,
     onDraftConsumed: () => setDraft(""),
-    onEditingConsumed: () => setEditingTurnId(null),
+    onEditingConsumed: () => {
+      setEditingTurnId(null);
+      setEditingAttachments([]);
+    },
     onAttachmentsConsumed: () => setAttachmentResetKey((current) => current + 1),
   });
 
@@ -150,6 +155,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
     else dispatch({ type: "CREATE_CONVERSATION", conversation: createConversation() });
     setDraft("");
     setEditingTurnId(null);
+    setEditingAttachments([]);
     setOpenMessageActions(null);
     setOpenConversationActions(null);
     setSidebarOpen(false);
@@ -226,6 +232,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
     if (!version) return;
     setDraft(version.user.content);
     setEditingTurnId(turn.id);
+    setEditingAttachments(version.user.attachments ?? []);
     setOpenMessageActions(null);
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
@@ -307,6 +314,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
       });
       if (conversationId === state.activeId) {
         setEditingTurnId(null);
+        setEditingAttachments([]);
         setDraft("");
       }
       setDeleteConversationId(null);
@@ -329,7 +337,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
     attachments: readonly PendingChatImage[] = [],
   ) => {
     event?.preventDefault();
-    return generation.sendMessage(draft, editingTurnId, attachments);
+    return generation.sendMessage(draft, editingTurnId, attachments, editingAttachments);
   };
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -444,11 +452,16 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
           effectiveThinking={preferences.effectiveThinking}
           effectiveEffort={preferences.effectiveEffort}
           editing={Boolean(editingTurnId)}
+          preservedAttachments={editingAttachments}
+          onRemovePreservedAttachment={(imageId) => {
+            setEditingAttachments((current) => current.filter((image) => image.id !== imageId));
+          }}
           isSubmittingAttachments={generation.isSubmittingAttachments}
           isPreparingAttachments={generation.isPreparingAttachments}
           submissionError={generation.submissionError}
           onCancelEdit={() => {
             setEditingTurnId(null);
+            setEditingAttachments([]);
             setDraft("");
           }}
           onSubmit={sendMessage}

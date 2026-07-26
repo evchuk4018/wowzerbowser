@@ -69,6 +69,7 @@ export type SendMessage = (
   content: string,
   editingTurnId?: string | null,
   attachments?: readonly PendingChatImage[],
+  preservedAttachments?: readonly UploadedChatImage[],
 ) => Promise<void>;
 
 export type ChatGenerationResult = {
@@ -222,10 +223,15 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     });
   }, []);
 
-  const sendMessage = useCallback<SendMessage>(async (rawContent, editingTurnId = null, pendingImages = []) => {
+  const sendMessage = useCallback<SendMessage>(async (
+    rawContent,
+    editingTurnId = null,
+    pendingImages = [],
+    preservedAttachments = [],
+  ) => {
     const input = optionsRef.current;
     const authoredContent = rawContent.trim();
-    const content = authoredContent || (pendingImages.length ? "Image attached" : "");
+    const content = authoredContent || (pendingImages.length || preservedAttachments.length ? "Image attached" : "");
     const conversation = activeConversation(input.state);
     if (
       !content ||
@@ -245,7 +251,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     const userMessageId = imageContext?.userMessageId ?? makeId();
     const jobId = makeId();
     const effectiveJobId = imageContext?.jobId ?? jobId;
-    let uploadedImages: UploadedChatImage[] = [];
+    let uploadedImages: UploadedChatImage[] = [...preservedAttachments];
     setSubmissionError(null);
     if (pendingImages.length) {
       attachmentSubmissionRef.current = true;
@@ -255,16 +261,16 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         if (!accessToken) throw new Error("Your session expired. Please sign in again.");
         const prepared = imageContext ? pendingImages.map((image) => image.uploadPromise) : [];
         if (prepared.every((promise): promise is Promise<UploadedChatImage> => Boolean(promise))) {
-          uploadedImages = await Promise.all(prepared);
+          uploadedImages = [...preservedAttachments, ...(await Promise.all(prepared))];
         } else {
-          uploadedImages = await uploadChatImages({
+          uploadedImages = [...preservedAttachments, ...(await uploadChatImages({
             conversationId: conversation.id,
             userMessageId,
             jobId: effectiveJobId,
             images: pendingImages,
             accessToken,
             signal: new AbortController().signal,
-          });
+          }))];
         }
       } catch (error) {
         setSubmissionError(error instanceof Error ? error.message : "The images could not be uploaded.");

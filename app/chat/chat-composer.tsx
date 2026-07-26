@@ -11,7 +11,7 @@ import {
   type RefObject,
   type SetStateAction,
 } from "react";
-import type { ChatModelId, ChatModelInfo, ChatReasoningEffort } from "../../lib/chat-protocol";
+import type { ChatImageAttachment, ChatModelId, ChatModelInfo, ChatReasoningEffort } from "../../lib/chat-protocol";
 import type { ChatModelPreference } from "../../lib/chat-model-preference";
 import {
   ACCEPTED_CHAT_IMAGE_TYPES,
@@ -40,6 +40,8 @@ export type ChatComposerProps = {
   effectiveThinking: boolean;
   effectiveEffort: ChatReasoningEffort;
   editing: boolean;
+  preservedAttachments?: readonly ChatImageAttachment[];
+  onRemovePreservedAttachment?: (imageId: string) => void;
   isSubmittingAttachments: boolean;
   isPreparingAttachments: boolean;
   submissionError?: string | null;
@@ -71,6 +73,8 @@ export function ChatComposer({
   effectiveThinking,
   effectiveEffort,
   editing,
+  preservedAttachments = [],
+  onRemovePreservedAttachment,
   isSubmittingAttachments,
   isPreparingAttachments,
   submissionError,
@@ -154,6 +158,23 @@ export function ChatComposer({
             ))}
           </div>
         )}
+        {preservedAttachments.length > 0 && (
+          <div className="composer-attachments" aria-label="Attached images from the edited prompt">
+            {preservedAttachments.map((image) => (
+              <div className="composer-attachment" key={image.id}>
+                <span title={image.name ?? "Attached image"}>{image.name || "Attached image"}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${image.name || "attached image"}`}
+                  disabled={disabled}
+                  onClick={() => onRemovePreservedAttachment?.(image.id)}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <textarea
           ref={textareaRef}
           value={draft}
@@ -163,7 +184,7 @@ export function ChatComposer({
           disabled={disabled}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey && attachments.length > 0) {
+            if (event.key === "Enter" && !event.shiftKey && (attachments.length > 0 || preservedAttachments.length > 0)) {
               event.preventDefault();
               void onSubmit(undefined, attachments);
               return;
@@ -313,7 +334,7 @@ export function ChatComposer({
               type="submit"
               className="send-button"
               aria-label="Send message"
-              disabled={disabled || (!draft.trim() && attachments.length === 0)}
+              disabled={disabled || (!draft.trim() && attachments.length === 0 && preservedAttachments.length === 0)}
             >
               ↑
             </button>

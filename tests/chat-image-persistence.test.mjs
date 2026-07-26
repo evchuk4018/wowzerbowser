@@ -185,6 +185,8 @@ test("message-version persistence stores attachment metadata on the owning versi
   assert.match(store, /attachments: unknown/);
   assert.match(store, /attachments: message\.attachments \?\? \[\]/);
   assert.match(store, /requestImageIds\(request\)/);
+  assert.match(store, /authoritativeAttachmentsForSubmission/);
+  assert.match(store, /previous\.userMessageId/);
   assert.match(store, /version_id: versionId/);
   assert.match(migration, /add column if not exists attachments jsonb/i);
   assert.match(migration, /jsonb_typeof\(attachments\) = 'array'/i);

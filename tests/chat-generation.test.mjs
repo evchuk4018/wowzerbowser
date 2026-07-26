@@ -76,3 +76,40 @@ test("editing a prompt truncates context and increments version index", () => {
   assert.equal(request.thinking, false);
 });
 
+test("editing a prompt preserves its existing image attachments", () => {
+  const attachment = {
+    id: "img-1",
+    name: "screen.png",
+    contentType: "image/png",
+    size: 128,
+    storagePath: "owner-1/conversation-1/message-1/img-1",
+    analysis: {
+      status: "complete",
+      visibleText: null,
+      mainVisuals: "A settings page.",
+      textModel: null,
+      visualModel: null,
+    },
+  };
+  const request = buildChatGenerationRequest({
+    conversation,
+    content: "revised with the same image",
+    editingTurnIndex: 0,
+    turnId: "turn-1",
+    versionId: "version-2",
+    userMessageId: "u2",
+    assistantMessageId: "a2",
+    jobId: "job-4",
+    settings,
+    model: "deepseek-v4-pro",
+    thinking: false,
+    reasoningEffort: "high",
+    attachments: [attachment],
+  });
+
+  assert.deepEqual(request.messages, [{
+    role: "user",
+    content: "revised with the same image\\n\\n[attached_image]\\nimage_id: img-1\\nvisible_text:\\n\\nmain_visuals:\\nA settings page.\\n[/attached_image]",
+    attachments: [attachment],
+  }]);
+});
