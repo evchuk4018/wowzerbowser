@@ -2,6 +2,8 @@ import { createClient, type SupabaseClient, type User } from "@supabase/supabase
 import type { AuthSession, AuthUser } from "./types";
 
 let client: SupabaseClient | null = null;
+let cachedSession: AuthSession | null | undefined;
+let sessionPromise: Promise<AuthSession | null> | null = null;
 
 function getClient(): SupabaseClient {
   if (client) return client;
@@ -36,26 +38,21 @@ function mapSession(session: { access_token: string; user: User } | null): AuthS
 
 export const supabaseBrowserAuth = {
   async getSession(): Promise<AuthSession | null> {
+    if (cachedSession !== undefined) return cachedSession;
+    if (sessionPromise) return sessionPromise;
     const supabase = getClient();
-    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-    if (sessionError) throw sessionError;
-    if (!sessionData.session) return null;
-
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-    if (userError) throw userError;
-    const user = mapUser(userData.user);
-    const { data: refreshedSessionData, error: refreshedSessionError } =
-      await supabase.auth.getSession();
-    if (refreshedSessionError) throw refreshedSessionError;
-    const refreshedSession = refreshedSessionData.session;
-    return user
-      ? { accessToken: refreshedSession?.access_token ?? sessionData.session.access_token, user }
-      : null;
+    sessionPromise = supabase.auth.getSession().then(({ data, error }) => {
+      if (error) throw error;
+      cachedSession = mapSession(data.session);
+      return cachedSession;
+    }).finally(() => { sessionPromise = null; });
+    return sessionPromise;
   },
 
   async signOut(): Promise<void> {
     const { error } = await getClient().auth.signOut();
     if (error) throw error;
+    cachedSession = null;
   },
 
   async signInWithPassword(email: string, password: string): Promise<AuthSession> {
@@ -63,6 +60,7 @@ export const supabaseBrowserAuth = {
     if (error) throw error;
     const session = mapSession(data.session);
     if (!session) throw new Error("Password sign-in did not create a session.");
+    cachedSession = session;
     return session;
   },
 
@@ -73,12 +71,14 @@ export const supabaseBrowserAuth = {
     if (!session) {
       throw new Error("Account created, but email confirmation is enabled. Disable it in Supabase to sign in automatically.");
     }
+    cachedSession = session;
     return session;
   },
 
   onSessionChange(listener: (session: AuthSession | null) => void): () => void {
     const { data } = getClient().auth.onAuthStateChange((_event, session) => {
-      listener(mapSession(session));
+      cachedSession = mapSession(session);
+      listener(cachedSession);
     });
     return () => data.subscription.unsubscribe();
   },

@@ -428,11 +428,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     try {
       const accessToken = await input.getAccessToken();
       if (!accessToken) throw new Error("Your session expired. Please sign in again.");
-      if (conversation.turns.length === 0) {
-        void generateChatTitle(content, conversation.id, accessToken)
-          .then((title) => inputRefDispatch(input, { type: "UPDATE_TITLE", conversationId: conversation.id, title }))
-          .catch(() => undefined);
-      }
+      const shouldGenerateTitle = conversation.turns.length === 0;
       if (
         controller.signal.aborted ||
         activeRequestsRef.current[conversation.id]?.messageId !== assistantMessage.id
@@ -475,6 +471,11 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         if (streamFrame === null) streamFrame = requestAnimationFrame(flushPendingEvents);
       }
       flushPendingEventsNow();
+      if (shouldGenerateTitle && !controller.signal.aborted) {
+        void generateChatTitle(content, conversation.id, accessToken)
+          .then((title) => inputRefDispatch(input, { type: "UPDATE_TITLE", conversationId: conversation.id, title }))
+          .catch(() => undefined);
+      }
     } catch (error: unknown) {
       if (controller.signal.aborted) {
         if (streamFrame !== null) cancelAnimationFrame(streamFrame);

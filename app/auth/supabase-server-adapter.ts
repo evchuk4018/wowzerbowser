@@ -24,7 +24,16 @@ export async function sendSupabaseMagicLink(email: string, redirectTo: string): 
 }
 
 export async function verifySupabaseAccessToken(accessToken: string): Promise<AuthUser | null> {
-  const { data, error } = await getServerClient().auth.getUser(accessToken);
+  const auth = getServerClient().auth;
+  const { data: claimData, error: claimError } = await auth.getClaims(accessToken);
+  const claims = claimData?.claims;
+  if (!claimError && typeof claims?.sub === "string" && typeof claims.email === "string") {
+    return { id: claims.sub, email: claims.email };
+  }
+
+  // Legacy symmetric projects and key-fetch failures cannot always be checked
+  // locally. Preserve the remote Auth validation as a compatibility fallback.
+  const { data, error } = await auth.getUser(accessToken);
   if (error || !data.user.email) return null;
   return { id: data.user.id, email: data.user.email };
 }
