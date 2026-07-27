@@ -295,7 +295,7 @@ function PlaceholderSettings({ label }: { label: string }) {
 export function SettingsModal({ settings, onClose, onSave, loadUsage }: SettingsModalProps) {
   const [draft, setDraft] = useState(settings);
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(true);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const dialogRef = useRef<HTMLElement>(null);
   const titleId = useId();
   const navigationId = useId();

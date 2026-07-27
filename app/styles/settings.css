@@ -606,7 +606,8 @@
     display: flex;
     flex-direction: column;
     grid-template-columns: 1fr;
-    height: min(
+    height: auto;
+    max-height: min(
       92dvh,
       calc(100dvh - env(safe-area-inset-top)),
       760px
