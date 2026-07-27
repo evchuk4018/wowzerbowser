@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { authorizeOwnerSession } from "../../../../auth/owner-auth-service";
 import { ChatImageError, isValidChatImageId } from "../../../../../lib/chat-image";
-import { readChatImageForOwner } from "../../../../server/chat/chat-image-service";
+import { readChatImagePreviewForOwner } from "../../../../server/chat/chat-image-service";
 
 export function createChatImageReadHandler(dependencies = {
   authorizeOwnerSession,
-  readChatImageForOwner,
+  readChatImagePreviewForOwner,
 }) {
   return async function GET(request: Request, context: { params: Promise<{ imageId: string }> }) {
     const authorization = request.headers.get("authorization");
@@ -19,7 +19,7 @@ export function createChatImageReadHandler(dependencies = {
       return NextResponse.json({ error: "Image not found." }, { status: 404 });
     }
     try {
-      const image = await dependencies.readChatImageForOwner({ ownerId: owner.id, conversationId, imageId });
+      const image = await dependencies.readChatImagePreviewForOwner({ ownerId: owner.id, conversationId, imageId });
       return new Response(new Blob([Buffer.from(image.bytes)]), {
         status: 200,
         headers: {

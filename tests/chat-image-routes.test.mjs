@@ -170,7 +170,7 @@ test("image read forwards owner and conversation and safely formats a scoped mis
       assert.equal(token, "session-token");
       return { id: "owner-from-session" };
     },
-    readChatImageForOwner: async (input) => {
+    readChatImagePreviewForOwner: async (input) => {
       readInput = input;
       if (input.ownerId !== "owner-from-session" || input.conversationId !== "conversation-1") {
         throw new ChatImageError("image_not_found", "The image was not found in this conversation.", 404);
@@ -193,7 +193,7 @@ test("image read forwards owner and conversation and safely formats a scoped mis
 
   const miss = createChatImageReadHandler({
     authorizeOwnerSession: async () => ({ id: "owner-from-session" }),
-    readChatImageForOwner: async () => {
+    readChatImagePreviewForOwner: async () => {
       throw new ChatImageError("image_not_found", "The image was not found in this conversation.", 404);
     },
   });
@@ -203,6 +203,22 @@ test("image read forwards owner and conversation and safely formats a scoped mis
   );
   assert.equal(missingResponse.status, 404);
   assert.deepEqual(await json(missingResponse), { error: "The image was not found in this conversation." });
+});
+
+test("image preview read preserves transient processing and storage statuses", async () => {
+  for (const [status, code] of [[409, "image_processing"], [503, "storage_read_failed"]]) {
+    const handler = createChatImageReadHandler({
+      authorizeOwnerSession: async () => ({ id: "owner-from-session" }),
+      readChatImagePreviewForOwner: async () => {
+        throw new ChatImageError(code, status === 409 ? "The image is still being prepared." : "The image could not be read.", status);
+      },
+    });
+    const response = await handler(
+      new Request("http://localhost/api/chat/images/image-1?conversationId=conversation-1", { headers: authHeaders }),
+      { params: Promise.resolve({ imageId: "image-1" }) },
+    );
+    assert.equal(response.status, status);
+  }
 });
 
 test("malformed multipart forms return a safe client error", async () => {

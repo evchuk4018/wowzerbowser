@@ -27,6 +27,7 @@ import {
   ensureChatImageConversation,
   failChatImageUpload,
   findChatImageAttachment,
+  findChatImagePreviewAttachment,
   waitForChatImageUpload,
   uploadChatImageObject,
 } from "./chat-image-store";
@@ -225,12 +226,12 @@ export async function analyzeAndStoreChatImages(
   })));
 }
 
-export async function readChatImageForOwner(input: {
+export async function readChatImagePreviewForOwner(input: {
   ownerId: string;
   conversationId: string;
   imageId: string;
 }): Promise<{ bytes: Uint8Array; contentType: ChatImageContentType }> {
-  const image = await findChatImageAttachment(input.ownerId, input.conversationId, input.imageId);
+  const image = await findChatImagePreviewAttachment(input.ownerId, input.conversationId, input.imageId);
   return {
     bytes: await downloadChatImageObject(input.ownerId, input.conversationId, image),
     contentType: image.contentType,

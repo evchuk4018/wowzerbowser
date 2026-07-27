@@ -480,6 +480,28 @@ export async function findChatImageAttachment(ownerId: string, conversationId: s
   throw new ChatImageError("image_not_found", "The image was not found in this conversation.", 404);
 }
 
+/**
+ * Resolves an owner-visible preview without requiring the optimistic chat turn
+ * to have finished persisting. Model-facing callers must continue to use
+ * findChatImageAttachment, which enforces active-turn membership.
+ */
+export async function findChatImagePreviewAttachment(ownerId: string, conversationId: string, imageId: string): Promise<ChatImageAttachment> {
+  assertId(conversationId, "conversationId");
+  assertId(imageId, "imageId");
+  const record = await getChatImageUploadRecord(ownerId, conversationId, imageId);
+  if (record?.status === "processing") {
+    throw new ChatImageError("image_processing", "The image is still being prepared.", 409);
+  }
+  const attachment = record && attachmentFromUploadRecord(record);
+  if (attachment) {
+    const updatedAt = Date.parse(record.updatedAt);
+    const withinPreSendWindow = Number.isFinite(updatedAt)
+      && updatedAt >= Date.now() - CHAT_IMAGE_PRE_SEND_RETENTION_MS;
+    if (withinPreSendWindow || await isActiveChatImageUpload(record)) return attachment;
+  }
+  throw new ChatImageError("image_not_found", "The image was not found in this conversation.", 404);
+}
+
 export async function downloadChatImageObject(ownerId: string, conversationId: string, image: ChatImageAttachment): Promise<Uint8Array> {
   if (!image.storagePath.startsWith(`${ownerId}/${conversationId}/`)) {
     throw new ChatImageError("unauthorized_image", "That image is not available in this conversation.", 403);
