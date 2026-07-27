@@ -1,4 +1,4 @@
-export const TRANSCRIPT_BOTTOM_THRESHOLD_PX = 1;
+export const TRANSCRIPT_BOTTOM_THRESHOLD_PX = 80;
 
 export type TranscriptScrollMetrics = {
   scrollHeight: number;
