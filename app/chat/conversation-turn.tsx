@@ -59,6 +59,7 @@ function UserDocument({ document }: { document: ChatDocumentAttachment }) {
   return (
     <div
       className={`message-document-attachment message-document-attachment--${type.toLowerCase()}`}
+      role="group"
       aria-label={`${type} document: ${document.name}, ${formatDocumentSize(document.size)}, ${pages}`}
     >
       <span className="message-document-icon" aria-hidden="true">
@@ -147,7 +148,7 @@ export function ConversationTurn({
               </div>
             ) : null}
             {userMessage.documents?.length ? (
-              <div className="message-document-attachments" aria-label="Attached documents">
+              <div className="message-document-attachments" role="group" aria-label="Attached documents">
                 {userMessage.documents.map((document) => (
                   <UserDocument key={document.id} document={document} />
                 ))}
