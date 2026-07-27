@@ -34,6 +34,8 @@ type MessageRow = {
   job_id: string | null;
   last_sequence: number | string;
   trace_round: number | null;
+  annotations: unknown;
+  sources: unknown;
 };
 
 function client() {
@@ -73,6 +75,8 @@ function messageFromRow(row: MessageRow): ChatHistoryMessage {
     ...(row.job_id === null ? {} : { jobId: row.job_id }),
     lastSequence: Number(row.last_sequence ?? 0),
     ...(row.trace_round === null ? {} : { traceRound: row.trace_round }),
+    ...(Array.isArray(row.annotations) && row.annotations.length ? { annotations: row.annotations } : {}),
+    ...(Array.isArray(row.sources) && row.sources.length ? { sources: row.sources } : {}),
   };
 }
 
@@ -103,6 +107,8 @@ function messageRow(
     job_id: message.jobId ?? null,
     last_sequence: message.lastSequence ?? 0,
     trace_round: message.traceRound ?? null,
+    annotations: message.annotations ?? [],
+    sources: message.sources ?? [],
     updated_at: new Date().toISOString(),
   };
 }

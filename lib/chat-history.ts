@@ -6,6 +6,7 @@ import type {
   ChatToolResult,
   ChatStreamEvent,
 } from "./chat-protocol";
+import type { ChatCitation, ChatSource } from "./chat-citations";
 
 export type ChatMessageStatus = "streaming" | "complete" | "error" | "cancelled";
 
@@ -52,6 +53,8 @@ export type ChatHistoryMessage = {
   jobId?: string;
   lastSequence?: number;
   traceRound?: number;
+  annotations?: ChatCitation[];
+  sources?: ChatSource[];
 };
 
 export type ChatTurnVersion = {
@@ -168,6 +171,17 @@ export function applyChatStreamEvent(
       ...(next.artifacts ?? []),
       ...(event.result.artifacts ?? []).filter((artifact) => !(next.artifacts ?? []).some((item) => item.id === artifact.id)),
     ];
+    const web = event.result.web;
+    const resultSources = web?.kind === "search" ? web.results : web?.kind === "page" ? [web.source] : [];
+    if (resultSources.length) {
+      const existing = new Map((next.sources ?? []).map((source) => [source.id, source]));
+      for (const source of resultSources) existing.set(source.id, source);
+      next.sources = [...existing.values()];
+    }
+  } else if (event.type === "annotations") {
+    const known = new Set((event.sources ?? []).map((source) => source.id));
+    next.sources = event.sources.filter((source) => known.has(source.id));
+    next.annotations = event.annotations.filter((annotation) => annotation.sourceIds.some((id) => known.has(id)));
   } else if (event.type === "artifact") {
     next.artifacts = (next.artifacts ?? []).some((artifact) => artifact.id === event.artifact.id)
       ? next.artifacts

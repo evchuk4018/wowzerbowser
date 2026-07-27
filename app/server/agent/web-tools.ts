@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { ChatToolCall, ChatToolResult } from "../../../lib/chat-protocol";
+import { sourceForUrl } from "../../../lib/chat-citations";
 import { configuredKeys, WebProviderError, withProviderKeys } from "./web-api-key-pool";
 
 export const WEB_SEARCH_TOOL_NAME = "web_search";
@@ -109,7 +110,7 @@ export async function executeWebTool(call: ChatToolCall): Promise<ChatToolResult
       const response = await withProviderKeys(configuredKeys("brave"), (key) => providerFetch(`https://api.search.brave.com/res/v1/web/search?${new URLSearchParams({ q: query, count: String(count), text_decorations: "false" })}`, { headers: { Accept: "application/json", "X-Subscription-Token": key } }));
       if (!response.ok) throw response;
       const body = await response.json() as { web?: { results?: Array<{ title?: unknown; url?: unknown; description?: unknown }> } };
-      const results = (body.web?.results ?? []).slice(0, count).map((item) => ({ title: text(item.title, 300), url: text(item.url, 2_000), snippet: text(item.description, MAX_SNIPPET) })).filter((item) => item.url);
+      const results = (body.web?.results ?? []).slice(0, count).map((item) => sourceForUrl({ title: text(item.title, 300), url: text(item.url, 2_000), snippet: text(item.description, MAX_SNIPPET) })).filter((item) => item.url);
       return { id: call.id, name: call.name, ok: true, stdout: "", stderr: "", durationMs: Date.now() - startedAt, web: { kind: "search", query, results } };
     }
     if (call.name === FETCH_PAGE_TOOL_NAME) {
@@ -117,8 +118,9 @@ export async function executeWebTool(call: ChatToolCall): Promise<ChatToolResult
       const url = text(input.url, 2_000); if (!/^https?:\/\//i.test(url)) throw new Error("fetch_page requires an http(s) URL.");
       const response = await withProviderKeys(configuredKeys("exa"), (key) => providerFetch("https://api.exa.ai/contents", { method: "POST", headers: { "content-type": "application/json", "x-api-key": key }, body: JSON.stringify({ urls: [url], text: { maxCharacters: MAX_MARKDOWN } }) }));
       if (!response.ok) throw response;
-      const body = await response.json() as { results?: Array<{ text?: unknown }> };
-      return { id: call.id, name: call.name, ok: true, stdout: "", stderr: "", durationMs: Date.now() - startedAt, web: { kind: "page", url, markdown: text(body.results?.[0]?.text, MAX_MARKDOWN) } };
+      const body = await response.json() as { results?: Array<{ text?: unknown; title?: unknown; publishedDate?: unknown }> };
+      const markdown = text(body.results?.[0]?.text, MAX_MARKDOWN);
+      return { id: call.id, name: call.name, ok: true, stdout: "", stderr: "", durationMs: Date.now() - startedAt, web: { kind: "page", source: sourceForUrl({ title: text(body.results?.[0]?.title, 300), url, snippet: markdown.slice(0, MAX_SNIPPET), publishedAt: text(body.results?.[0]?.publishedDate, 100) }), markdown } };
     }
     throw new Error(`Unknown tool: ${call.name}`);
   } catch (error) {

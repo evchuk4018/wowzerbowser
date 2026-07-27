@@ -6,6 +6,7 @@ import type {
 import { normalizeChatImageAttachments, parseChatImageToolResult } from "../../lib/chat-protocol";
 import type { ChatAssistantActivity } from "../../lib/chat-history";
 import { DOCUMENT_CONTENT_TYPES, type ChatDocumentAttachment } from "../../lib/chat-document";
+import { sourceForUrl } from "../../lib/chat-citations";
 import {
   deleteChatConversation,
   fetchChatConversation,
@@ -142,7 +143,12 @@ function normalizeToolResult(value: unknown): ChatToolResult | undefined {
   }
   // The provider payload is deliberately kept opaque here.  It is validated by
   // the protocol layer when it is used, while malformed values are ignored.
-  if (candidate.web && typeof candidate.web === "object") result.web = candidate.web as ChatToolResult["web"];
+  if (candidate.web && typeof candidate.web === "object") {
+    const web = candidate.web as Record<string, unknown>;
+    if (web.kind === "page" && typeof web.url === "string" && typeof web.markdown === "string") {
+      result.web = { kind: "page", source: sourceForUrl({ url: web.url, snippet: web.markdown.slice(0, 1200) }), markdown: web.markdown };
+    } else result.web = candidate.web as ChatToolResult["web"];
+  }
   if (candidate.utility && typeof candidate.utility === "object") result.utility = candidate.utility as ChatToolResult["utility"];
   if (candidate.image && typeof candidate.image === "object") {
     try { result.image = parseChatImageToolResult(candidate.image); } catch { /* malformed legacy activity */ }
@@ -235,6 +241,8 @@ export function normalizeStoredMessage(
   if (lastSequence !== undefined && lastSequence >= 0) message.lastSequence = lastSequence;
   const traceRound = finiteNumber(candidate.traceRound);
   if (traceRound !== undefined && traceRound >= 0) message.traceRound = traceRound;
+  if (Array.isArray(candidate.annotations)) message.annotations = candidate.annotations as Message["annotations"];
+  if (Array.isArray(candidate.sources)) message.sources = candidate.sources as Message["sources"];
   if (Array.isArray(candidate.attachments)) {
     const attachments = normalizeChatImageAttachments(candidate.attachments);
     if (attachments.length) message.attachments = attachments;

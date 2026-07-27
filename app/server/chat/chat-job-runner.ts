@@ -8,6 +8,7 @@ import type {
 import { generateChatResponse } from "../../chat/chat-server-service";
 import { recordUsage } from "../usage/usage-store";
 import { claimChatJob, createChatJobEventWriter, finishChatJob, isChatJobCancelled } from "./chat-job-store";
+import type { ChatCitation, ChatSource } from "../../../lib/chat-citations";
 
 export type RunChatJobOptions = {
   onEvent?: (event: SequencedChatStreamEvent) => void;
@@ -32,6 +33,8 @@ export async function runChatJob(
   let completedProviderOutputWindowMs = 0;
   let roundFirstOutputAt: number | null = null;
   let roundLastOutputAt: number | null = null;
+  let annotations: ChatCitation[] = [];
+  let sources: ChatSource[] = [];
   const terminalResponse = (status: ChatJobTerminalResponse["status"], error: string | null): ChatJobTerminalResponse => {
     const completionTokens = usage?.completionTokens ?? null;
     const currentRoundWindowMs = roundFirstOutputAt === null || roundLastOutputAt === null
@@ -44,6 +47,7 @@ export async function runChatJob(
       error,
       usage,
       finalOutput: output,
+      ...(annotations.length ? { annotations, sources } : {}),
       providerMetrics: {
         completionTokens,
         outputWindowMs,
@@ -81,6 +85,7 @@ export async function runChatJob(
           roundLastOutputAt = now;
         }
         if (event.type === "content") output += event.delta;
+        if (event.type === "annotations") { annotations = event.annotations; sources = event.sources; }
         if (event.type === "done") usage = event.usage;
         if (event.type === "error") generationError = event.message;
       },

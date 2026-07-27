@@ -101,7 +101,8 @@ export async function getChatJob(ownerId: string, conversationId: string, jobId:
     sequence: Number(row.event_index),
     jobId,
   }));
-  return { jobId, conversationId, status: jobResult.data.status as ChatJobStatus, events, hasMore, lastSequence: events.at(-1)?.sequence ?? after, error: jobResult.data.error, usage: jobResult.data.usage as ChatUsage | null, finalOutput: jobResult.data.final_output, createdAt: jobResult.data.created_at, updatedAt: jobResult.data.updated_at };
+  const annotationEvent = [...events].reverse().find((event) => event.type === "annotations");
+  return { jobId, conversationId, status: jobResult.data.status as ChatJobStatus, events, hasMore, lastSequence: events.at(-1)?.sequence ?? after, error: jobResult.data.error, usage: jobResult.data.usage as ChatUsage | null, finalOutput: jobResult.data.final_output, ...(annotationEvent?.type === "annotations" ? { annotations: annotationEvent.annotations, sources: annotationEvent.sources } : {}), createdAt: jobResult.data.created_at, updatedAt: jobResult.data.updated_at };
 }
 
 export async function cancelChatJob(ownerId: string, conversationId: string, jobId: string) {

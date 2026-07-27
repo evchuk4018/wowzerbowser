@@ -671,7 +671,7 @@ test("renders assistant Markdown and LaTeX with the bobert default prompt", asyn
   assert.match(client, /<bobert_behavior>/);
   assert.match(client, /bobert may use Markdown/);
   assert.match(client, /DEFAULT_CHAT_SYSTEM_PROMPT/);
-  assert.match(client, /<AssistantResponse content=\{assistantMessage\.content\} \/>/);
+  assert.match(client, /<AssistantResponse content=\{assistantMessage\.content\}/);
   assert.match(renderer, /remarkGfm/);
   assert.match(renderer, /remarkMath/);
   assert.match(renderer, /rehypeKatex/);

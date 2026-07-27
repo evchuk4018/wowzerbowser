@@ -1,3 +1,5 @@
+import { sourceForUrl, type ChatCitation, type ChatSource } from "./chat-citations";
+
 export const DEFAULT_CHAT_SYSTEM_PROMPT = `<bobert_behavior>
 
 bobert is the assistant’s name.
@@ -114,8 +116,8 @@ export type ChatToolResult = {
   stderrTruncated?: boolean;
   artifacts?: ChatArtifact[];
   web?:
-    | { kind: "search"; query: string; results: Array<{ title: string; url: string; snippet: string }> }
-    | { kind: "page"; url: string; markdown: string };
+    | { kind: "search"; query: string; results: ChatSource[] }
+    | { kind: "page"; source: ChatSource; markdown: string };
   /** Replayable results from server-local utilities, distinct from web-provider output. */
   utility?:
     | { kind: "time"; currentTime: string; timeZone: string }
@@ -161,6 +163,8 @@ export type ChatJobResumeResponse = {
   error: string | null;
   usage: ChatUsage | null;
   finalOutput: string | null;
+  annotations?: ChatCitation[];
+  sources?: ChatSource[];
   createdAt: string;
   updatedAt: string;
 };
@@ -171,6 +175,8 @@ export type ChatJobTerminalResponse = {
   error: string | null;
   usage: ChatUsage | null;
   finalOutput: string;
+  annotations?: ChatCitation[];
+  sources?: ChatSource[];
   providerMetrics?: ChatStreamMetrics;
 };
 export type ChatStreamMetrics = {
@@ -196,6 +202,7 @@ export type ChatStreamEvent =
   | { type: "content"; delta: string }
   | { type: "tool_call"; call: ChatToolCall }
   | { type: "tool_result"; result: ChatToolResult }
+  | { type: "annotations"; annotations: ChatCitation[]; sources: ChatSource[] }
   | { type: "artifact"; artifact: ChatArtifact }
   | {
       type: "meta";
@@ -517,9 +524,9 @@ function readToolCalls(value: unknown, field: string): ChatToolCall[] | undefine
             }
           : {}),
         ...(isRecord(call.result.web) && call.result.web.kind === "search" && Array.isArray(call.result.web.results)
-          ? { web: { kind: "search" as const, query: readBoundedString(call.result.web.query, `${field}[${index}].result.web.query`, 400), results: call.result.web.results.slice(0, 5).map((item, itemIndex) => { if (!isRecord(item)) throw new ChatRequestValidationError(`${field}[${index}].result.web.results[${itemIndex}] is invalid.`); return { title: readBoundedString(item.title, "web title", 300), url: readBoundedString(item.url, "web url", 2_000), snippet: readBoundedString(item.snippet, "web snippet", 1_200) }; }) } }
+          ? { web: { kind: "search" as const, query: readBoundedString(call.result.web.query, `${field}[${index}].result.web.query`, 400), results: call.result.web.results.slice(0, 5).map((item, itemIndex) => { if (!isRecord(item)) throw new ChatRequestValidationError(`${field}[${index}].result.web.results[${itemIndex}] is invalid.`); const url = readBoundedString(item.url, "web url", 2_000); const source = sourceForUrl({ title: readBoundedString(item.title, "web title", 300), url, snippet: readBoundedString(item.snippet, "web snippet", 1_200), ...(item.publishedAt === undefined ? {} : { publishedAt: readBoundedString(item.publishedAt, "web published date", 100) }) }); return { ...source, id: typeof item.id === "string" && item.id ? item.id : source.id, publisher: typeof item.publisher === "string" && item.publisher ? item.publisher : source.publisher }; }) } }
           : isRecord(call.result.web) && call.result.web.kind === "page"
-            ? { web: { kind: "page" as const, url: readBoundedString(call.result.web.url, `${field}[${index}].result.web.url`, 2_000), markdown: readBoundedString(call.result.web.markdown, `${field}[${index}].result.web.markdown`, 24_000) } }
+            ? { web: { kind: "page" as const, source: (() => { if (!isRecord(call.result.web.source)) { const legacyUrl = readBoundedString(call.result.web.url, `${field}[${index}].result.web.url`, 2_000); return sourceForUrl({ url: legacyUrl }); } return { id: readBoundedString(call.result.web.source.id, "web source id", 80), title: readBoundedString(call.result.web.source.title, "web title", 300), url: readBoundedString(call.result.web.source.url, `${field}[${index}].result.web.source.url`, 2_000), snippet: readBoundedString(call.result.web.source.snippet, "web snippet", 1_200), publisher: readBoundedString(call.result.web.source.publisher, "web publisher", 200), ...(call.result.web.source.publishedAt === undefined ? {} : { publishedAt: readBoundedString(call.result.web.source.publishedAt, "web published date", 100) }) }; })(), markdown: readBoundedString(call.result.web.markdown, `${field}[${index}].result.web.markdown`, 24_000) } }
             : {}),
         ...(isRecord(call.result.utility) && call.result.utility.kind === "time"
           ? { utility: { kind: "time" as const, currentTime: readBoundedString(call.result.utility.currentTime, `${field}[${index}].result.utility.currentTime`, 64), timeZone: readBoundedString(call.result.utility.timeZone, `${field}[${index}].result.utility.timeZone`, 100) } }

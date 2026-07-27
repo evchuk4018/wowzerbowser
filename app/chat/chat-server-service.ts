@@ -20,6 +20,7 @@ import { availablePdfTools, executePdfTool } from "../server/agent/pdf-tool";
 import { getAuthorizedDocument, getDocumentPages } from "../server/chat/chat-document-store";
 import { ingestDocx, ingestPdf } from "../server/chat/chat-document-service";
 import { DOCX_CONTENT_TYPE, documentContext } from "../../lib/chat-document";
+import { parseCitationMarkup, validCitationSources, type ChatSource } from "../../lib/chat-citations";
 
 const MAX_RESPONSE_MS = 240_000;
 const MAX_TOOL_CALLS = 6;
@@ -87,6 +88,7 @@ export async function generateChatResponse(
       const roundUsages: Array<ReturnType<typeof latestNonNullUsage>> = [];
       let totalToolCalls = 0;
       let executor: ModalPythonExecutor | null = null;
+      const sourceCatalog = new Map<string, ChatSource>();
 
       try {
         for (let round = 1; round <= MAX_TOOL_CALLS + 1; round += 1) {
@@ -120,7 +122,6 @@ export async function generateChatResponse(
                 await enqueue(event);
               } else if (event.type === "content") {
                 contentParts.push(event.delta);
-                await enqueue(event);
               } else if (event.type === "tool_call") {
                 calls.push(event.call);
               } else if (event.type === "done") {
@@ -150,6 +151,9 @@ export async function generateChatResponse(
           }
 
           if (!calls.length) {
+            const parsed = parseCitationMarkup(contentParts.join(""), validCitationSources([...sourceCatalog.values()]));
+            if (parsed.content) await enqueue({ type: "content", delta: parsed.content });
+            await enqueue({ type: "annotations", annotations: parsed.annotations, sources: validCitationSources([...sourceCatalog.values()]) });
             break;
           }
           if (!toolDefinitions.length) {
@@ -195,6 +199,9 @@ export async function generateChatResponse(
               };
             }
             call.result = result;
+            const web = result.web;
+            const sources = web?.kind === "search" ? web.results : web?.kind === "page" ? [web.source] : [];
+            for (const source of sources) sourceCatalog.set(source.id, source);
             await enqueue({ type: "tool_result", result });
             for (const artifact of result.artifacts ?? []) await enqueue({ type: "artifact", artifact });
           }

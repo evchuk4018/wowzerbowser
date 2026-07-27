@@ -178,6 +178,8 @@ export function ConversationTurn({
             activities={assistantMessage.activities ?? []}
             content={assistantMessage.content}
             artifacts={assistantMessage.artifacts ?? []}
+            annotations={assistantMessage.annotations}
+            sources={assistantMessage.sources}
             getAccessToken={getAccessToken}
           />
         ) : (
@@ -198,7 +200,7 @@ export function ConversationTurn({
             )}
             <div className="message-bubble">
               {assistantMessage.content ? (
-                <AssistantResponse content={assistantMessage.content} />
+                <AssistantResponse content={assistantMessage.content} annotations={assistantMessage.annotations} sources={assistantMessage.sources} />
               ) : !assistantMessage.thinkingEnabled && waitingByMessage[assistantMessage.id] ? (
                 <CallActivityIndicator />
               ) : null}

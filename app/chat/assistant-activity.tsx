@@ -14,6 +14,7 @@ import type {
 } from "./assistant-activity-types";
 import { fetchChatArtifact } from "./chat-service";
 import { formatDuration } from "./format-duration";
+import type { ChatCitation, ChatSource } from "../../lib/chat-citations";
 
 export type {
   AssistantActivity,
@@ -124,8 +125,8 @@ function PythonDisclosure({ activity }: { activity: PythonActivity }) {
 function WebDisclosure({ activity }: { activity: WebActivity }) {
   const [open, setOpen] = useState(false); const liveDuration = useLiveDuration(activity.startedAt, activity.status === "running"); const duration = activity.durationMs ?? liveDuration;
   const web = activity.result?.web; const utility = activity.result?.utility;
-  const label = web?.kind === "search" ? `Search: ${web.query}` : web?.kind === "page" ? `Page: ${web.url}` : utility?.kind === "time" ? `Time: ${utility.timeZone}` : utility?.kind === "date" ? `Date: ${utility.timeZone}` : utility?.kind === "location" ? "Deployment location" : activity.call.name === "web_search" ? "Web search" : activity.call.name === "fetch_page" ? "Fetch page" : activity.call.name;
-  const output = web?.kind === "search" ? web.results.map((item) => `${item.title}\n${item.url}\n${item.snippet}`).join("\n\n") : web?.kind === "page" ? web.markdown : utility?.kind === "time" ? `${utility.currentTime}\n${utility.timeZone}` : utility?.kind === "date" ? `${utility.currentDate}\n${utility.timeZone}` : utility?.kind === "location" ? utility.available ? `${utility.location}\nSource: deployment metadata` : utility.message : activity.result?.stderr ?? "Waiting for result…";
+  const label = web?.kind === "search" ? `Search: ${web.query}` : web?.kind === "page" ? `Page: ${web.source.url}` : utility?.kind === "time" ? `Time: ${utility.timeZone}` : utility?.kind === "date" ? `Date: ${utility.timeZone}` : utility?.kind === "location" ? "Deployment location" : activity.call.name === "web_search" ? "Web search" : activity.call.name === "fetch_page" ? "Fetch page" : activity.call.name;
+  const output = web?.kind === "search" ? web.results.map((item) => `${item.title}\n${item.url}\n${item.snippet}`).join("\n\n") : web?.kind === "page" ? `${web.source.title}\n${web.source.url}\n\n${web.markdown}` : utility?.kind === "time" ? `${utility.currentTime}\n${utility.timeZone}` : utility?.kind === "date" ? `${utility.currentDate}\n${utility.timeZone}` : utility?.kind === "location" ? utility.available ? `${utility.location}\nSource: deployment metadata` : utility.message : activity.result?.stderr ?? "Waiting for result…";
   return <div className={`web-nested web-nested-${activity.status}`}><button type="button" className="web-nested-summary" aria-expanded={open} onClick={() => setOpen((value) => !value)}><span className="python-nested-chevron">{open ? "⌄" : "›"}</span><span className="web-activity-label">{label}</span><span className="python-activity-status">{activity.status === "running" ? "Running" : activity.status === "completed" ? "Completed" : "Failed"}</span>{duration !== undefined && <span className="python-activity-duration">{formatDuration(duration)}</span>}</button>{open && <pre className="web-output">{output}</pre>}</div>;
 }
 function ImageDisclosure({ activity }: { activity: ImageActivity }) {
@@ -229,11 +230,15 @@ export function AssistantActivityTimeline({
   activities,
   content,
   artifacts,
+  annotations,
+  sources,
   getAccessToken,
 }: {
   activities: AssistantActivity[];
   content: string;
   artifacts: ChatArtifact[];
+  annotations?: ChatCitation[];
+  sources?: ChatSource[];
   getAccessToken: () => Promise<string | null>;
 }) {
   const rounds = activities.reduce<Map<number, { reasoning?: ReasoningActivity; python: PythonActivity[]; web: WebActivity[]; image: ImageActivity[] }>>((grouped, activity) => {
@@ -264,7 +269,7 @@ export function AssistantActivityTimeline({
       </div>
       {content && (
         <div className="message-bubble">
-          <AssistantResponse content={content} />
+          <AssistantResponse content={content} annotations={annotations} sources={sources} />
         </div>
       )}
       {artifacts.length > 0 && (
