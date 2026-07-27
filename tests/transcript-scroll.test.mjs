@@ -12,12 +12,12 @@ test("is near the bottom when no distance remains", () => {
   assert.equal(isTranscriptNearBottom(metricsWithRemainingDistance(0)), true);
 });
 
-test("is near the bottom at the default threshold", () => {
-  assert.equal(isTranscriptNearBottom(metricsWithRemainingDistance(80)), true);
+test("allows one pixel of browser rounding tolerance", () => {
+  assert.equal(isTranscriptNearBottom(metricsWithRemainingDistance(1)), true);
 });
 
-test("is not near the bottom beyond the default threshold", () => {
-  assert.equal(isTranscriptNearBottom(metricsWithRemainingDistance(81)), false);
+test("small upward touchpad movement disables auto-scroll", () => {
+  assert.equal(isTranscriptNearBottom(metricsWithRemainingDistance(2)), false);
 });
 
 test("is near the bottom when the remaining distance is negative", () => {
