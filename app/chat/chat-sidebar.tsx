@@ -11,6 +11,7 @@ export type ChatSidebarProps = {
   streamingByConversation: Record<string, string>;
   openConversationActions: string | null;
   userEmail: string;
+  mobileMenuButtonRef: RefObject<HTMLButtonElement | null>;
   settingsButtonRef: RefObject<HTMLButtonElement | null>;
   onToggleSidebar: () => void;
   onCloseSidebar: () => void;
@@ -33,6 +34,7 @@ export function ChatSidebar({
   streamingByConversation,
   openConversationActions,
   userEmail,
+  mobileMenuButtonRef,
   settingsButtonRef,
   onToggleSidebar,
   onCloseSidebar,
@@ -49,6 +51,7 @@ export function ChatSidebar({
   return (
     <>
       <button
+        ref={mobileMenuButtonRef}
         className="mobile-menu"
         type="button"
         aria-label="Open conversation menu"

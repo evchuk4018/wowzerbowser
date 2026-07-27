@@ -64,6 +64,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [recoveredStreaming, setRecoveredStreaming] = useState<Record<string, string>>({});
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const longPressTimerRef = useRef<number | null>(null);
@@ -355,7 +356,12 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
   };
   const closeSettings = () => {
     setSettingsOpen(false);
-    requestAnimationFrame(() => settingsButtonRef.current?.focus());
+    requestAnimationFrame(() => {
+      const focusTarget = window.matchMedia("(max-width: 760px)").matches
+        ? mobileMenuButtonRef.current
+        : settingsButtonRef.current;
+      focusTarget?.focus();
+    });
   };
 
   if (!ready || !active) return <main className="loading-shell" aria-label="Loading chat" />;
@@ -368,6 +374,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
         streamingByConversation={streamingByConversation}
         openConversationActions={openConversationActions}
         userEmail={user.email}
+        mobileMenuButtonRef={mobileMenuButtonRef}
         settingsButtonRef={settingsButtonRef}
         onToggleSidebar={() => setSidebarOpen((open) => !open)}
         onCloseSidebar={() => setSidebarOpen(false)}
@@ -378,7 +385,11 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
         onStartConversationLongPress={startConversationLongPress}
         onCancelConversationLongPress={cancelConversationLongPress}
         onDeleteConversation={requestDeleteConversation}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => {
+          setSidebarOpen(false);
+          setOpenConversationActions(null);
+          setSettingsOpen(true);
+        }}
         onSignOut={onSignOut}
       />
       {deleteConversationId && (() => {

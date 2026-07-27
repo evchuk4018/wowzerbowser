@@ -295,19 +295,28 @@ function PlaceholderSettings({ label }: { label: string }) {
 export function SettingsModal({ settings, onClose, onSave, loadUsage }: SettingsModalProps) {
   const [draft, setDraft] = useState(settings);
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(true);
   const dialogRef = useRef<HTMLElement>(null);
   const titleId = useId();
+  const navigationId = useId();
 
   useEffect(() => {
-    dialogRef.current?.querySelector<HTMLButtonElement>(".settings-nav-item")?.focus();
+    const initialFocusSelector = window.matchMedia("(max-width: 700px)").matches
+      ? ".settings-menu-toggle"
+      : ".settings-nav-item";
+    dialogRef.current?.querySelector<HTMLButtonElement>(initialFocusSelector)?.focus();
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") onClose();
       if (event.key !== "Tab" || !dialogRef.current) return;
+      const mobileViewport = window.matchMedia("(max-width: 700px)").matches;
       const focusable = Array.from(
         dialogRef.current.querySelectorAll<HTMLElement>(
           'button:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
         ),
-      ).filter((element) => !element.hasAttribute("hidden"));
+      ).filter((element) =>
+        !element.hasAttribute("hidden")
+        && !(mobileViewport && !mobileMenuOpen && element.closest(".settings-sidebar")),
+      );
       if (!focusable.length) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
@@ -321,7 +330,14 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage }: Settings
     };
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
+  }, [onClose, mobileMenuOpen]);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    dialogRef.current
+      ?.querySelector<HTMLButtonElement>('.settings-nav-item[aria-current="page"]')
+      ?.focus();
+  }, [mobileMenuOpen]);
 
   const activeLabel = sections.find(({ id }) => id === activeSection)?.label ?? "Settings";
 
@@ -340,19 +356,26 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage }: Settings
         aria-modal="true"
         aria-labelledby={titleId}
       >
-        <aside className="settings-sidebar">
+        <aside className={`settings-sidebar${mobileMenuOpen ? " settings-sidebar-open" : ""}`}>
           <div className="settings-brand">
             <div className="settings-kicker">Preferences</div>
             <h2 id={titleId}>Settings</h2>
           </div>
-          <nav className="settings-nav" aria-label="Settings sections">
+          <nav id={navigationId} className="settings-nav" aria-label="Settings sections">
             {sections.map((section) => (
               <button
                 key={section.id}
                 type="button"
                 className="settings-nav-item"
                 aria-current={activeSection === section.id ? "page" : undefined}
-                onClick={() => setActiveSection(section.id)}
+                onClick={() => {
+                  setActiveSection(section.id);
+                  setMobileMenuOpen(false);
+                  requestAnimationFrame(() => {
+                    if (!window.matchMedia("(max-width: 700px)").matches) return;
+                    dialogRef.current?.querySelector<HTMLButtonElement>(".settings-menu-toggle")?.focus();
+                  });
+                }}
               >
                 {section.label}
               </button>
@@ -362,8 +385,19 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage }: Settings
 
         <div className="settings-main">
           <header className="settings-header">
+            <button
+              type="button"
+              className="settings-menu-toggle"
+              aria-controls={navigationId}
+              aria-expanded={mobileMenuOpen}
+              onClick={() => setMobileMenuOpen((open) => !open)}
+            >
+              Sections
+            </button>
             <span className="settings-mobile-title">{activeLabel}</span>
-            <button type="button" className="settings-close" aria-label="Close settings" onClick={onClose}>×</button>
+            <button type="button" className="settings-close" aria-label="Close settings" onClick={onClose}>
+              &times;
+            </button>
           </header>
           <div className="settings-content">
             {activeSection === "general" && (

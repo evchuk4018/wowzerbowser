@@ -314,6 +314,10 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(client, /User presence/);
   assert.match(settings, /aria-label="Settings sections"/);
   assert.match(settings, /aria-current=/);
+  assert.match(settings, /className="settings-menu-toggle"/);
+  assert.match(settings, /aria-expanded=\{mobileMenuOpen\}/);
+  assert.match(settings, /aria-controls=\{navigationId\}/);
+  assert.match(settings, /setMobileMenuOpen\(false\)/);
   assert.match(settings, /Promise<UsageReport>/);
   assert.match(settings, /aria-label="Usage period"/);
   assert.match(settings, /Day/);
@@ -341,8 +345,13 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(settings, /per 1M tokens/);
   assert.match(styles, /backdrop-filter: blur\(8px\)/);
   assert.match(styles, /grid-template-columns: 190px minmax\(0, 1fr\)/);
+  assert.match(styles, /grid-template-columns: repeat\(6, minmax\(0, 1fr\)\)/);
+  assert.match(styles, /grid-template-rows: repeat\(2, minmax\(38px, auto\)\)/);
+  assert.match(styles, /\.settings-sidebar:not\(\.settings-sidebar-open\) \.settings-nav/);
   assert.match(styles, /\.settings-bar-target:hover \.settings-bar-tooltip,[\s\S]*?\.settings-bar-target:focus-visible \.settings-bar-tooltip/);
   assert.match(styles, /@media \(max-width: 700px\)/);
+  assert.match(workspace, /mobileMenuButtonRef/);
+  assert.match(workspace, /setSidebarOpen\(false\);[\s\S]*?setOpenConversationActions\(null\);[\s\S]*?setSettingsOpen\(true\)/);
   assert.doesNotMatch(client, /Messages stay on this device/);
   assert.doesNotMatch(styles, /privacy-note/);
   assert.match(styles, /bottom: calc\(100% \+ 8px\)/);
