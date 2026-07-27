@@ -105,6 +105,37 @@ test("DSML accepts ASCII markers and preserves string parameter contents", () =>
   });
 });
 
+test("DSML accepts doubled, spaced, and mixed delimiters across arbitrary fragments", () => {
+  const block = [
+    "< || DSML |｜ tool_calls >",
+    '< |｜ DSML || invoke name="fetch_page" >',
+    '< ｜ DSML | | parameter name="url" string="true" >',
+    "https://example.com/lesson",
+    "</ |｜ DSML || parameter >",
+    "</ ｜ DSML |｜ invoke >",
+    "</ || DSML |｜ tool_calls >",
+  ].join("");
+
+  const result = collect(new DeepSeekDsmlParser(), [...block]);
+
+  assert.equal(result.content, "");
+  assert.equal(result.rejected, false);
+  assert.equal(result.toolCalls.length, 1);
+  assert.equal(result.toolCalls[0].name, "fetch_page");
+  assert.deepEqual(JSON.parse(result.toolCalls[0].arguments), {
+    url: "https://example.com/lesson",
+  });
+});
+
+test("DSML parser emits ordinary tool-enabled content before finish", () => {
+  const parser = new DeepSeekDsmlParser();
+  const result = parser.feed("ordinary content");
+
+  assert.equal(result.content, "ordinary content");
+  assert.equal(result.rejected, false);
+  assert.equal(parser.finish().content, "");
+});
+
 test("malformed and truncated DSML blocks are rejected and never become tool calls", () => {
   const bar = "|";
   const malformed = [
@@ -127,6 +158,52 @@ test("malformed and truncated DSML blocks are rejected and never become tool cal
   assert.equal(truncated.toolCalls.length, 0);
   assert.equal(truncated.rejected, true);
   assert.equal(truncated.content, "before ");
+});
+
+test("adapter emits one fetch_page call for fragmented mixed DSML without visible markup", async () => {
+  const block = [
+    "< || DSML |｜ tool_calls >",
+    '< |｜ DSML || invoke name="fetch_page" >',
+    '< ｜ DSML | | parameter name="url" string="true" >',
+    "https://example.com/lesson",
+    "</ |｜ DSML || parameter >",
+    "</ ｜ DSML |｜ invoke >",
+    "</ || DSML |｜ tool_calls >",
+  ].join("");
+  const responseText = [
+    ...[..."Please read this page. " + block].map((fragment) => sseChunk({ choices: [{ delta: { content: fragment } }] })),
+    "data: [DONE]\n\n",
+  ].join("");
+
+  const originalFetch = globalThis.fetch;
+  const originalApiKey = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = "test-key";
+  globalThis.fetch = async () => streamResponse(responseText);
+  try {
+    const events = [];
+    for await (const event of streamDeepSeekChatRound(request, {
+      tools: [{
+        type: "function",
+        function: { name: "fetch_page", description: "Fetch a page", parameters: { type: "object" } },
+      }],
+    })) events.push(event);
+
+    const visibleContent = events
+      .filter(({ type }) => type === "content")
+      .map(({ delta }) => delta)
+      .join("");
+    assert.equal(visibleContent, "Please read this page. ");
+    assert.doesNotMatch(visibleContent, /DSML|invoke|parameter/);
+
+    const calls = events.filter(({ type }) => type === "tool_call").map(({ call }) => call);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].name, "fetch_page");
+    assert.deepEqual(JSON.parse(calls[0].arguments), { url: "https://example.com/lesson" });
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalApiKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = originalApiKey;
+  }
 });
 
 test("adapter suppresses DSML content and deduplicates it against native tool_calls", async () => {
@@ -240,6 +317,42 @@ test("adapter parses DSML from reasoning_content while preserving visible reason
     assert.equal(calls.length, 1);
     assert.equal(calls[0].name, "noop");
     assert.deepEqual(JSON.parse(calls[0].arguments), {});
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalApiKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = originalApiKey;
+  }
+});
+
+test("adapter rejects unrecognized DSML-like markup instead of leaking it", async () => {
+  const malformed = "before <|||DSML|||tool_calls> leaked";
+  const responseText = [
+    ...[...malformed].map((fragment) => sseChunk({ choices: [{ delta: { content: fragment } }] })),
+    "data: [DONE]\n\n",
+  ].join("");
+  const originalFetch = globalThis.fetch;
+  const originalApiKey = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = "test-key";
+  globalThis.fetch = async () => streamResponse(responseText);
+  try {
+    const events = [];
+    await assert.rejects(
+      (async () => {
+        for await (const event of streamDeepSeekChatRound(request, {
+          tools: [{
+            type: "function",
+            function: { name: "fetch_page", description: "Fetch a page", parameters: { type: "object" } },
+          }],
+        })) events.push(event);
+      })(),
+      /malformed or truncated DSML/i,
+    );
+    const visibleContent = events
+      .filter(({ type }) => type === "content")
+      .map(({ delta }) => delta)
+      .join("");
+    assert.equal(visibleContent, "before ");
+    assert.doesNotMatch(visibleContent, /DSML|invoke|parameter/);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalApiKey === undefined) delete process.env.DEEPSEEK_API_KEY;
