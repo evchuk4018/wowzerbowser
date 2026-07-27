@@ -13,7 +13,8 @@ export type ChatTranscriptProps = {
   thinkingByMessage: Record<string, ThinkingTiming>;
   copiedMessageId: string | null;
   getAccessToken: () => Promise<string | null>;
-  endRef: RefObject<HTMLDivElement | null>;
+  transcriptRef: RefObject<HTMLDivElement | null>;
+  onTranscriptScroll: (element: HTMLDivElement) => void;
   onSetOpenMessageActions: (turnId: string | null) => void;
   onStartLongPress: (turnId: string, pointerType: string) => void;
   onCancelLongPress: () => void;
@@ -34,7 +35,8 @@ export function ChatTranscript({
   thinkingByMessage,
   copiedMessageId,
   getAccessToken,
-  endRef,
+  transcriptRef,
+  onTranscriptScroll,
   onSetOpenMessageActions,
   onStartLongPress,
   onCancelLongPress,
@@ -55,7 +57,15 @@ export function ChatTranscript({
   }
 
   return (
-    <div className="transcript" aria-live="polite" onScroll={() => onSetOpenMessageActions(null)}>
+    <div
+      ref={transcriptRef}
+      className="transcript"
+      aria-live="polite"
+      onScroll={(event) => {
+        onSetOpenMessageActions(null);
+        onTranscriptScroll(event.currentTarget);
+      }}
+    >
       {turns.map((turn) => (
         <ConversationTurn
           key={turn.id}
@@ -78,7 +88,6 @@ export function ChatTranscript({
           onShare={onShare}
         />
       ))}
-      <div ref={endRef} />
     </div>
   );
 }
