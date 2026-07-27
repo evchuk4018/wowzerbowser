@@ -79,6 +79,12 @@ function normalizeDocumentAttachment(value: unknown): ChatDocumentAttachment | n
     imageCount,
     analyzedImageCount,
     imageAnalyses: imageAnalyses as ChatDocumentAttachment["imageAnalyses"],
+    ...(typeof candidate.projectId === "string" ? { projectId: candidate.projectId } : {}),
+    ...(typeof candidate.revisionId === "string" ? { revisionId: candidate.revisionId } : {}),
+    ...(candidate.parentRevisionId === null || typeof candidate.parentRevisionId === "string" ? { parentRevisionId: candidate.parentRevisionId as string | null } : {}),
+    ...(candidate.origin === "generated" || candidate.origin === "uploaded" ? { origin: candidate.origin } : {}),
+    ...(typeof candidate.editable === "boolean" ? { editable: candidate.editable } : {}),
+    ...(candidate.sourceCompleteness === "complete" || candidate.sourceCompleteness === "entrypoint-only" ? { sourceCompleteness: candidate.sourceCompleteness } : {}),
   };
 }
 
@@ -99,7 +105,14 @@ function normalizeArtifact(value: unknown): ChatArtifact | null {
   const contentType = typeof candidate.contentType === "string" ? candidate.contentType : null;
   const size = nonNegativeNumber(candidate.size);
   if (!id || name === null || contentType === null || size === undefined) return null;
-  return { id, name, contentType, size };
+  return { id, name, contentType, size,
+    ...(typeof candidate.projectId === "string" ? { projectId: candidate.projectId } : {}),
+    ...(typeof candidate.revisionId === "string" ? { revisionId: candidate.revisionId } : {}),
+    ...(candidate.parentRevisionId === null || typeof candidate.parentRevisionId === "string" ? { parentRevisionId: candidate.parentRevisionId as string | null } : {}),
+    ...(candidate.origin === "generated" || candidate.origin === "uploaded" ? { origin: candidate.origin } : {}),
+    ...(typeof candidate.editable === "boolean" ? { editable: candidate.editable } : {}),
+    ...(candidate.sourceCompleteness === "complete" || candidate.sourceCompleteness === "entrypoint-only" ? { sourceCompleteness: candidate.sourceCompleteness } : {}),
+  };
 }
 
 function normalizeToolCall(value: unknown): ChatToolCall | null {

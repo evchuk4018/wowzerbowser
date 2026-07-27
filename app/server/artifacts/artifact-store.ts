@@ -12,6 +12,12 @@ type ArtifactDescriptor = {
   contentType: string;
   size: number;
   sha256: string;
+  projectId?: string;
+  revisionId?: string;
+  parentRevisionId?: string | null;
+  origin?: "generated" | "uploaded";
+  editable?: boolean;
+  sourceCompleteness?: "complete" | "entrypoint-only";
 };
 
 function signingKey(): string {
@@ -33,6 +39,12 @@ export function registerArtifact(input: ArtifactDescriptor): ChatArtifact {
     contentType: input.contentType || "application/octet-stream",
     size: input.size,
     sha256: input.sha256,
+    ...(input.projectId ? { projectId: input.projectId } : {}),
+    ...(input.revisionId ? { revisionId: input.revisionId } : {}),
+    ...(input.parentRevisionId !== undefined ? { parentRevisionId: input.parentRevisionId } : {}),
+    ...(input.origin ? { origin: input.origin } : {}),
+    ...(input.editable !== undefined ? { editable: input.editable } : {}),
+    ...(input.sourceCompleteness ? { sourceCompleteness: input.sourceCompleteness } : {}),
   };
   const payload = Buffer.from(JSON.stringify(descriptor), "utf8").toString("base64url");
   return {
@@ -40,6 +52,12 @@ export function registerArtifact(input: ArtifactDescriptor): ChatArtifact {
     name: descriptor.name,
     contentType: descriptor.contentType,
     size: descriptor.size,
+    ...(descriptor.projectId ? { projectId: descriptor.projectId } : {}),
+    ...(descriptor.revisionId ? { revisionId: descriptor.revisionId } : {}),
+    ...(descriptor.parentRevisionId !== undefined ? { parentRevisionId: descriptor.parentRevisionId } : {}),
+    ...(descriptor.origin ? { origin: descriptor.origin } : {}),
+    ...(descriptor.editable !== undefined ? { editable: descriptor.editable } : {}),
+    ...(descriptor.sourceCompleteness ? { sourceCompleteness: descriptor.sourceCompleteness } : {}),
   };
 }
 

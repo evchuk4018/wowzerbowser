@@ -56,6 +56,7 @@ export type PdfIngestionInput = {
   alreadyUploaded?: boolean;
   signal?: AbortSignal;
   timing?: DocumentIngestionTiming;
+  projectId?: string; revisionId?: string; parentRevisionId?: string | null; origin?: "generated" | "uploaded"; editable?: boolean; sourceCompleteness?: "complete" | "entrypoint-only";
 };
 
 export type PdfIngestionDependencies = {
@@ -90,6 +91,7 @@ function createPdfDocument(input: PdfIngestionInput, pages: ChatDocumentPage[], 
     imageCount: metadata.imageCount,
     analyzedImageCount: 0,
     imageAnalyses: [],
+    ...(input.projectId ? { projectId: input.projectId, revisionId: input.revisionId, parentRevisionId: input.parentRevisionId, origin: input.origin, editable: input.editable, sourceCompleteness: input.sourceCompleteness } : {}),
   };
 }
 
@@ -182,7 +184,7 @@ export function createPdfIngestor(overrides: Partial<PdfIngestionDependencies> =
 
 export const ingestPdf = createPdfIngestor();
 
-export async function ingestDocx(input: { ownerId: string; conversationId: string; documentId: string; filename: string; bytes: Uint8Array; userMessageId?: string; jobId?: string; alreadyUploaded?: boolean; signal?: AbortSignal; timing?: DocumentIngestionTiming }): Promise<ChatDocumentAttachment> {
+export async function ingestDocx(input: { ownerId: string; conversationId: string; documentId: string; filename: string; bytes: Uint8Array; userMessageId?: string; jobId?: string; alreadyUploaded?: boolean; signal?: AbortSignal; timing?: DocumentIngestionTiming; projectId?: string; revisionId?: string; parentRevisionId?: string | null; origin?: "generated" | "uploaded"; editable?: boolean; sourceCompleteness?: "complete" | "entrypoint-only" }): Promise<ChatDocumentAttachment> {
   const timing = createTiming({ documentType: DOCX_CONTENT_TYPE, byteSize: input.bytes.length, alreadyUploaded: input.alreadyUploaded, timing: input.timing });
   const ownsTiming = !input.timing;
   try {
@@ -197,7 +199,7 @@ export async function ingestDocx(input: { ownerId: string; conversationId: strin
     const imageAnalyses = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
     const ocrPageCount = imageAnalyses.filter((analysis) => Boolean(analysis.visibleText?.trim())).length;
     timing.updateMetadata({ ocrPageCount });
-    const document: ChatDocumentAttachment = { id: input.documentId, name: input.filename, contentType: DOCX_CONTENT_TYPE, size: input.bytes.length, pageCount: parsed.pages.length, tokenEstimate: estimatePdfTokens(parsed.pages.map((page) => page.text).join("")), hasImages: parsed.imageCount > 0, imageCount: parsed.imageCount, analyzedImageCount: imageAnalyses.length, imageAnalyses };
+    const document: ChatDocumentAttachment = { id: input.documentId, name: input.filename, contentType: DOCX_CONTENT_TYPE, size: input.bytes.length, pageCount: parsed.pages.length, tokenEstimate: estimatePdfTokens(parsed.pages.map((page) => page.text).join("")), hasImages: parsed.imageCount > 0, imageCount: parsed.imageCount, analyzedImageCount: imageAnalyses.length, imageAnalyses, ...(input.projectId ? { projectId: input.projectId, revisionId: input.revisionId, parentRevisionId: input.parentRevisionId, origin: input.origin, editable: input.editable, sourceCompleteness: input.sourceCompleteness } : {}) };
     await registerDocument({ ownerId: input.ownerId, conversationId: input.conversationId, userMessageId: input.userMessageId ?? null, jobId: input.jobId ?? null, document, pages: parsed.pages, timing });
     markSkippedStages(timing, [DOCUMENT_INGESTION_STAGES.EXTERNAL_PARSING, DOCUMENT_INGESTION_STAGES.PAGE_RENDERING, DOCUMENT_INGESTION_STAGES.OCR]);
     if (ownsTiming) finishOwnedTiming(timing, [DOCUMENT_INGESTION_STAGES.EXTERNAL_PARSING, DOCUMENT_INGESTION_STAGES.PAGE_RENDERING, DOCUMENT_INGESTION_STAGES.OCR]);

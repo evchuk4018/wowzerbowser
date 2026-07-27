@@ -3,6 +3,8 @@ import "server-only";
 import type { ChatArtifact, ChatToolCall, ChatToolResult } from "../../../lib/chat-protocol";
 import { registerArtifact } from "../artifacts/artifact-store";
 import { isModalConfigured, ModalPythonExecutor } from "../modal/modal-python-executor";
+import { validatePythonToolInput } from "../../../lib/python-tool-policy";
+import { registerGeneratedDocumentProvenance } from "../documents/generated-document-provenance";
 import {
   PYTHON_TOOL_DEFINITION,
   PYTHON_TOOL_NAME,
@@ -41,22 +43,37 @@ export async function executePythonTool(
     };
   }
   try {
-    const result = await executor.run(parseArguments(call.arguments));
-    const artifacts: ChatArtifact[] = (result.artifacts ?? []).map((item) =>
-      registerArtifact({
+    const pythonInput = validatePythonToolInput(parseArguments(call.arguments));
+    const result = await executor.run(pythonInput);
+    const artifacts: ChatArtifact[] = [];
+    for (const item of result.artifacts ?? []) {
+      const contentType = contentTypeFor(item.path);
+      if (contentType === "application/pdf" || contentType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+        const provenance = await registerGeneratedDocumentProvenance({ ownerId, conversationId, jobId: call.id, pythonInput, executor, artifact: item });
+        artifacts.push(registerArtifact({
+          ownerId, conversationId, name: item.path.split("/").pop() || "artifact",
+          path: provenance.canonicalOutputPath, size: item.size, sha256: item.sha256, contentType,
+          projectId: provenance.projectId, revisionId: provenance.revisionId,
+          parentRevisionId: provenance.manifest.parentRevisionId, origin: "generated", editable: true,
+          sourceCompleteness: provenance.sourceCompleteness,
+        }));
+      } else artifacts.push(registerArtifact({
         ownerId,
         conversationId,
         name: item.path.split("/").pop() || "artifact",
         path: item.path,
         size: item.size,
         sha256: item.sha256,
-        contentType: contentTypeFor(item.path),
-      }),
-    );
+        contentType,
+      }));
+    }
     if (onDocumentArtifact) {
       for (const artifact of artifacts.filter((item) => item.contentType === "application/pdf" || item.contentType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document")) {
-        const source = result.artifacts?.find((item) => item.path.split("/").pop() === artifact.name);
-        if (source) await onDocumentArtifact(artifact, await executor.readArtifact(source.path));
+        const descriptor = (result.artifacts ?? []).find((item) => item.path.split("/").pop() === artifact.name);
+        if (descriptor) {
+          const provenancePath = artifact.projectId && artifact.revisionId ? `documents/${artifact.projectId}/revisions/${artifact.revisionId}/output/${artifact.name}` : descriptor.path;
+          await onDocumentArtifact(artifact, await executor.readArtifact(provenancePath));
+        }
       }
     }
     return {

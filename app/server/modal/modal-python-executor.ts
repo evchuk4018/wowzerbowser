@@ -514,6 +514,43 @@ export class ModalPythonExecutor {
     return readBoundedArtifactBytes(sandbox, relativeWorkspacePath(pathValue), this.responseDeadlineAt);
   }
 
+  /** Bounded, no-follow read used only by document provenance capture. */
+  async readWorkspaceFile(pathValue: string): Promise<Uint8Array> {
+    return this.readArtifact(pathValue);
+  }
+
+  async createWorkspaceDirectory(pathValue: string): Promise<void> {
+    const path = relativeWorkspacePath(pathValue);
+    if (!path.startsWith("documents/")) throw new Error("Only canonical document directories may be created.");
+    const sandbox = await this.ensureSandbox(this.responseDeadlineAt);
+    const result = await runProcess(sandbox, ["python3", "-c", "import os,sys\np='/workspace/'+sys.argv[1]\nos.makedirs(p,exist_ok=False)", path], { deadlineAt: this.responseDeadlineAt });
+    if (result.exitCode !== 0) throw new Error(result.stderr || "Unable to create document revision directory.");
+  }
+
+  async writeWorkspaceFile(pathValue: string, bytes: Uint8Array): Promise<void> {
+    const path = relativeWorkspacePath(pathValue);
+    if (!path.startsWith("documents/") || bytes.byteLength > PYTHON_TOOL_LIMITS.maxArtifactBytes) throw new Error("Document workspace write is not allowed.");
+    const sandbox = await this.ensureSandbox(this.responseDeadlineAt);
+    const encoded = Buffer.from(bytes).toString("base64");
+    const script = "import base64,os,sys\np='/workspace/'+sys.argv[1]\nos.makedirs(os.path.dirname(p),exist_ok=True)\nflags=os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_NOFOLLOW',0)\nfd=os.open(p,flags,0o600)\ntry: os.write(fd,base64.b64decode(sys.stdin.read()))\nfinally: os.close(fd)";
+    const result = await runProcess(sandbox, ["python3", "-c", script, path], { stdin: encoded, deadlineAt: this.responseDeadlineAt });
+    if (result.exitCode !== 0) throw new Error(result.stderr || "Unable to write document revision file.");
+  }
+
+  async copyWorkspaceFile(sourceValue: string, destinationValue: string): Promise<void> {
+    const bytes = await this.readWorkspaceFile(sourceValue);
+    await this.writeWorkspaceFile(destinationValue, bytes);
+  }
+
+  async listWorkspaceTree(rootValue: string): Promise<Array<{ path: string; size: number }>> {
+    const root = relativeWorkspacePath(rootValue);
+    const sandbox = await this.ensureSandbox(this.responseDeadlineAt);
+    const script = "import json,os,stat,sys\nroot='/workspace/'+sys.argv[1]\nout=[]\nfor base,dirs,files in os.walk(root,followlinks=False):\n dirs[:]=[d for d in dirs if d not in {'.venv','.runs','__pycache__'} and not os.path.islink(os.path.join(base,d))]\n for n in files:\n  p=os.path.join(base,n)\n  try: s=os.lstat(p)\n  except OSError: continue\n  if stat.S_ISREG(s.st_mode): out.append({'path':os.path.relpath(p,'/workspace').replace(os.sep,'/'),'size':s.st_size})\n  if len(out)>100: raise RuntimeError('too many source files')\nprint(json.dumps(out))";
+    const result = await runProcess(sandbox, ["python3", "-c", script, root], { outputLimit: 256 * 1024, deadlineAt: this.responseDeadlineAt });
+    if (result.exitCode !== 0) throw new Error(result.stderr || "Unable to list document source tree.");
+    return JSON.parse(result.stdout) as Array<{ path: string; size: number }>;
+  }
+
   async close(): Promise<void> {
     const sandbox = this.sandbox;
     this.sandbox = null;

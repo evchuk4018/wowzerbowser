@@ -93,6 +93,12 @@ export type ChatArtifact = {
   name: string;
   contentType: string;
   size: number;
+  projectId?: string;
+  revisionId?: string;
+  parentRevisionId?: string | null;
+  origin?: "generated" | "uploaded";
+  editable?: boolean;
+  sourceCompleteness?: "complete" | "entrypoint-only";
 };
 
 export type ChatImageToolResult = {
