@@ -52,19 +52,23 @@ function formatDocumentSize(size: number): string {
 }
 
 function UserDocument({ document }: { document: ChatDocumentAttachment }) {
-  const type = document.contentType === "application/pdf" ? "PDF" : "DOCX";
+  const isPdf = document.contentType === "application/pdf";
+  const type = isPdf ? "PDF" : "DOCX";
   const pages = `${document.pageCount} ${document.pageCount === 1 ? "page" : "pages"}`;
 
   return (
     <div
-      className="message-document-attachment"
+      className={`message-document-attachment message-document-attachment--${type.toLowerCase()}`}
       aria-label={`${type} document: ${document.name}, ${formatDocumentSize(document.size)}, ${pages}`}
     >
-      <span className="message-document-type" aria-hidden="true">{type}</span>
+      <span className="message-document-icon" aria-hidden="true">
+        <span className="message-document-icon-fold" />
+        <span className="message-document-type">{type}</span>
+      </span>
       <span className="message-document-details">
         <span className="message-document-name" title={document.name}>{document.name}</span>
         <span className="message-document-meta" aria-hidden="true">
-          {formatDocumentSize(document.size)} <span aria-hidden="true">·</span> {pages}
+          {type} <span aria-hidden="true">·</span> {formatDocumentSize(document.size)} <span aria-hidden="true">·</span> {pages}
         </span>
       </span>
     </div>
@@ -113,6 +117,7 @@ export function ConversationTurn({
   if (!version) return null;
   const userMessage = version.user;
   const assistantMessage = version.assistant;
+  const hasUserAttachments = Boolean(userMessage.attachments?.length || userMessage.documents?.length);
   const handleContextMenu = (event: React.MouseEvent<HTMLElement>) => {
     event.preventDefault();
     onOpenActions(turn.id);
@@ -133,7 +138,7 @@ export function ConversationTurn({
       <div className="message-user-container">
         <article className="message user">
           <div className="message-label">You</div>
-          <div className="message-bubble">
+          <div className={`message-bubble ${hasUserAttachments ? "message-bubble--with-attachments" : ""}`}>
             {userMessage.attachments?.length ? (
               <div className="message-image-attachments">
                 {userMessage.attachments.map((image) => (
@@ -148,7 +153,7 @@ export function ConversationTurn({
                 ))}
               </div>
             ) : null}
-            {userMessage.content}
+            {userMessage.content ? <div className="message-user-content">{userMessage.content}</div> : null}
           </div>
           {turn.versions.length > 1 && (
             <div className="version-controls" aria-label="Prompt versions">
