@@ -21,25 +21,23 @@ type SettingsSection =
   | "notifications"
   | "personalization"
   | "plugins"
-  | "voice"
   | "storage"
   | "safety"
   | "security"
   | "account"
   | "keyboard";
 
-const sections: Array<{ id: SettingsSection; label: string }> = [
-  { id: "general", label: "General" },
-  { id: "usage", label: "Usage" },
-  { id: "notifications", label: "Notifications" },
-  { id: "personalization", label: "Personalization" },
-  { id: "plugins", label: "Plugins" },
-  { id: "voice", label: "Voice" },
-  { id: "storage", label: "Storage" },
-  { id: "safety", label: "Safety" },
-  { id: "security", label: "Security and login" },
-  { id: "account", label: "Account" },
-  { id: "keyboard", label: "Keyboard" },
+const sections: Array<{ id: SettingsSection; label: string; description: string; icon: string }> = [
+  { id: "general", label: "General", description: "Conversation context and app preferences.", icon: "⚙" },
+  { id: "usage", label: "Usage", description: "Review token volume and estimated costs.", icon: "◫" },
+  { id: "notifications", label: "Notifications", description: "Choose how and when you get updates.", icon: "♢" },
+  { id: "personalization", label: "Personalization", description: "Shape how the experience works for you.", icon: "✦" },
+  { id: "plugins", label: "Plugins", description: "Manage connected tools and extensions.", icon: "⌘" },
+  { id: "storage", label: "Storage", description: "Review stored data and retention options.", icon: "▱" },
+  { id: "safety", label: "Safety", description: "Control safeguards and content preferences.", icon: "◇" },
+  { id: "security", label: "Security and login", description: "Protect your account and active sessions.", icon: "⌾" },
+  { id: "account", label: "Account", description: "Manage your profile and account details.", icon: "◎" },
+  { id: "keyboard", label: "Keyboard", description: "View and customize keyboard shortcuts.", icon: "⌨" },
 ];
 
 const ranges: Array<{ id: UsageRange; label: string }> = [
@@ -174,7 +172,9 @@ function UsageSettings({ loadUsage }: Pick<SettingsModalProps, "loadUsage">) {
         </p>
       )}
 
-      <div className="settings-chart" aria-label={`${ranges.find(({ id }) => id === range)?.label} usage chart`}>
+      {usage && (
+        <>
+          <div className="settings-chart" aria-label={`${ranges.find(({ id }) => id === range)?.label} usage chart`}>
         {usage?.buckets.length ? usage.buckets.map((bucket) => {
           const breakdown = modelBreakdownLabel(bucket.models);
           const indicators = [
@@ -223,9 +223,9 @@ function UsageSettings({ loadUsage }: Pick<SettingsModalProps, "loadUsage">) {
         }) : (
           <div className="settings-chart-empty">No usage in this period</div>
         )}
-      </div>
+          </div>
 
-      <div className="settings-summary" aria-label="Usage summary">
+          <div className="settings-summary" aria-label="Usage summary">
         <div><span>Provider calls</span><strong>{numberFormat.format(totals?.requestCount ?? 0)}</strong></div>
         <div><span>Input tokens</span><strong>{numberFormat.format(totals?.promptTokens ?? 0)}</strong></div>
         <div><span>Output tokens</span><strong>{numberFormat.format(totals?.completionTokens ?? 0)}</strong></div>
@@ -234,50 +234,52 @@ function UsageSettings({ loadUsage }: Pick<SettingsModalProps, "loadUsage">) {
           <strong>{formatCurrency(totals?.costUsd ?? 0)}</strong>
           {!!totals?.unpricedRequestCount && <small>Partial / {totals.unpricedRequestCount} unpriced</small>}
         </div>
-      </div>
-      {!!(totals?.estimatedRequestCount || totals?.unpricedRequestCount) && (
-        <div className="settings-usage-flags" aria-label="Usage data notes">
+          </div>
+          {!!(totals?.estimatedRequestCount || totals?.unpricedRequestCount) && (
+            <div className="settings-usage-flags" aria-label="Usage data notes">
           {!!totals.estimatedRequestCount && (
             <span><i aria-hidden="true">~</i>{numberFormat.format(totals.estimatedRequestCount)} estimated</span>
           )}
           {!!totals.unpricedRequestCount && (
             <span><i aria-hidden="true">!</i>{numberFormat.format(totals.unpricedRequestCount)} unpriced</span>
           )}
-        </div>
-      )}
+            </div>
+          )}
 
-      <div className="settings-pricing">
-        <div className="settings-pricing-heading">
-          <h4>Pricing</h4>
-          <span>per 1M tokens</span>
-        </div>
-        <div className="settings-table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Provider</th>
-                <th scope="col">Model</th>
-                <th scope="col">Input</th>
-                <th scope="col">Cached input</th>
-                <th scope="col">Output</th>
-              </tr>
-            </thead>
-            <tbody>
-              {usage?.pricing.length ? usage.pricing.map((item) => (
-                <tr key={`${item.provider}:${item.model}`}>
-                  <td>{providerLabel(item.provider)}</td>
-                  <th scope="row">{item.label}</th>
-                  <td>{formatCurrency(item.inputUsdPerMillion)}</td>
-                  <td>{item.cachedInputUsdPerMillion == null ? "N/A" : formatCurrency(item.cachedInputUsdPerMillion)}</td>
-                  <td>{formatCurrency(item.outputUsdPerMillion)}</td>
-                </tr>
-              )) : (
-                <tr><td colSpan={5} className="settings-table-empty">Pricing will appear with usage data.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+          <div className="settings-pricing">
+            <div className="settings-pricing-heading">
+              <h4>Pricing</h4>
+              <span>per 1M tokens</span>
+            </div>
+            <div className="settings-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Provider</th>
+                    <th scope="col">Model</th>
+                    <th scope="col">Input</th>
+                    <th scope="col">Cached input</th>
+                    <th scope="col">Output</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {usage.pricing.length ? usage.pricing.map((item) => (
+                    <tr key={`${item.provider}:${item.model}`}>
+                      <td>{providerLabel(item.provider)}</td>
+                      <th scope="row">{item.label}</th>
+                      <td>{formatCurrency(item.inputUsdPerMillion)}</td>
+                      <td>{item.cachedInputUsdPerMillion == null ? "N/A" : formatCurrency(item.cachedInputUsdPerMillion)}</td>
+                      <td>{formatCurrency(item.outputUsdPerMillion)}</td>
+                    </tr>
+                  )) : (
+                    <tr><td colSpan={5} className="settings-table-empty">Pricing will appear with usage data.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 }
@@ -295,28 +297,19 @@ function PlaceholderSettings({ label }: { label: string }) {
 export function SettingsModal({ settings, onClose, onSave, loadUsage }: SettingsModalProps) {
   const [draft, setDraft] = useState(settings);
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showIndex, setShowIndex] = useState(true);
   const dialogRef = useRef<HTMLElement>(null);
   const titleId = useId();
-  const navigationId = useId();
 
   useEffect(() => {
-    const initialFocusSelector = window.matchMedia("(max-width: 700px)").matches
-      ? ".settings-menu-toggle"
-      : ".settings-nav-item";
-    dialogRef.current?.querySelector<HTMLButtonElement>(initialFocusSelector)?.focus();
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") onClose();
       if (event.key !== "Tab" || !dialogRef.current) return;
-      const mobileViewport = window.matchMedia("(max-width: 700px)").matches;
       const focusable = Array.from(
         dialogRef.current.querySelectorAll<HTMLElement>(
           'button:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
         ),
-      ).filter((element) =>
-        !element.hasAttribute("hidden")
-        && !(mobileViewport && !mobileMenuOpen && element.closest(".settings-sidebar")),
-      );
+      ).filter((element) => !element.hasAttribute("hidden"));
       if (!focusable.length) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
@@ -330,16 +323,23 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage }: Settings
     };
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [onClose, mobileMenuOpen]);
+  }, [onClose]);
 
   useEffect(() => {
-    if (!mobileMenuOpen) return;
-    dialogRef.current
-      ?.querySelector<HTMLButtonElement>('.settings-nav-item[aria-current="page"]')
-      ?.focus();
-  }, [mobileMenuOpen]);
+    const selector = showIndex
+      ? `.settings-section-card[data-section="${activeSection}"]`
+      : ".settings-sections-button";
+    dialogRef.current?.querySelector<HTMLButtonElement>(selector)?.focus();
+  }, [activeSection, showIndex]);
 
   const activeLabel = sections.find(({ id }) => id === activeSection)?.label ?? "Settings";
+  const openSection = (section: SettingsSection) => {
+    setActiveSection(section);
+    setShowIndex(false);
+  };
+  const returnToIndex = () => {
+    setShowIndex(true);
+  };
 
   return (
     <div
@@ -356,61 +356,52 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage }: Settings
         aria-modal="true"
         aria-labelledby={titleId}
       >
-        <aside className={`settings-sidebar${mobileMenuOpen ? " settings-sidebar-open" : ""}`}>
-          <div className="settings-brand">
-            <div className="settings-kicker">Preferences</div>
-            <h2 id={titleId}>Settings</h2>
-          </div>
-          <nav id={navigationId} className="settings-nav" aria-label="Settings sections">
-            {sections.map((section) => (
-              <button
-                key={section.id}
-                type="button"
-                className="settings-nav-item"
-                aria-current={activeSection === section.id ? "page" : undefined}
-                onClick={() => {
-                  setActiveSection(section.id);
-                  setMobileMenuOpen(false);
-                  requestAnimationFrame(() => {
-                    if (!window.matchMedia("(max-width: 700px)").matches) return;
-                    dialogRef.current?.querySelector<HTMLButtonElement>(".settings-menu-toggle")?.focus();
-                  });
-                }}
-              >
-                {section.label}
-              </button>
-            ))}
-          </nav>
-        </aside>
-
         <div className="settings-main">
           <header className="settings-header">
-            <button
-              type="button"
-              className="settings-menu-toggle"
-              aria-controls={navigationId}
-              aria-expanded={mobileMenuOpen}
-              onClick={() => setMobileMenuOpen((open) => !open)}
-            >
-              Sections
-            </button>
-            <span className="settings-mobile-title">{activeLabel}</span>
+            {!showIndex && (
+              <button type="button" className="settings-sections-button" onClick={returnToIndex}>
+                <span aria-hidden="true">←</span> Sections
+              </button>
+            )}
+            <h2 id={titleId}>{showIndex ? "Settings" : activeLabel}</h2>
             <button type="button" className="settings-close" aria-label="Close settings" onClick={onClose}>
               &times;
             </button>
           </header>
           <div className="settings-content">
-            {activeSection === "general" && (
+            {showIndex ? (
+              <div className="settings-section-grid" aria-label="Settings sections">
+                {sections.map((section) => (
+                  <button
+                    key={section.id}
+                    type="button"
+                    className="settings-section-card"
+                    data-section={section.id}
+                    aria-current={activeSection === section.id ? "page" : undefined}
+                    onClick={() => openSection(section.id)}
+                  >
+                    <span className="settings-card-icon" aria-hidden="true">{section.icon}</span>
+                    <span className="settings-card-copy">
+                      <strong>{section.label}</strong>
+                      <span>{section.description}</span>
+                    </span>
+                    <span className="settings-card-arrow" aria-hidden="true">›</span>
+                  </button>
+                ))}
+              </div>
+            ) : activeSection === "general" ? (
               <GeneralSettings
                 draft={draft}
                 systemPrompt={settings.systemPrompt}
                 onChange={(userPresence) => setDraft((current) => ({ ...current, userPresence }))}
               />
+            ) : activeSection === "usage" ? (
+              <UsageSettings loadUsage={loadUsage} />
+            ) : (
+              <PlaceholderSettings label={activeLabel} />
             )}
-            {activeSection === "usage" && <UsageSettings loadUsage={loadUsage} />}
-            {!["general", "usage"].includes(activeSection) && <PlaceholderSettings label={activeLabel} />}
           </div>
-          {activeSection === "general" && (
+          {(showIndex || activeSection === "general") && (
             <div className="settings-actions">
               <button type="button" className="settings-cancel" onClick={onClose}>Cancel</button>
               <button

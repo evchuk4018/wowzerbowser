@@ -16,8 +16,7 @@
 
 .settings-dialog {
   position: relative;
-  display: grid;
-  grid-template-columns: 190px minmax(0, 1fr);
+  display: block;
   width: min(100%, 900px);
   height: min(720px, calc(100dvh - 48px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
   overflow: hidden;
@@ -27,70 +26,10 @@
   box-shadow: 0 24px 70px rgba(0, 0, 0, .48);
 }
 
-.settings-sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
-  min-height: 0;
-  overflow-y: auto;
-  border-right: 1px solid var(--line);
-  background: rgba(0, 0, 0, .12);
-  padding: 25px 14px;
-}
-
-.settings-brand {
-  padding: 0 10px;
-}
-
-.settings-kicker {
-  margin-bottom: 5px;
-  color: var(--quiet);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-
-.settings-brand h2 {
-  margin: 0;
-  font-size: 23px;
-  font-weight: 560;
-  letter-spacing: -.035em;
-}
-
-.settings-nav {
-  display: grid;
-  gap: 3px;
-}
-
-.settings-nav-item {
-  width: 100%;
-  min-height: 38px;
-  border: 0;
-  border-radius: 9px;
-  background: transparent;
-  padding: 0 11px;
-  color: var(--muted);
-  cursor: pointer;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 550;
-  text-align: left;
-}
-
-.settings-nav-item:hover {
-  background: var(--panel-hover);
-  color: var(--text);
-}
-
-.settings-nav-item[aria-current="page"] {
-  background: rgba(212, 255, 112, .1);
-  color: var(--accent);
-}
-
 .settings-main {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100%;
   min-width: 0;
   min-height: 0;
 }
@@ -99,15 +38,16 @@
   display: flex;
   min-height: 57px;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   border-bottom: 1px solid var(--line);
   padding: 0 18px 0 24px;
 }
 
-.settings-mobile-title {
-  display: none;
-  font-size: 14px;
-  font-weight: 650;
+.settings-header h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -.025em;
 }
 
 .settings-close {
@@ -128,8 +68,8 @@
 }
 
 .settings-close:focus-visible,
-.settings-menu-toggle:focus-visible,
-.settings-nav-item:focus-visible,
+.settings-sections-button:focus-visible,
+.settings-section-card:focus-visible,
 .settings-range button:focus-visible,
 .settings-bar-target:focus-visible,
 .settings-cancel:focus-visible,
@@ -138,14 +78,98 @@
   outline-offset: 2px;
 }
 
-.settings-menu-toggle {
-  display: none;
+.settings-sections-button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: transparent;
+  padding: 0 10px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-sections-button:hover {
+  background: var(--panel-hover);
+  color: var(--text);
 }
 
 .settings-content {
   min-height: 0;
   overflow-y: auto;
   padding: 30px 34px;
+}
+
+.settings-section-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.settings-section-card {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  min-height: 104px;
+  align-items: center;
+  gap: 13px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  padding: 16px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+}
+
+.settings-section-card:hover {
+  transform: translateY(-1px);
+  border-color: #5b5d54;
+  background: var(--panel-hover);
+}
+
+.settings-section-card[aria-current="page"] {
+  border-color: rgba(212, 255, 112, .6);
+  background: rgba(212, 255, 112, .08);
+}
+
+.settings-card-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, .035);
+  color: var(--accent);
+  font-size: 19px;
+}
+
+.settings-card-copy {
+  display: grid;
+  gap: 5px;
+}
+
+.settings-card-copy strong {
+  font-size: 14px;
+  font-weight: 620;
+}
+
+.settings-card-copy > span {
+  color: var(--quiet);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.settings-card-arrow {
+  color: var(--quiet);
+  font-size: 22px;
 }
 
 .settings-panel-heading {
@@ -605,8 +629,12 @@
   .settings-dialog {
     display: flex;
     flex-direction: column;
-    grid-template-columns: 1fr;
-    height: auto;
+    width: 100%;
+    height: min(
+      92dvh,
+      calc(100dvh - env(safe-area-inset-top)),
+      760px
+    );
     max-height: min(
       92dvh,
       calc(100dvh - env(safe-area-inset-top)),
@@ -618,92 +646,28 @@
     border-radius: 18px 18px 0 0;
   }
 
-  .settings-sidebar {
-    display: flex;
-    gap: 15px;
-    min-width: 0;
-    overflow: hidden;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-    padding: 17px 56px 10px 16px;
-  }
-
   .settings-main {
     flex: 1 1 auto;
-  }
-
-  .settings-brand {
-    padding: 0 2px;
-  }
-
-  .settings-kicker {
-    display: none;
-  }
-
-  .settings-brand h2 {
-    font-size: 20px;
-  }
-
-  .settings-nav {
-    display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    grid-template-rows: repeat(2, minmax(38px, auto));
-    grid-auto-flow: row;
-    gap: 3px;
-    min-width: 0;
-    padding-bottom: 7px;
-  }
-
-  .settings-sidebar:not(.settings-sidebar-open) .settings-nav {
-    display: none;
-  }
-
-  .settings-nav-item {
-    min-width: 0;
-    min-height: 38px;
-    padding: 4px 3px;
-    font-size: 10px;
-    line-height: 1.15;
-    overflow-wrap: anywhere;
-    text-align: center;
+    width: 100%;
+    min-height: 0;
   }
 
   .settings-header {
     min-height: 48px;
-    justify-content: flex-start;
-    gap: 10px;
-    padding: 0 56px 0 14px;
-  }
-
-  .settings-menu-toggle {
-    display: inline-flex;
-    min-height: 32px;
-    align-items: center;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: transparent;
-    padding: 0 9px;
-    color: var(--muted);
-    cursor: pointer;
-    font: inherit;
-    font-size: 11px;
-    font-weight: 650;
-  }
-
-  .settings-menu-toggle:hover {
-    background: var(--panel-hover);
-    color: var(--text);
+    padding: 0 14px;
   }
 
   .settings-close {
-    position: absolute;
-    z-index: 1;
-    top: 12px;
-    right: max(14px, env(safe-area-inset-right));
+    position: static;
   }
 
-  .settings-mobile-title {
-    display: inline;
+  .settings-section-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-section-card {
+    min-height: 88px;
+    padding: 13px;
   }
 
   .settings-content {
@@ -752,7 +716,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .settings-bar {
+  .settings-bar,
+  .settings-section-card {
     transition: none;
   }
 }

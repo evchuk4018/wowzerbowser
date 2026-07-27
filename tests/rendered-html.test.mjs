@@ -314,10 +314,11 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(client, /User presence/);
   assert.match(settings, /aria-label="Settings sections"/);
   assert.match(settings, /aria-current=/);
-  assert.match(settings, /className="settings-menu-toggle"/);
-  assert.match(settings, /aria-expanded=\{mobileMenuOpen\}/);
-  assert.match(settings, /aria-controls=\{navigationId\}/);
-  assert.match(settings, /setMobileMenuOpen\(false\)/);
+  assert.match(settings, /className="settings-section-grid"/);
+  assert.match(settings, /className="settings-section-card"/);
+  assert.match(settings, /className="settings-sections-button"/);
+  assert.match(settings, /setShowIndex\(false\)/);
+  assert.match(settings, /setShowIndex\(true\)/);
   assert.match(settings, /Promise<UsageReport>/);
   assert.match(settings, /aria-label="Usage period"/);
   assert.match(settings, /Day/);
@@ -327,7 +328,6 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(settings, /Notifications/);
   assert.match(settings, /Personalization/);
   assert.match(settings, /Plugins/);
-  assert.match(settings, /Voice/);
   assert.match(settings, /Storage/);
   assert.match(settings, /Safety/);
   assert.match(settings, /Security and login/);
@@ -344,10 +344,9 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(workspace, /loadUsage=\{loadUsage\}/);
   assert.match(settings, /per 1M tokens/);
   assert.match(styles, /backdrop-filter: blur\(8px\)/);
-  assert.match(styles, /grid-template-columns: 190px minmax\(0, 1fr\)/);
-  assert.match(styles, /grid-template-columns: repeat\(6, minmax\(0, 1fr\)\)/);
-  assert.match(styles, /grid-template-rows: repeat\(2, minmax\(38px, auto\)\)/);
-  assert.match(styles, /\.settings-sidebar:not\(\.settings-sidebar-open\) \.settings-nav/);
+  assert.match(styles, /\.settings-section-grid[\s\S]*?grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(styles, /\.settings-section-card\[aria-current="page"\]/);
+  assert.match(styles, /\.settings-main[\s\S]*?height: 100%/);
   assert.match(styles, /\.settings-bar-target:hover \.settings-bar-tooltip,[\s\S]*?\.settings-bar-target:focus-visible \.settings-bar-tooltip/);
   assert.match(styles, /@media \(max-width: 700px\)/);
   assert.match(workspace, /mobileMenuButtonRef/);
