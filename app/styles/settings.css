@@ -135,8 +135,8 @@
 }
 
 .settings-section-card[aria-current="page"] {
-  border-color: rgba(212, 255, 112, .6);
-  background: rgba(212, 255, 112, .08);
+  border-color: rgba(138, 60, 242, .65);
+  background: rgba(138, 60, 242, .1);
 }
 
 .settings-card-icon {
