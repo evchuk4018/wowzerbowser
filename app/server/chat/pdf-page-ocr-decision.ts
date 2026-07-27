@@ -54,6 +54,7 @@ export const PDF_PAGE_OCR_SIGNAL_WEIGHTS = Object.freeze({
   imageObject: 0.2,
   largeImagePageCoverage: 0.14,
   visibleContentWithoutNativeText: 0.1,
+  visualAnalysisUnavailable: 0.25,
   repeatedHeaderFooterOnly: 0.5,
 } as const);
 
@@ -68,6 +69,7 @@ export const PDF_PAGE_OCR_REASON_CODES = Object.freeze({
   imageObject: "image_object_present",
   largeImagePageCoverage: "image_dominant",
   visibleContentWithoutNativeText: "dense_visual_content_without_text",
+  visualAnalysisUnavailable: "visual_analysis_unavailable",
   repeatedHeaderFooterOnly: "repeated_header_footer_only",
   nativeTextSufficient: "native_text_accepted",
 } as const);
@@ -103,6 +105,9 @@ export type PdfPageOcrDecisionMetrics = {
   visibleContentCoverage?: number | null;
   inkCoverage?: number | null;
   visibleInkCoverage?: number | null;
+  /** False means image/ink inspection failed, so an empty page is unknown rather than blank. */
+  visualAnalysisAvailable?: boolean | null;
+  imageObjectCountAvailable?: boolean | null;
   repeatedHeaderFooterOnly?: boolean | null;
   repeatedHeaderFooterOnlyText?: boolean | null;
   isRepeatedHeaderFooterOnly?: boolean | null;
@@ -243,6 +248,8 @@ export function decidePdfPageOcr(metrics: PdfPageOcrDecisionMetrics): PdfPageOcr
   const visibleContentCoverage = optionalNormalizedRatio(
     finiteMetric(metrics, ["visibleContentCoverage", "inkCoverage", "visibleInkCoverage"]),
   );
+  const visualAnalysisAvailable = booleanMetric(metrics, ["visualAnalysisAvailable", "imageObjectCountAvailable"]);
+  const visualAnalysisUnavailable = visualAnalysisAvailable === false;
   const repeatedHeaderFooterOnly =
     booleanMetric(metrics, [
       "repeatedHeaderFooterOnly",
@@ -258,6 +265,7 @@ export function decidePdfPageOcr(metrics: PdfPageOcrDecisionMetrics): PdfPageOcr
     replacementCharacterRatio === 0 &&
     oneCharacterTokenRatio === 0 &&
     !repeatedHeaderFooterOnly &&
+    !visualAnalysisUnavailable &&
     !hasMeaningfulVisualContent(largeImagePageCoverage, visibleContentCoverage);
   const blankPage = explicitBlankPage ?? inferredBlankPage;
 
@@ -313,6 +321,11 @@ export function decidePdfPageOcr(metrics: PdfPageOcrDecisionMetrics): PdfPageOcr
     textItemCount < MIN_TEXT_ITEM_COUNT,
     PDF_PAGE_OCR_SIGNAL_WEIGHTS.sparseTextItems,
     PDF_PAGE_OCR_REASON_CODES.sparseTextItems,
+  );
+  addSignal(
+    visualAnalysisUnavailable && meaningfulCharacterCount === 0,
+    PDF_PAGE_OCR_SIGNAL_WEIGHTS.visualAnalysisUnavailable,
+    PDF_PAGE_OCR_REASON_CODES.visualAnalysisUnavailable,
   );
   addSignal(
     imageObjectCount > 0,

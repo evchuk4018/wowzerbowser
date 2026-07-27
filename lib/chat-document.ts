@@ -23,6 +23,13 @@ export type ChatDocumentAttachment = {
 
 export type ChatDocumentPage = { pageNumber: number; text: string };
 
+export type PdfPageOcrDecision = {
+  needsOcr: boolean;
+  score: number;
+  reasons: string[];
+  nativeTextConfidence: number;
+};
+
 export type ChatDocumentPageCandidate = ChatDocumentPage & {
   textItemCount: number;
   imageObjectCount: number;
@@ -45,6 +52,7 @@ export type NativePdfExtraction = {
   textItemCount: number;
   imageObjectCount: number;
   pages: ChatDocumentPageCandidate[];
+  pageOcrDecisions: PdfPageOcrDecision[];
   extractionQuality: PdfExtractionQuality;
 };
 

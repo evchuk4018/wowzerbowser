@@ -1,0 +1,45 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 6 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /XObject << /Im1 8 0 R >> >> /Contents 7 0 R >>
+endobj
+6 0 obj
+<< /Length 58 >>
+stream
+BT
+/F1 18 Tf
+72 700 Td
+(A normal native text page for the mixed fixture.) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Length 31 >>
+stream
+q
+612 0 0 792 0 0 cm
+/Im1 Do
+Q
+
+endstream
+endobj
+8 0 obj
+<< /Type /XObject /Subtype /Image /Width 612 /Height 792 /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /ASCIIHexDecode /Length 3 >>
+stream
+00>
+endstream
+endobj
+trailer
+<< /Size 9 /Root 1 0 R >>
+%%EOF

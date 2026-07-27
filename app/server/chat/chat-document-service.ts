@@ -22,8 +22,7 @@ function createTiming(input: { documentType: string; byteSize: number; alreadyUp
 }
 
 function shouldUseExternalPdfFallback(native: NativePdfExtraction): boolean {
-  if (!native.extractionQuality.hasTextLayer) return true;
-  return native.pages.some((page) => page.text.length === 0 && (page.imageObjectCount > 0 || !native.extractionQuality.imageObjectCountAvailable));
+  return native.pageOcrDecisions.some((decision) => decision.needsOcr);
 }
 
 async function createPdfDownloadUrl(input: { ownerId: string; conversationId: string; documentId: string }): Promise<string> {
@@ -51,9 +50,15 @@ export async function ingestPdf(input: { ownerId: string; conversationId: string
       });
       // Keep the native page map authoritative so a provider response cannot
       // silently drop an empty page or change the document's page count.
-      pages = native.pages.map((page, index) => ({ pageNumber: page.pageNumber, text: externalPages[index]?.text ?? "" }));
+      pages = native.pages.map((page, index) => {
+        const decision = native.pageOcrDecisions[index];
+        const externalText = externalPages[index]?.text;
+        return decision?.needsOcr
+          ? { pageNumber: page.pageNumber, text: externalText?.trim() ? externalText : page.text }
+          : { pageNumber: page.pageNumber, text: page.text };
+      });
     }
-    timing.updateMetadata({ pageCount: native.pageCount, ocrPageCount: 0 });
+    timing.updateMetadata({ pageCount: native.pageCount, ocrPageCount: native.pageOcrDecisions.filter((decision) => decision.needsOcr).length });
     const document: ChatDocumentAttachment = { id: input.pdfId, name: input.filename, contentType: "application/pdf", size: input.bytes.length, pageCount: native.pageCount, tokenEstimate: estimatePdfTokens(pages.map((p) => p.text).join("")), hasImages: native.imageObjectCount > 0, imageCount: native.imageObjectCount, analyzedImageCount: 0, imageAnalyses: [] };
     await registerDocument({ ownerId: input.ownerId, conversationId: input.conversationId, userMessageId: input.userMessageId ?? null, jobId: input.jobId ?? null, document, pages, timing });
     markSkippedStages(timing, [DOCUMENT_INGESTION_STAGES.EXTERNAL_PARSING, DOCUMENT_INGESTION_STAGES.PAGE_RENDERING, DOCUMENT_INGESTION_STAGES.OCR, DOCUMENT_INGESTION_STAGES.DOCX_IMAGE_ANALYSIS]);
