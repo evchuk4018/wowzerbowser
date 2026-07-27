@@ -18,7 +18,7 @@ const expectedPackages = [
   ["matplotlib", "matplotlib"],
   ["pillow", "PIL"],
   ["pypdf", "pypdf"],
-  ["pymupdf", "pymupdf"],
+  ["pymupdf", "fitz"],
   ["pdfplumber", "pdfplumber"],
   ["reportlab", "reportlab"],
   ["python-docx", "docx"],

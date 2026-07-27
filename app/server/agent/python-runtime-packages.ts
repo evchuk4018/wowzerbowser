@@ -14,7 +14,7 @@ export const PYTHON_RUNTIME_PACKAGES = Object.freeze([
   { packageName: "matplotlib", importName: "matplotlib" },
   { packageName: "pillow", importName: "PIL" },
   { packageName: "pypdf", importName: "pypdf" },
-  { packageName: "pymupdf", importName: "pymupdf" },
+  { packageName: "pymupdf", importName: "fitz" },
   { packageName: "pdfplumber", importName: "pdfplumber" },
   { packageName: "reportlab", importName: "reportlab" },
   { packageName: "python-docx", importName: "docx" },

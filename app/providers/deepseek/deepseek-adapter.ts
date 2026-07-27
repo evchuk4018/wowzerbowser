@@ -13,6 +13,7 @@ import {
   type DeepSeekMessage,
   type DeepSeekMessageBuildOptions,
 } from "./deepseek-messages";
+import { DeepSeekDsmlParser } from "./deepseek-dsml";
 import { assertDeepSeekConfigured, DEEPSEEK_BASE_URL, deepSeekHeaders } from "./deepseek-client-config";
 import { DeepSeekError } from "./deepseek-error";
 
@@ -84,6 +85,15 @@ function usageFromChunk(value: DeepSeekChunk["usage"]): ChatUsage | null {
 
 type MutableToolCall = { id: string; name: string; arguments: string };
 
+type StreamParseState = {
+  toolCalls: Map<number, MutableToolCall>;
+  contentDsmlParser: DeepSeekDsmlParser;
+  reasoningDsmlParser: DeepSeekDsmlParser;
+  dsmlEnabled: boolean;
+  dsmlCalls: ChatToolCall[];
+  finalized: boolean;
+};
+
 function flushToolCalls(toolCalls: Map<number, MutableToolCall>): ChatStreamEvent[] {
   const calls = [...toolCalls.entries()].sort(([left], [right]) => left - right);
   toolCalls.clear();
@@ -116,9 +126,68 @@ function appendToolCallDeltas(target: Map<number, MutableToolCall>, value: unkno
   }
 }
 
-function parseChunk(data: string, toolCalls: Map<number, MutableToolCall>): ChatStreamEvent[] {
+function canonicalizeJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => canonicalizeJson(item));
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => [key, canonicalizeJson(item)]),
+  );
+}
+
+function canonicalArguments(value: string): string {
+  try {
+    return JSON.stringify(canonicalizeJson(JSON.parse(value)));
+  } catch {
+    return value.trim();
+  }
+}
+
+function isSameToolCall(left: ChatToolCall, right: ChatToolCall): boolean {
+  return left.name === right.name && canonicalArguments(left.arguments) === canonicalArguments(right.arguments);
+}
+
+function throwMalformedDsml(): never {
+  throw new DeepSeekError("DeepSeek returned malformed or truncated DSML tool-call markup.");
+}
+
+function finishStream(state: StreamParseState): ChatStreamEvent[] {
+  if (state.finalized) return [];
+  state.finalized = true;
+
+  const events: ChatStreamEvent[] = [];
+  if (state.dsmlEnabled) {
+    const reasoningTail = state.reasoningDsmlParser.finish();
+    const contentTail = state.contentDsmlParser.finish();
+    if (reasoningTail.rejected || contentTail.rejected) throwMalformedDsml();
+    if (reasoningTail.content) events.push({ type: "reasoning", delta: reasoningTail.content });
+    if (contentTail.content) events.push({ type: "content", delta: contentTail.content });
+    state.dsmlCalls.push(...reasoningTail.toolCalls, ...contentTail.toolCalls);
+  }
+
+  const nativeEvents = flushToolCalls(state.toolCalls);
+  events.push(...nativeEvents);
+  const nativeCalls = nativeEvents
+    .filter((event): event is Extract<ChatStreamEvent, { type: "tool_call" }> => event.type === "tool_call")
+    .map((event) => event.call);
+  const matchedNative = new Set<number>();
+  for (const call of state.dsmlCalls) {
+    const duplicateIndex = nativeCalls.findIndex(
+      (nativeCall, index) => !matchedNative.has(index) && isSameToolCall(nativeCall, call),
+    );
+    if (duplicateIndex >= 0) {
+      matchedNative.add(duplicateIndex);
+      continue;
+    }
+    events.push({ type: "tool_call", call });
+  }
+  return events;
+}
+
+function parseChunk(data: string, state: StreamParseState): ChatStreamEvent[] {
   if (data === "[DONE]") {
-    return flushToolCalls(toolCalls);
+    return finishStream(state);
   }
 
   let chunk: DeepSeekChunk;
@@ -128,24 +197,47 @@ function parseChunk(data: string, toolCalls: Map<number, MutableToolCall>): Chat
     return [];
   }
   const delta = chunk.choices?.[0]?.delta;
-  appendToolCallDeltas(toolCalls, delta?.tool_calls);
+  appendToolCallDeltas(state.toolCalls, delta?.tool_calls);
   const events: ChatStreamEvent[] = [];
   if (typeof delta?.reasoning_content === "string" && delta.reasoning_content) {
-    events.push({ type: "reasoning", delta: delta.reasoning_content });
+    if (!state.dsmlEnabled) {
+      events.push({ type: "reasoning", delta: delta.reasoning_content });
+    } else {
+      const parsed = state.reasoningDsmlParser.feed(delta.reasoning_content);
+      if (parsed.rejected) throwMalformedDsml();
+      if (parsed.content) events.push({ type: "reasoning", delta: parsed.content });
+      if (parsed.toolCalls.length) state.dsmlCalls.push(...parsed.toolCalls);
+    }
   }
-  if (typeof delta?.content === "string" && delta.content) events.push({ type: "content", delta: delta.content });
+  if (typeof delta?.content === "string" && delta.content) {
+    if (!state.dsmlEnabled) {
+      events.push({ type: "content", delta: delta.content });
+    } else {
+      const parsed = state.contentDsmlParser.feed(delta.content);
+      if (parsed.rejected) throwMalformedDsml();
+      if (parsed.content) events.push({ type: "content", delta: parsed.content });
+      if (parsed.toolCalls.length) state.dsmlCalls.push(...parsed.toolCalls);
+    }
+  }
   const usage = usageFromChunk(chunk.usage);
   if (usage) events.push({ type: "done", usage });
   return events;
 }
 
-async function* parseSse(response: Response): AsyncGenerator<ChatStreamEvent> {
+async function* parseSse(response: Response, dsmlEnabled: boolean): AsyncGenerator<ChatStreamEvent> {
   if (!response.body) throw new DeepSeekError("DeepSeek returned an empty stream.");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let completed = false;
-  const toolCalls = new Map<number, MutableToolCall>();
+  const state: StreamParseState = {
+    toolCalls: new Map<number, MutableToolCall>(),
+    contentDsmlParser: new DeepSeekDsmlParser(),
+    reasoningDsmlParser: new DeepSeekDsmlParser(),
+    dsmlEnabled,
+    dsmlCalls: [],
+    finalized: false,
+  };
 
   const consume = async function* (block: string): AsyncGenerator<ChatStreamEvent> {
     const data = block
@@ -154,8 +246,8 @@ async function* parseSse(response: Response): AsyncGenerator<ChatStreamEvent> {
       .map((line) => line.slice(5).trim())
       .join("\n");
     if (!data) return;
-    for (const event of parseChunk(data, toolCalls)) {
-      if (data === "[DONE]") completed = true;
+    if (data === "[DONE]") completed = true;
+    for (const event of parseChunk(data, state)) {
       yield event;
     }
   };
@@ -170,8 +262,8 @@ async function* parseSse(response: Response): AsyncGenerator<ChatStreamEvent> {
       if (done) break;
     }
     if (buffer.trim()) yield* consume(buffer);
-    if (!completed && toolCalls.size) {
-      for (const event of flushToolCalls(toolCalls)) yield event;
+    if (!completed) {
+      for (const event of finishStream(state)) yield event;
     }
   } finally {
     if (!completed) await reader.cancel().catch(() => undefined);
@@ -206,7 +298,7 @@ export async function* streamDeepSeekChatRound(
     );
   }
   options.onResponse?.(true);
-  yield* parseSse(response);
+  yield* parseSse(response, Boolean(options.tools?.length));
 }
 
 /** Backwards-compatible single-round stream used by simple consumers. */
