@@ -1,0 +1,11 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { documentRevisionOutputPath, documentRevisionSourcePath, validateDocumentProjectManifest } from "../lib/document-project.ts";
+const sha = createHash("sha256").update("x").digest("hex");
+const projectId = "project_123", revisionId = "revision_123";
+const manifest = () => ({ schemaVersion: 1, projectId, revisionId, parentRevisionId: null, origin: "generated", createdAt: new Date(0).toISOString(), createdByJobId: null, entrypoint: documentRevisionSourcePath(projectId, revisionId, "main.py"), outputPath: documentRevisionOutputPath(projectId, revisionId, "report.pdf"), outputFilename: "report.pdf", outputContentType: "application/pdf", sourceFiles: [{ path: documentRevisionSourcePath(projectId, revisionId, "main.py"), size: 1, sha256: sha, contentType: "text/x-python" }], outputSha256: sha, sourceCompleteness: "complete" });
+test("builds and validates canonical revision paths", () => assert.equal(validateDocumentProjectManifest(manifest()).outputFilename, "report.pdf"));
+test("rejects traversal, absolute and reserved child paths", () => { for (const path of ["../x", "/x", ".runs/x"]) assert.throws(() => documentRevisionSourcePath(projectId, revisionId, path)); });
+test("rejects escaped outputs, missing entrypoint, and duplicate source paths", () => { const escaped = manifest(); escaped.outputPath = "other/report.pdf"; assert.throws(() => validateDocumentProjectManifest(escaped)); const missing = manifest(); missing.sourceFiles = []; assert.throws(() => validateDocumentProjectManifest(missing)); const duplicate = manifest(); duplicate.sourceFiles.push(duplicate.sourceFiles[0]); assert.throws(() => validateDocumentProjectManifest(duplicate)); });
+test("enforces source count and per-file size limits", () => { const count = manifest(); count.sourceFiles = Array.from({length:101}, (_, i) => ({...count.sourceFiles[0], path: documentRevisionSourcePath(projectId, revisionId, `f${i}.py`)})); count.entrypoint = count.sourceFiles[0].path; assert.throws(() => validateDocumentProjectManifest(count)); const size = manifest(); size.sourceFiles[0].size = 25 * 1024 * 1024 + 1; assert.throws(() => validateDocumentProjectManifest(size)); });

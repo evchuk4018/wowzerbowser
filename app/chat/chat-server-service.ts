@@ -177,8 +177,8 @@ export async function generateChatResponse(
               if (!executor) executor = new ModalPythonExecutor(ownerId, conversationId, responseDeadlineAt);
               result = await executePythonTool(call, executor, ownerId, conversationId, async (artifact, bytes) => {
                 const pdfId = artifact.id;
-                if (artifact.contentType === DOCX_CONTENT_TYPE) await ingestDocx({ ownerId, conversationId, documentId: pdfId, filename: artifact.name, bytes, jobId: responseId, signal: roundSignal });
-                else await ingestPdf({ ownerId, conversationId, pdfId, filename: artifact.name, bytes, jobId: responseId });
+                if (artifact.contentType === DOCX_CONTENT_TYPE) await ingestDocx({ ownerId, conversationId, documentId: pdfId, filename: artifact.name, bytes, jobId: responseId, signal: roundSignal, projectId: artifact.projectId, revisionId: artifact.revisionId, parentRevisionId: artifact.parentRevisionId, origin: artifact.origin, editable: artifact.editable, sourceCompleteness: artifact.sourceCompleteness });
+                else await ingestPdf({ ownerId, conversationId, pdfId, filename: artifact.name, bytes, jobId: responseId, projectId: artifact.projectId, revisionId: artifact.revisionId, parentRevisionId: artifact.parentRevisionId, origin: artifact.origin, editable: artifact.editable, sourceCompleteness: artifact.sourceCompleteness });
                 allowedPdfIds.add(pdfId);
               });
             } else if (call.name === INSPECT_IMAGE_TOOL_NAME && imageToolAdvertised) {

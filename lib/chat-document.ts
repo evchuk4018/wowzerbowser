@@ -19,6 +19,12 @@ export type ChatDocumentAttachment = {
   imageCount: number;
   analyzedImageCount: number;
   imageAnalyses: ChatDocumentImageAnalysis[];
+  projectId?: string;
+  revisionId?: string;
+  parentRevisionId?: string | null;
+  origin?: "generated" | "uploaded";
+  editable?: boolean;
+  sourceCompleteness?: "complete" | "entrypoint-only";
 };
 
 export const PDF_PAGE_EXTRACTION_METHODS = ["native", "ocr", "blank"] as const;
