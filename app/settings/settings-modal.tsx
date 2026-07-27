@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import type { ReactNode } from "react";
 import type {
   UsageModelSummary,
   UsageRange,
@@ -29,50 +28,19 @@ type SettingsSection =
   | "account"
   | "keyboard";
 
-type SettingsSectionIcon =
-  | "sliders" | "chart" | "bell" | "sparkles" | "puzzle" | "mic"
-  | "database" | "shield" | "lock" | "user" | "keyboard";
-
-const sections: Array<{
-  id: SettingsSection;
-  label: string;
-  description: string;
-  icon: SettingsSectionIcon;
-}> = [
-  { id: "general", label: "General", description: "Core preferences and context", icon: "sliders" },
-  { id: "usage", label: "Usage", description: "Tokens, costs, and activity", icon: "chart" },
-  { id: "notifications", label: "Notifications", description: "Alerts and updates", icon: "bell" },
-  { id: "personalization", label: "Personalization", description: "Tailor your experience", icon: "sparkles" },
-  { id: "plugins", label: "Plugins", description: "Connected tools and services", icon: "puzzle" },
-  { id: "voice", label: "Voice", description: "Speech and audio controls", icon: "mic" },
-  { id: "storage", label: "Storage", description: "Data and saved content", icon: "database" },
-  { id: "safety", label: "Safety", description: "Content and privacy controls", icon: "shield" },
-  { id: "security", label: "Security and login", description: "Access and authentication", icon: "lock" },
-  { id: "account", label: "Account", description: "Profile and account details", icon: "user" },
-  { id: "keyboard", label: "Keyboard", description: "Shortcuts and navigation", icon: "keyboard" },
+const sections: Array<{ id: SettingsSection; label: string }> = [
+  { id: "general", label: "General" },
+  { id: "usage", label: "Usage" },
+  { id: "notifications", label: "Notifications" },
+  { id: "personalization", label: "Personalization" },
+  { id: "plugins", label: "Plugins" },
+  { id: "voice", label: "Voice" },
+  { id: "storage", label: "Storage" },
+  { id: "safety", label: "Safety" },
+  { id: "security", label: "Security and login" },
+  { id: "account", label: "Account" },
+  { id: "keyboard", label: "Keyboard" },
 ];
-
-function SectionIcon({ icon }: { icon: SettingsSectionIcon }) {
-  const paths: Record<SettingsSectionIcon, ReactNode> = {
-    sliders: <><path d="M4 6h10M18 6h2M14 4v4M4 18h2M10 18h10M8 16v4M4 12h4M12 12h8M10 10v4" /></>,
-    chart: <><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></>,
-    bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></>,
-    sparkles: <><path d="m12 3-1.2 3.8L7 8l3.8 1.2L12 13l1.2-3.8L17 8l-3.8-1.2L12 3ZM5 14l-.8 2.2L2 17l2.2.8L5 20l.8-2.2L8 17l-2.2-.8L5 14ZM19 13l-.6 1.4L17 15l1.4.6L19 17l.6-1.4L21 15l-1.4-.6L19 13Z" /></>,
-    puzzle: <path d="M19 13h-2.2a2.8 2.8 0 1 0-5.6 0H9V9H5V5h4V2.8a2.8 2.8 0 1 1 5.6 0V5H19v4h2.2a2.8 2.8 0 1 1 0 5.6H19V19h-4v2.2a2.8 2.8 0 1 1-5.6 0V19H5v-4h4" />,
-    mic: <><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v4M8 22h8" /></>,
-    database: <><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" /></>,
-    shield: <path d="M12 22s8-3.5 8-10V5l-8-3-8 3v7c0 6.5 8 10 8 10Z" />,
-    lock: <><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3" /></>,
-    user: <><circle cx="12" cy="8" r="4" /><path d="M4 22a8 8 0 0 1 16 0" /></>,
-    keyboard: <><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M10 13h.01M14 13h4M7 16h10" /></>,
-  };
-
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      {paths[icon]}
-    </svg>
-  );
-}
 
 const ranges: Array<{ id: UsageRange; label: string }> = [
   { id: "day", label: "Day" },
@@ -409,14 +377,7 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage }: Settings
                   });
                 }}
               >
-                <span className="settings-nav-icon"><SectionIcon icon={section.icon} /></span>
-                <span className="settings-nav-copy">
-                  <span className="settings-nav-label">{section.label}</span>
-                  <span className="settings-nav-description">{section.description}</span>
-                </span>
-                <svg className="settings-nav-chevron" viewBox="0 0 20 20" aria-hidden="true">
-                  <path d="m7.5 4.5 5 5-5 5" />
-                </svg>
+                {section.label}
               </button>
             ))}
           </nav>
