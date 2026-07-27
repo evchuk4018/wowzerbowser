@@ -75,35 +75,33 @@
   margin-top: 13px;
 }
 
-.version-controls button {
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  padding: 3px 6px;
-  color: var(--quiet);
-  cursor: pointer;
-  font-size: 11px;
-}
-
-.version-controls button:hover:not(:disabled) {
-  background: #34352f;
-  color: var(--text);
-}
-
 .version-controls {
   display: flex;
   align-items: center;
-  gap: 2px;
-  margin-top: 4px;
+  gap: 6px;
   color: var(--quiet);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .version-controls button {
-  min-width: 22px;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
   padding: 0;
+  color: var(--quiet);
+  cursor: pointer;
   font-size: 17px;
-  line-height: 18px;
+  line-height: 26px;
+}
+
+.version-controls button:hover:not(:disabled),
+.version-controls button:focus-visible {
+  border-color: #494a45;
+  outline: 0;
+  background: #34352f;
+  color: var(--text);
 }
 
 .version-controls button:disabled {
@@ -113,6 +111,73 @@
 
 .message.assistant .message-bubble {
   color: #dfdfd8;
+}
+
+.response-controls {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.response-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.response-actions button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  padding: 4px 8px;
+  color: var(--quiet);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.response-actions button:hover:not(:disabled),
+.response-actions button:focus-visible {
+  border-color: #494a45;
+  outline: 0;
+  background: #34352f;
+  color: var(--text);
+}
+
+.response-actions button.is-copied {
+  color: #a9d8b1;
+}
+
+.response-actions button:disabled {
+  cursor: default;
+  opacity: .42;
+}
+
+.response-action-icon {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.6;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .message-error {
@@ -228,6 +293,12 @@
 }
 
 @media (max-width: 600px) {
+  .response-controls {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
   .message.user .message-bubble--with-attachments {
     width: min(100%, 460px);
   }

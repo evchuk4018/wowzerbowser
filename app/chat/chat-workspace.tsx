@@ -261,6 +261,18 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
       window.setTimeout(() => setCopiedMessageId(null), 1400);
     } catch {}
   };
+  const retryTurn = (turn: ConversationTurn) => {
+    const version = turn.versions[turn.activeVersion];
+    if (!version || activeStreaming) return Promise.resolve();
+    return generation.sendMessage(
+      version.user.content,
+      turn.id,
+      [],
+      version.user.attachments ?? [],
+      [],
+      version.user.documents ?? [],
+    );
+  };
   const sharePrompt = async (message: Message) => {
     try {
       if (navigator.share) await navigator.share({ text: message.content });
@@ -446,6 +458,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
           onCancelLongPress={cancelLongPress}
           onSelectVersion={selectVersion}
           onCopy={copyPrompt}
+          onRetry={retryTurn}
           onEdit={editTurn}
           onShare={sharePrompt}
         />

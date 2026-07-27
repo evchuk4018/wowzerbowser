@@ -91,6 +91,7 @@ export type ConversationTurnProps = {
   onCancelLongPress: () => void;
   onSelectVersion: (turnId: string, direction: -1 | 1) => void;
   onCopy: (message: Message) => void | Promise<void>;
+  onRetry: (turn: ConversationTurnType) => void | Promise<void>;
   onEdit: (turn: ConversationTurnType) => void;
   onShare: (message: Message) => void | Promise<void>;
 };
@@ -111,6 +112,7 @@ export function ConversationTurn({
   onCancelLongPress,
   onSelectVersion,
   onCopy,
+  onRetry,
   onEdit,
   onShare,
 }: ConversationTurnProps) {
@@ -156,27 +158,6 @@ export function ConversationTurn({
             ) : null}
             {userMessage.content ? <div className="message-user-content">{userMessage.content}</div> : null}
           </div>
-          {turn.versions.length > 1 && (
-            <div className="version-controls" aria-label="Prompt versions">
-              <button
-                type="button"
-                aria-label="Previous prompt version"
-                disabled={turn.activeVersion === 0 || isStreamingConversation}
-                onClick={() => onSelectVersion(turn.id, -1)}
-              >
-                ‹
-              </button>
-              <span>{turn.activeVersion + 1} / {turn.versions.length}</span>
-              <button
-                type="button"
-                aria-label="Next prompt version"
-                disabled={turn.activeVersion === turn.versions.length - 1 || isStreamingConversation}
-                onClick={() => onSelectVersion(turn.id, 1)}
-              >
-                ›
-              </button>
-            </div>
-          )}
         </article>
         {actionsOpen && (
           <MessageActions
@@ -226,6 +207,59 @@ export function ConversationTurn({
         )}
         {assistantMessage.error && <div className="message-error">{assistantMessage.error}</div>}
         {assistantMessage.status === "cancelled" && <div className="message-note">Response stopped.</div>}
+        <div className="response-controls">
+          <div className="response-actions" role="group" aria-label="Response actions">
+            <button
+              type="button"
+              className={copiedMessageId === assistantMessage.id ? "is-copied" : undefined}
+              disabled={isStreamingConversation || !assistantMessage.content}
+              aria-label={copiedMessageId === assistantMessage.id ? "Response copied" : "Copy response"}
+              onClick={() => void onCopy(assistantMessage)}
+            >
+              <svg className="response-action-icon" viewBox="0 0 20 20" aria-hidden="true">
+                <rect x="6.5" y="6.5" width="9" height="9" rx="1.5" />
+                <path d="M4.5 13.5h-1a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v1" />
+              </svg>
+              <span>{copiedMessageId === assistantMessage.id ? "Copied" : "Copy"}</span>
+            </button>
+            <button
+              type="button"
+              disabled={isStreamingConversation}
+              aria-label="Retry this response"
+              onClick={() => void onRetry(turn)}
+            >
+              <svg className="response-action-icon" viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M15.5 6.5V3m0 3.5H12" />
+                <path d="M15.1 6.4A6.5 6.5 0 1 0 16 13" />
+              </svg>
+              <span>Retry</span>
+            </button>
+            <span className="visually-hidden" aria-live="polite">
+              {copiedMessageId === assistantMessage.id ? "Response copied to clipboard." : ""}
+            </span>
+          </div>
+          {turn.versions.length > 1 && (
+            <div className="version-controls" role="group" aria-label="Response versions">
+              <button
+                type="button"
+                aria-label="Show previous response version"
+                disabled={turn.activeVersion === 0 || isStreamingConversation}
+                onClick={() => onSelectVersion(turn.id, -1)}
+              >
+                <span aria-hidden="true">‹</span>
+              </button>
+              <span aria-live="polite">Response {turn.activeVersion + 1} of {turn.versions.length}</span>
+              <button
+                type="button"
+                aria-label="Show next response version"
+                disabled={turn.activeVersion === turn.versions.length - 1 || isStreamingConversation}
+                onClick={() => onSelectVersion(turn.id, 1)}
+              >
+                <span aria-hidden="true">›</span>
+              </button>
+            </div>
+          )}
+        </div>
       </article>
     </article>
   );

@@ -19,6 +19,7 @@ export type ChatTranscriptProps = {
   onCancelLongPress: () => void;
   onSelectVersion: (turnId: string, direction: -1 | 1) => void;
   onCopy: (message: Message) => void | Promise<void>;
+  onRetry: (turn: ConversationTurnType) => void | Promise<void>;
   onEdit: (turn: ConversationTurnType) => void;
   onShare: (message: Message) => void | Promise<void>;
 };
@@ -39,6 +40,7 @@ export function ChatTranscript({
   onCancelLongPress,
   onSelectVersion,
   onCopy,
+  onRetry,
   onEdit,
   onShare,
 }: ChatTranscriptProps) {
@@ -71,6 +73,7 @@ export function ChatTranscript({
           onCancelLongPress={onCancelLongPress}
           onSelectVersion={onSelectVersion}
           onCopy={onCopy}
+          onRetry={onRetry}
           onEdit={onEdit}
           onShare={onShare}
         />
