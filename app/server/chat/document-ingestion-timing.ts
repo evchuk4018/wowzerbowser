@@ -42,6 +42,7 @@ export interface DocumentIngestionTimingMetadata {
   pageCount?: number | null;
   ocrPageCount?: number | null;
   cacheStatus?: DocumentIngestionCacheStatus | boolean | string | null;
+  fallbackUsed?: boolean;
 }
 
 export interface DocumentIngestionTimingOptions {
@@ -67,6 +68,7 @@ export interface DocumentIngestionTimingSnapshot {
   durationMs: number;
   failedStage: DocumentIngestionStage | null;
   failedStages: readonly DocumentIngestionStage[];
+  fallbackUsed?: true;
   stageDurations: Readonly<Partial<Record<DocumentIngestionStage, number>>>;
   stages: readonly DocumentIngestionStageTiming[];
   completed: boolean;
@@ -82,6 +84,7 @@ export interface DocumentIngestionTimingLogEntry {
   durationMs: number;
   failedStage: DocumentIngestionStage | null;
   failedStages: readonly DocumentIngestionStage[];
+  fallbackUsed?: true;
   stages: Readonly<Partial<Record<DocumentIngestionStage, number>>>;
 }
 
@@ -182,6 +185,7 @@ export class DocumentIngestionTiming {
     pageCount: number | null;
     ocrPageCount: number | null;
     cacheStatus: DocumentIngestionCacheStatus;
+    fallbackUsed?: true;
   };
   private totalEnded = false;
 
@@ -196,6 +200,7 @@ export class DocumentIngestionTiming {
       pageCount: safeNonNegativeInteger(metadata.pageCount),
       ocrPageCount: safeNonNegativeInteger(metadata.ocrPageCount),
       cacheStatus: safeCacheStatus(metadata.cacheStatus),
+      ...(metadata.fallbackUsed === true ? { fallbackUsed: true as const } : {}),
     };
 
   }
@@ -206,6 +211,10 @@ export class DocumentIngestionTiming {
     if (metadata.pageCount !== undefined) this.metadata.pageCount = safeNonNegativeInteger(metadata.pageCount);
     if (metadata.ocrPageCount !== undefined) this.metadata.ocrPageCount = safeNonNegativeInteger(metadata.ocrPageCount);
     if (metadata.cacheStatus !== undefined) this.metadata.cacheStatus = safeCacheStatus(metadata.cacheStatus);
+    if (metadata.fallbackUsed !== undefined) {
+      if (metadata.fallbackUsed) this.metadata.fallbackUsed = true;
+      else delete this.metadata.fallbackUsed;
+    }
     return this;
   }
 
@@ -307,11 +316,15 @@ export class DocumentIngestionTiming {
   }
 
   get failedStage(): DocumentIngestionStage | null {
-    return this.failedStages[0] ?? null;
+    return this.failedStages.at(-1) ?? null;
   }
 
   get failedStages(): readonly DocumentIngestionStage[] {
     return DOCUMENT_INGESTION_STAGE_ORDER.filter((stage) => this.failed.has(stage));
+  }
+
+  get fallbackUsed(): boolean {
+    return this.metadata.fallbackUsed === true;
   }
 
   toLogEntry(): DocumentIngestionTimingLogEntry {
@@ -326,6 +339,7 @@ export class DocumentIngestionTiming {
       durationMs: snapshot.durationMs,
       failedStage: snapshot.failedStage,
       failedStages: snapshot.failedStages,
+      ...(snapshot.fallbackUsed ? { fallbackUsed: true } : {}),
       stages: snapshot.stageDurations,
     };
   }
@@ -363,7 +377,7 @@ export function createSafeDocumentIngestionLogEntry(
   const cacheStatus = safeCacheStatus(timing.cacheStatus);
   const stages = Object.fromEntries(stageEntries(timing)) as Partial<Record<DocumentIngestionStage, number>>;
   const failedStages = timing.failedStages.filter((stage) => STAGE_SET.has(stage));
-  const failedStage = failedStages[0] ?? null;
+  const failedStage = failedStages.at(-1) ?? null;
   return {
     event: "document-ingestion-timing",
     documentType,
@@ -374,6 +388,7 @@ export function createSafeDocumentIngestionLogEntry(
     durationMs: safeDuration(timing.durationMs),
     failedStage,
     failedStages,
+    ...(timing.fallbackUsed === true ? { fallbackUsed: true } : {}),
     stages,
   };
 }

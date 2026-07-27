@@ -1,6 +1,7 @@
 import "server-only";
-import { DOCX_CONTENT_TYPE, estimatePdfTokens, MAX_PDF_BYTES, type ChatDocumentAttachment, type ChatDocumentPage } from "../../../lib/chat-document";
-import { documentStoragePath, registerDocument, uploadDocumentBytes } from "./chat-document-store";
+import { ChatDocumentError, DOCX_CONTENT_TYPE, estimatePdfTokens, MAX_PDF_BYTES, type ChatDocumentAttachment, type ChatDocumentPage, type NativePdfExtraction } from "../../../lib/chat-document";
+import { assertSignedDocumentDownloadUrl, createSignedDocumentDownloadUrl, documentStoragePath, registerDocument, uploadDocumentBytes } from "./chat-document-store";
+import { parsePdfWithOpenRouter } from "../../providers/openrouter/openrouter-document-adapter";
 import { parseDocx } from "./docx-parser";
 import { analyzeDocumentImage } from "./chat-image-service";
 import { DOCUMENT_INGESTION_STAGES, DocumentIngestionTiming, type DocumentIngestionStage } from "./document-ingestion-timing";
@@ -43,37 +44,143 @@ async function processSelectedPdfPages(input: {
   return input.pages.slice().sort((left, right) => left.pageNumber - right.pageNumber).map((page) => results.get(page.pageNumber) ?? { pageNumber: page.pageNumber, text: page.nativeText, extractionMethod: page.nativeText.trim() ? "native" : "blank" });
 }
 
-export async function ingestPdf(input: { ownerId: string; conversationId: string; pdfId: string; filename: string; bytes: Uint8Array; downloadUrl?: string; userMessageId?: string; jobId?: string; alreadyUploaded?: boolean; signal?: AbortSignal; timing?: DocumentIngestionTiming }): Promise<ChatDocumentAttachment> {
-  const timing = createTiming({ documentType: "application/pdf", byteSize: input.bytes.length, alreadyUploaded: input.alreadyUploaded, timing: input.timing });
-  const ownsTiming = !input.timing;
-  try {
-    const native = await timing.measure(DOCUMENT_INGESTION_STAGES.NATIVE_PARSING, () => parsePdfNatively(input.bytes, { signal: input.signal }));
-    if (!input.alreadyUploaded) await timing.measure(DOCUMENT_INGESTION_STAGES.SUPABASE_UPLOAD, () => uploadDocumentBytes(documentStoragePath(input.ownerId, input.conversationId, input.pdfId, "application/pdf"), input.bytes, "application/pdf"));
-    const ocrInputs = native.pages.map((page, index) => ({
-      pageNumber: page.pageNumber,
-      nativeText: page.text,
-      needsOcr: native.pageOcrDecisions[index]?.needsOcr ?? false,
-    }));
-    const pagesNeedingOcr = ocrInputs.filter((page) => page.needsOcr).map((page) => page.pageNumber);
-    let pages: ChatDocumentPage[];
-    if (pagesNeedingOcr.length > 0) {
-      pages = await processSelectedPdfPages({ bytes: input.bytes, pages: ocrInputs, signal: input.signal, timing });
-      if (pages.some((page) => page.failure)) timing.markFailed(DOCUMENT_INGESTION_STAGES.OCR);
-    } else {
-      pages = ocrInputs.map((page) => ({ pageNumber: page.pageNumber, text: page.nativeText, extractionMethod: page.nativeText.trim() ? "native" : "blank" }));
-    }
-    timing.updateMetadata({ pageCount: native.pageCount, ocrPageCount: native.pageOcrDecisions.filter((decision) => decision.needsOcr).length });
-    const document: ChatDocumentAttachment = { id: input.pdfId, name: input.filename, contentType: "application/pdf", size: input.bytes.length, pageCount: native.pageCount, tokenEstimate: estimatePdfTokens(pages.map((p) => p.text).join("")), hasImages: native.imageObjectCount > 0, imageCount: native.imageObjectCount, analyzedImageCount: 0, imageAnalyses: [] };
-    await registerDocument({ ownerId: input.ownerId, conversationId: input.conversationId, userMessageId: input.userMessageId ?? null, jobId: input.jobId ?? null, document, pages, timing });
-    markSkippedStages(timing, [DOCUMENT_INGESTION_STAGES.EXTERNAL_PARSING, DOCUMENT_INGESTION_STAGES.PAGE_RENDERING, DOCUMENT_INGESTION_STAGES.OCR, DOCUMENT_INGESTION_STAGES.DOCX_IMAGE_ANALYSIS]);
-    if (ownsTiming) finishOwnedTiming(timing, [DOCUMENT_INGESTION_STAGES.EXTERNAL_PARSING, DOCUMENT_INGESTION_STAGES.PAGE_RENDERING, DOCUMENT_INGESTION_STAGES.OCR, DOCUMENT_INGESTION_STAGES.DOCX_IMAGE_ANALYSIS]);
-    return document;
-  } catch (error) {
-    markSkippedStages(timing, [DOCUMENT_INGESTION_STAGES.EXTERNAL_PARSING, DOCUMENT_INGESTION_STAGES.PAGE_RENDERING, DOCUMENT_INGESTION_STAGES.OCR, DOCUMENT_INGESTION_STAGES.DOCX_IMAGE_ANALYSIS]);
-    if (ownsTiming) finishOwnedTiming(timing, [DOCUMENT_INGESTION_STAGES.EXTERNAL_PARSING, DOCUMENT_INGESTION_STAGES.PAGE_RENDERING, DOCUMENT_INGESTION_STAGES.OCR, DOCUMENT_INGESTION_STAGES.DOCX_IMAGE_ANALYSIS]);
-    throw error;
-  }
+export type PdfIngestionInput = {
+  ownerId: string;
+  conversationId: string;
+  pdfId: string;
+  filename: string;
+  bytes: Uint8Array;
+  downloadUrl?: string;
+  userMessageId?: string;
+  jobId?: string;
+  alreadyUploaded?: boolean;
+  signal?: AbortSignal;
+  timing?: DocumentIngestionTiming;
+};
+
+export type PdfIngestionDependencies = {
+  parsePdfNatively: typeof parsePdfNatively;
+  parsePdfWithOpenRouter: typeof parsePdfWithOpenRouter;
+  assertSignedDocumentDownloadUrl: typeof assertSignedDocumentDownloadUrl;
+  createSignedDocumentDownloadUrl: typeof createSignedDocumentDownloadUrl;
+  uploadDocumentBytes: typeof uploadDocumentBytes;
+  registerDocument: typeof registerDocument;
+};
+
+const PDF_SKIPPED_STAGES = [
+  DOCUMENT_INGESTION_STAGES.EXTERNAL_PARSING,
+  DOCUMENT_INGESTION_STAGES.PAGE_RENDERING,
+  DOCUMENT_INGESTION_STAGES.OCR,
+  DOCUMENT_INGESTION_STAGES.DOCX_IMAGE_ANALYSIS,
+] as const satisfies readonly DocumentIngestionStage[];
+
+function recoverableNativePdfFailure(error: unknown): boolean {
+  return error instanceof ChatDocumentError && error.code === "pdf_parser_failed";
 }
+
+function createPdfDocument(input: PdfIngestionInput, pages: ChatDocumentPage[], metadata: { pageCount: number; imageCount: number }): ChatDocumentAttachment {
+  return {
+    id: input.pdfId,
+    name: input.filename,
+    contentType: "application/pdf",
+    size: input.bytes.length,
+    pageCount: metadata.pageCount,
+    tokenEstimate: estimatePdfTokens(pages.map((page) => page.text).join("")),
+    hasImages: metadata.imageCount > 0,
+    imageCount: metadata.imageCount,
+    analyzedImageCount: 0,
+    imageAnalyses: [],
+  };
+}
+
+async function uploadPdfIfNeeded(input: PdfIngestionInput, deps: PdfIngestionDependencies, timing: DocumentIngestionTiming): Promise<void> {
+  if (input.alreadyUploaded) return;
+  await timing.measure(DOCUMENT_INGESTION_STAGES.SUPABASE_UPLOAD, () => deps.uploadDocumentBytes(
+    documentStoragePath(input.ownerId, input.conversationId, input.pdfId, "application/pdf"),
+    input.bytes,
+    "application/pdf",
+  ));
+}
+
+async function parsePdfExternally(input: PdfIngestionInput, deps: PdfIngestionDependencies, timing: DocumentIngestionTiming): Promise<ChatDocumentPage[]> {
+  const pages = await timing.measure(DOCUMENT_INGESTION_STAGES.EXTERNAL_PARSING, async () => {
+    const signedUrl = input.downloadUrl
+      ? deps.assertSignedDocumentDownloadUrl({ ownerId: input.ownerId, conversationId: input.conversationId, documentId: input.pdfId, contentType: "application/pdf", signedUrl: input.downloadUrl })
+      : await deps.createSignedDocumentDownloadUrl({ ownerId: input.ownerId, conversationId: input.conversationId, documentId: input.pdfId, contentType: "application/pdf" });
+    return deps.parsePdfWithOpenRouter(signedUrl, input.filename, input.signal);
+  });
+  return pages.map((page, index) => ({
+    pageNumber: index + 1,
+    text: page.text,
+    extractionMethod: page.text.trim() ? "native" : "blank",
+  }));
+}
+
+async function registerPdf(input: PdfIngestionInput, deps: PdfIngestionDependencies, timing: DocumentIngestionTiming, document: ChatDocumentAttachment, pages: ChatDocumentPage[]): Promise<ChatDocumentAttachment> {
+  await deps.registerDocument({ ownerId: input.ownerId, conversationId: input.conversationId, userMessageId: input.userMessageId ?? null, jobId: input.jobId ?? null, document, pages, timing });
+  return document;
+}
+
+export function createPdfIngestor(overrides: Partial<PdfIngestionDependencies> = {}) {
+  const deps: PdfIngestionDependencies = {
+    parsePdfNatively,
+    parsePdfWithOpenRouter,
+    assertSignedDocumentDownloadUrl,
+    createSignedDocumentDownloadUrl,
+    uploadDocumentBytes,
+    registerDocument,
+    ...overrides,
+  };
+
+  return async function ingestPdf(input: PdfIngestionInput): Promise<ChatDocumentAttachment> {
+    const timing = createTiming({ documentType: "application/pdf", byteSize: input.bytes.length, alreadyUploaded: input.alreadyUploaded, timing: input.timing });
+    const ownsTiming = !input.timing;
+    try {
+      let native: NativePdfExtraction;
+      try {
+        native = await timing.measure(DOCUMENT_INGESTION_STAGES.NATIVE_PARSING, () => deps.parsePdfNatively(input.bytes, { signal: input.signal }));
+      } catch (error) {
+        if (!recoverableNativePdfFailure(error)) throw error;
+        timing.updateMetadata({ fallbackUsed: true });
+        await uploadPdfIfNeeded(input, deps, timing);
+        const pages = await parsePdfExternally(input, deps, timing);
+        timing.updateMetadata({ pageCount: pages.length, ocrPageCount: 0 });
+        const document = createPdfDocument(input, pages, { pageCount: pages.length, imageCount: 0 });
+        await registerPdf(input, deps, timing, document, pages);
+        markSkippedStages(timing, [DOCUMENT_INGESTION_STAGES.PAGE_RENDERING, DOCUMENT_INGESTION_STAGES.OCR, DOCUMENT_INGESTION_STAGES.DOCX_IMAGE_ANALYSIS]);
+        if (ownsTiming) finishOwnedTiming(timing, [DOCUMENT_INGESTION_STAGES.PAGE_RENDERING, DOCUMENT_INGESTION_STAGES.OCR, DOCUMENT_INGESTION_STAGES.DOCX_IMAGE_ANALYSIS]);
+        return document;
+      }
+
+      await uploadPdfIfNeeded(input, deps, timing);
+      const ocrInputs = native.pages.map((page, index) => ({
+        pageNumber: page.pageNumber,
+        nativeText: page.text,
+        needsOcr: native.pageOcrDecisions[index]?.needsOcr ?? false,
+      }));
+      const pagesNeedingOcr = ocrInputs.filter((page) => page.needsOcr).map((page) => page.pageNumber);
+      let pages: ChatDocumentPage[];
+      if (pagesNeedingOcr.length > 0) {
+        pages = await processSelectedPdfPages({ bytes: input.bytes, pages: ocrInputs, signal: input.signal, timing });
+        if (pages.some((page) => page.failure)) timing.markFailed(DOCUMENT_INGESTION_STAGES.OCR);
+      } else {
+        pages = ocrInputs.map((page) => ({ pageNumber: page.pageNumber, text: page.nativeText, extractionMethod: page.nativeText.trim() ? "native" : "blank" }));
+      }
+      timing.updateMetadata({ pageCount: native.pageCount, ocrPageCount: native.pageOcrDecisions.filter((decision) => decision.needsOcr).length });
+      const document = createPdfDocument(input, pages, { pageCount: native.pageCount, imageCount: native.imageObjectCount });
+      await registerPdf(input, deps, timing, document, pages);
+      markSkippedStages(timing, PDF_SKIPPED_STAGES);
+      if (ownsTiming) finishOwnedTiming(timing, PDF_SKIPPED_STAGES);
+      return document;
+    } catch (error) {
+      markSkippedStages(timing, PDF_SKIPPED_STAGES);
+      if (ownsTiming) finishOwnedTiming(timing, PDF_SKIPPED_STAGES);
+      throw error;
+    }
+  };
+}
+
+export const ingestPdf = createPdfIngestor();
 
 export async function ingestDocx(input: { ownerId: string; conversationId: string; documentId: string; filename: string; bytes: Uint8Array; userMessageId?: string; jobId?: string; alreadyUploaded?: boolean; signal?: AbortSignal; timing?: DocumentIngestionTiming }): Promise<ChatDocumentAttachment> {
   const timing = createTiming({ documentType: DOCX_CONTENT_TYPE, byteSize: input.bytes.length, alreadyUploaded: input.alreadyUploaded, timing: input.timing });

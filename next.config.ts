@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
-const canvasTraceFiles = [
+const pdfRuntimeTraceFiles = [
+  "./node_modules/pdfjs-dist/**/*",
   "./node_modules/@napi-rs/canvas/**/*",
   "./node_modules/@napi-rs/canvas-linux-x64-gnu/**/*",
   "./node_modules/@napi-rs/canvas-linux-x64-musl/**/*",
@@ -9,10 +10,10 @@ const canvasTraceFiles = [
 ];
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["@napi-rs/canvas"],
+  serverExternalPackages: ["@napi-rs/canvas", "pdfjs-dist"],
   outputFileTracingIncludes: {
-    "/api/chat": canvasTraceFiles,
-    "/api/chat/documents/finalize": canvasTraceFiles,
+    "/api/chat": pdfRuntimeTraceFiles,
+    "/api/chat/documents/finalize": pdfRuntimeTraceFiles,
   },
   turbopack: {
     root: process.cwd(),

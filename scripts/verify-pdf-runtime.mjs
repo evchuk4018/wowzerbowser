@@ -25,6 +25,11 @@ if (process.argv.includes("--trace")) {
     for (const tracePath of tracePaths) {
       const trace = JSON.parse(await readFile(tracePath, "utf8"));
       const files = Array.isArray(trace.files) ? trace.files : [];
+      for (const marker of ["node_modules/pdfjs-dist/", "node_modules/pdfjs-dist/standard_fonts/", "node_modules/pdfjs-dist/wasm/"]) {
+        if (!files.some((file) => file.includes(marker))) {
+          throw new Error(`${tracePath} does not include ${marker}`);
+        }
+      }
       if (!files.some((file) => file.includes("node_modules/@napi-rs/canvas/"))) {
         throw new Error(`${tracePath} does not include @napi-rs/canvas`);
       }
