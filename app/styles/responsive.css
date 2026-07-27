@@ -139,28 +139,38 @@
 
   .mobile-menu {
     position: fixed;
-    top: calc(15px + env(safe-area-inset-top));
-    left: calc(15px + env(safe-area-inset-left));
+    top: max(16px, calc(8px + env(safe-area-inset-top)));
+    left: max(12px, calc(12px + env(safe-area-inset-left)));
     z-index: 12;
     display: flex;
-    width: 38px;
-    height: 38px;
+    width: 36px;
+    height: 34px;
     align-items: center;
     flex-direction: column;
     justify-content: center;
     gap: 5px;
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    background: var(--panel);
+    border: 1px solid rgba(255, 255, 255, .12);
+    border-radius: 11px;
+    background: rgba(22, 20, 26, .94);
+    box-shadow: 0 8px 18px rgba(0, 0, 0, .26);
   }
 
   .mobile-menu span {
-    width: 15px;
-    border-top: 1.5px solid var(--text);
+    width: 14px;
+    border-top: 1.5px solid #f0edf3;
   }
 
   .empty-state {
-    margin-top: -90px;
+    margin-top: -40px;
+  }
+
+  .empty-state h1 {
+    font-size: 28px;
+  }
+
+  .empty-state p {
+    color: #9b96a2;
+    font-size: 14px;
   }
 
   .transcript {
@@ -205,8 +215,13 @@
   }
 
   .composer {
-    min-height: 118px;
+    min-height: 106px;
+    border-radius: 17px;
     padding: 14px 13px 11px;
+  }
+
+  .composer textarea {
+    height: 42px;
   }
 
   .settings-field textarea {
@@ -217,9 +232,30 @@
     gap: 6px;
   }
 
+  .attach-button,
+  .send-button {
+    width: 32px;
+    height: 30px;
+  }
+
+  .send-button {
+    border-radius: 9px;
+  }
+
   .composer-menu-trigger {
+    height: 30px;
     max-width: 126px;
     padding-inline: 7px;
+  }
+
+  .composer-action-spacer + .composer-menu .composer-menu-trigger {
+    width: 74px;
+    max-width: 74px;
+  }
+
+  .composer-action-spacer + .composer-menu + .composer-menu .composer-menu-trigger {
+    width: 100px;
+    max-width: 100px;
   }
 
   .python-nested-summary {

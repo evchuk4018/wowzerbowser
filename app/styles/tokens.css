@@ -1,11 +1,11 @@
 :root {
-  --bg: #181918;
-  --sidebar: #20211f;
-  --panel: #292a27;
-  --panel-hover: #32332f;
-  --line: #393a36;
-  --text: #f1f0eb;
-  --muted: #a8a8a1;
-  --quiet: #777872;
-  --accent: #d4ff70;
+  --bg: #050506;
+  --sidebar: #0e0d11;
+  --panel: #131216;
+  --panel-hover: #1d1a22;
+  --line: #2b2831;
+  --text: #f4f2f7;
+  --muted: #a5a0aa;
+  --quiet: #706b76;
+  --accent: #8a3cf2;
 }

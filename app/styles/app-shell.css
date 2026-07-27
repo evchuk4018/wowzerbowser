@@ -21,7 +21,7 @@
   justify-content: center;
   overflow: hidden;
   background:
-    radial-gradient(circle at 50% 38%, rgba(255, 255, 255, .018), transparent 31%),
+    radial-gradient(circle at 50% 38%, rgba(138, 60, 242, .035), transparent 31%),
     var(--bg);
 }
 
@@ -35,23 +35,25 @@
 }
 
 .spark-mark {
-  width: 44px;
-  height: 44px;
-  margin: 0 auto 21px;
-  color: var(--accent);
-  font-size: 38px;
-  line-height: 1;
+  width: 26px;
+  height: 26px;
+  margin: 0 auto 29px;
+  background: linear-gradient(145deg, #b459ff 4%, #7d2be9 92%);
+  clip-path: polygon(50% 0, 63% 36%, 100% 50%, 63% 64%, 50% 100%, 37% 64%, 0 50%, 37% 36%);
+  font-size: 0;
 }
 
 .empty-state h1 {
   margin: 0;
-  font-size: clamp(30px, 3vw, 43px);
+  font-size: clamp(28px, 3vw, 40px);
   font-weight: 430;
   letter-spacing: -0.045em;
+  line-height: 1.15;
 }
 
 .empty-state p {
-  margin: 12px 0 0;
+  margin: 13px 0 0;
   color: var(--muted);
-  font-size: 15px;
+  font-size: 16px;
+  line-height: 1.35;
 }

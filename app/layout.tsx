@@ -43,7 +43,7 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: "cover",
-  themeColor: "#d4ff70",
+  themeColor: "#050506",
   colorScheme: "dark",
   interactiveWidget: "resizes-content",
 };
