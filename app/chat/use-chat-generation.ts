@@ -78,6 +78,7 @@ export type SendMessage = (
   attachments?: readonly PendingChatImage[],
   preservedAttachments?: readonly UploadedChatImage[],
   documents?: readonly PendingChatDocument[],
+  preservedDocuments?: readonly ChatDocumentAttachment[],
 ) => Promise<void>;
 
 export type ChatGenerationResult = {
@@ -249,10 +250,11 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     pendingImages = [],
     preservedAttachments = [],
     pendingDocuments = [],
+    preservedDocuments = [],
   ) => {
     const input = optionsRef.current;
     const authoredContent = rawContent.trim();
-    const content = authoredContent || (pendingImages.length || preservedAttachments.length || pendingDocuments.length ? "Attachment added" : "");
+    const content = authoredContent || (pendingImages.length || preservedAttachments.length || pendingDocuments.length || preservedDocuments.length ? "Attachment added" : "");
     const conversation = activeConversation(input.state);
     if (
       !content ||
@@ -280,7 +282,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     const jobId = makeId();
     const effectiveJobId = imageContext?.jobId ?? documentContext?.jobId ?? jobId;
     let uploadedImages: UploadedChatImage[] = [...preservedAttachments];
-    let uploadedDocuments: ChatDocumentAttachment[] = [];
+    let uploadedDocuments: ChatDocumentAttachment[] = [...preservedDocuments];
     setSubmissionError(null);
     if (pendingImages.length) {
       attachmentSubmissionRef.current = true;

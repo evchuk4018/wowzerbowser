@@ -5,6 +5,7 @@ import type {
 } from "../../lib/chat-protocol";
 import { normalizeChatImageAttachments, parseChatImageToolResult } from "../../lib/chat-protocol";
 import type { ChatAssistantActivity } from "../../lib/chat-history";
+import { DOCUMENT_CONTENT_TYPES, type ChatDocumentAttachment } from "../../lib/chat-document";
 import {
   deleteChatConversation,
   fetchChatConversation,
@@ -50,6 +51,34 @@ function asRecord(value: unknown): RecordValue | null {
 
 function nonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function normalizeDocumentAttachment(value: unknown): ChatDocumentAttachment | null {
+  const candidate = asRecord(value);
+  if (!candidate || typeof candidate.id !== "string" || !candidate.id
+    || typeof candidate.name !== "string"
+    || !DOCUMENT_CONTENT_TYPES.includes(candidate.contentType as never)
+    || typeof candidate.size !== "number" || !Number.isFinite(candidate.size) || candidate.size < 0
+    || typeof candidate.pageCount !== "number" || !Number.isFinite(candidate.pageCount) || candidate.pageCount < 0
+    || typeof candidate.tokenEstimate !== "number" || !Number.isFinite(candidate.tokenEstimate) || candidate.tokenEstimate < 0) return null;
+  const legacyPdf = candidate.contentType === "application/pdf";
+  const hasImages = typeof candidate.hasImages === "boolean" ? candidate.hasImages : false;
+  const imageCount = typeof candidate.imageCount === "number" && Number.isFinite(candidate.imageCount) ? Math.max(0, candidate.imageCount) : 0;
+  const analyzedImageCount = typeof candidate.analyzedImageCount === "number" && Number.isFinite(candidate.analyzedImageCount) ? Math.max(0, candidate.analyzedImageCount) : 0;
+  const imageAnalyses = Array.isArray(candidate.imageAnalyses) ? candidate.imageAnalyses : [];
+  if (!legacyPdf && typeof candidate.hasImages !== "boolean") return null;
+  return {
+    id: candidate.id,
+    name: candidate.name,
+    contentType: candidate.contentType as ChatDocumentAttachment["contentType"],
+    size: candidate.size,
+    pageCount: candidate.pageCount,
+    tokenEstimate: candidate.tokenEstimate,
+    hasImages,
+    imageCount,
+    analyzedImageCount,
+    imageAnalyses: imageAnalyses as ChatDocumentAttachment["imageAnalyses"],
+  };
 }
 
 function finiteNumber(value: unknown): number | undefined {
@@ -209,6 +238,12 @@ export function normalizeStoredMessage(
   if (Array.isArray(candidate.attachments)) {
     const attachments = normalizeChatImageAttachments(candidate.attachments);
     if (attachments.length) message.attachments = attachments;
+  }
+  if (Array.isArray(candidate.documents)) {
+    const documents = candidate.documents
+      .map(normalizeDocumentAttachment)
+      .filter((document): document is ChatDocumentAttachment => document !== null);
+    if (documents.length) message.documents = documents;
   }
   if (Array.isArray(candidate.artifacts)) {
     message.artifacts = candidate.artifacts

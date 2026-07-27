@@ -8,6 +8,7 @@ import { MessageActions } from "./message-actions";
 import { ReasoningBlock } from "./reasoning-block";
 import { CallActivityIndicator } from "./call-activity-indicator";
 import type { ChatImageAttachment } from "../../lib/chat-protocol";
+import type { ChatDocumentAttachment } from "../../lib/chat-document";
 import { fetchChatImage } from "./chat-service";
 import { useEffect, useState } from "react";
 
@@ -40,6 +41,32 @@ function UserImage({ image, conversationId, getAccessToken }: {
       {/* eslint-disable-next-line @next/next/no-img-element */}
       {previewUrl ? <img src={previewUrl} alt={image.name ?? "Attached image"} /> : <span>Loading image…</span>}
       {image.name && <span>{image.name}</span>}
+    </div>
+  );
+}
+
+function formatDocumentSize(size: number): string {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(size < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
+function UserDocument({ document }: { document: ChatDocumentAttachment }) {
+  const type = document.contentType === "application/pdf" ? "PDF" : "DOCX";
+  const pages = `${document.pageCount} ${document.pageCount === 1 ? "page" : "pages"}`;
+
+  return (
+    <div
+      className="message-document-attachment"
+      aria-label={`${type} document: ${document.name}, ${formatDocumentSize(document.size)}, ${pages}`}
+    >
+      <span className="message-document-type" aria-hidden="true">{type}</span>
+      <span className="message-document-details">
+        <span className="message-document-name" title={document.name}>{document.name}</span>
+        <span className="message-document-meta" aria-hidden="true">
+          {formatDocumentSize(document.size)} <span aria-hidden="true">·</span> {pages}
+        </span>
+      </span>
     </div>
   );
 }
@@ -111,6 +138,13 @@ export function ConversationTurn({
               <div className="message-image-attachments">
                 {userMessage.attachments.map((image) => (
                   <UserImage key={image.id} image={image} conversationId={conversationId} getAccessToken={getAccessToken} />
+                ))}
+              </div>
+            ) : null}
+            {userMessage.documents?.length ? (
+              <div className="message-document-attachments" aria-label="Attached documents">
+                {userMessage.documents.map((document) => (
+                  <UserDocument key={document.id} document={document} />
                 ))}
               </div>
             ) : null}

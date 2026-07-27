@@ -16,6 +16,21 @@ test("malformed stored messages are rejected without throwing", () => {
   assert.deepEqual(normalized, { role: "user", id: "m2", content: "hello" });
 });
 
+test("stored PDF and DOCX metadata survives message normalization", () => {
+  const pdf = normalizeStoredMessage({
+    role: "user", id: "document-user", content: "Review these files",
+    documents: [{ id: "pdf-1", name: "report.pdf", contentType: "application/pdf", size: 2048, pageCount: 3, tokenEstimate: 500 }],
+  });
+  assert.equal(pdf?.documents?.[0].name, "report.pdf");
+  assert.equal(pdf?.documents?.[0].pageCount, 3);
+
+  const docx = normalizeStoredMessage({
+    role: "user", id: "docx-user", content: "Review this file",
+    documents: [{ id: "docx-1", name: "notes.docx", contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", size: 4096, pageCount: 2, tokenEstimate: 700, hasImages: false, imageCount: 0, analyzedImageCount: 0, imageAnalyses: [] }],
+  });
+  assert.equal(docx?.documents?.[0].contentType, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+});
+
 test("legacy alternating messages migrate into versioned turns", () => {
   const migrated = migrateConversation({
     id: "legacy-1",
@@ -79,4 +94,3 @@ test("settings loading falls back to canonical defaults when remote storage fail
     globalThis.fetch = previousFetch;
   }
 });
-

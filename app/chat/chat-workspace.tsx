@@ -36,6 +36,7 @@ import { useChatShortcuts } from "./use-chat-shortcuts";
 import { useMobileHistoryNavigation } from "./use-mobile-history-navigation";
 import { usePersistedJobRecovery } from "./use-persisted-job-recovery";
 import type { ChatImageAttachment } from "../../lib/chat-protocol";
+import type { ChatDocumentAttachment } from "../../lib/chat-document";
 
 export type ChatWorkspaceProps = {
   user: AuthUser;
@@ -58,6 +59,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
   const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
   const [editingTurnId, setEditingTurnId] = useState<string | null>(null);
   const [editingAttachments, setEditingAttachments] = useState<ChatImageAttachment[]>([]);
+  const [editingDocuments, setEditingDocuments] = useState<ChatDocumentAttachment[]>([]);
   const [openMessageActions, setOpenMessageActions] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [recoveredStreaming, setRecoveredStreaming] = useState<Record<string, string>>({});
@@ -123,6 +125,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
     onEditingConsumed: () => {
       setEditingTurnId(null);
       setEditingAttachments([]);
+      setEditingDocuments([]);
     },
     onAttachmentsConsumed: () => setAttachmentResetKey((current) => current + 1),
   });
@@ -157,6 +160,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
     setDraft("");
     setEditingTurnId(null);
     setEditingAttachments([]);
+    setEditingDocuments([]);
     setOpenMessageActions(null);
     setOpenConversationActions(null);
     setSidebarOpen(false);
@@ -234,6 +238,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
     setDraft(version.user.content);
     setEditingTurnId(turn.id);
     setEditingAttachments(version.user.attachments ?? []);
+    setEditingDocuments(version.user.documents ?? []);
     setOpenMessageActions(null);
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
@@ -316,6 +321,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
       if (conversationId === state.activeId) {
         setEditingTurnId(null);
         setEditingAttachments([]);
+        setEditingDocuments([]);
         setDraft("");
       }
       setDeleteConversationId(null);
@@ -339,7 +345,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
     documents: readonly PendingChatDocument[] = [],
   ) => {
     event?.preventDefault();
-    return generation.sendMessage(draft, editingTurnId, attachments, editingAttachments, documents);
+    return generation.sendMessage(draft, editingTurnId, attachments, editingAttachments, documents, editingDocuments);
   };
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -455,8 +461,12 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
           effectiveEffort={preferences.effectiveEffort}
           editing={Boolean(editingTurnId)}
           preservedAttachments={editingAttachments}
+          preservedDocuments={editingDocuments}
           onRemovePreservedAttachment={(imageId) => {
             setEditingAttachments((current) => current.filter((image) => image.id !== imageId));
+          }}
+          onRemovePreservedDocument={(documentId) => {
+            setEditingDocuments((current) => current.filter((document) => document.id !== documentId));
           }}
           isSubmittingAttachments={generation.isSubmittingAttachments}
           isPreparingAttachments={generation.isPreparingAttachments}
@@ -464,6 +474,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
           onCancelEdit={() => {
             setEditingTurnId(null);
             setEditingAttachments([]);
+            setEditingDocuments([]);
             setDraft("");
           }}
           onSubmit={sendMessage}

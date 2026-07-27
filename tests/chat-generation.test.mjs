@@ -113,3 +113,39 @@ test("editing a prompt preserves its existing image attachments", () => {
     attachments: [attachment],
   }]);
 });
+
+test("edited request preserves its existing document attachments", () => {
+  const document = {
+    id: "pdf-1",
+    name: "report.pdf",
+    contentType: "application/pdf",
+    size: 2048,
+    pageCount: 3,
+    tokenEstimate: 500,
+    hasImages: false,
+    imageCount: 0,
+    analyzedImageCount: 0,
+    imageAnalyses: [],
+  };
+  const request = buildChatGenerationRequest({
+    conversation,
+    content: "revised with the same document",
+    editingTurnIndex: 0,
+    turnId: "turn-1",
+    versionId: "version-3",
+    userMessageId: "u3",
+    assistantMessageId: "a3",
+    jobId: "job-5",
+    settings,
+    model: "deepseek-v4-pro",
+    thinking: false,
+    reasoningEffort: "high",
+    documents: [document],
+  });
+
+  assert.deepEqual(request.messages, [{
+    role: "user",
+    content: "revised with the same document",
+    documents: [document],
+  }]);
+});

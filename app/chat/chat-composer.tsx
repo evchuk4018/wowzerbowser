@@ -19,7 +19,7 @@ import {
   validateChatImages,
 } from "./chat-image-attachments";
 import { validateChatDocument, type PendingChatDocument } from "./chat-document-attachments";
-import { DOCUMENT_CONTENT_TYPES } from "../../lib/chat-document";
+import { DOCUMENT_CONTENT_TYPES, type ChatDocumentAttachment } from "../../lib/chat-document";
 
 export type ChatComposerProps = {
   draft: string;
@@ -44,6 +44,8 @@ export type ChatComposerProps = {
   editing: boolean;
   preservedAttachments?: readonly ChatImageAttachment[];
   onRemovePreservedAttachment?: (imageId: string) => void;
+  preservedDocuments?: readonly ChatDocumentAttachment[];
+  onRemovePreservedDocument?: (documentId: string) => void;
   isSubmittingAttachments: boolean;
   isPreparingAttachments: boolean;
   submissionError?: string | null;
@@ -79,6 +81,8 @@ export function ChatComposer({
   editing,
   preservedAttachments = [],
   onRemovePreservedAttachment,
+  preservedDocuments = [],
+  onRemovePreservedDocument,
   isSubmittingAttachments,
   isPreparingAttachments,
   submissionError,
@@ -248,6 +252,23 @@ export function ChatComposer({
             ))}
           </div>
         )}
+        {preservedDocuments.length > 0 && (
+          <div className="composer-attachments" aria-label="Attached documents from the edited prompt">
+            {preservedDocuments.map((document) => (
+              <div className="composer-attachment" key={document.id}>
+                <span title={document.name}>{document.name}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${document.name}`}
+                  disabled={disabled}
+                  onClick={() => onRemovePreservedDocument?.(document.id)}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <textarea
           ref={textareaRef}
           value={draft}
@@ -257,7 +278,7 @@ export function ChatComposer({
           disabled={isSubmittingAttachments}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey && (attachments.length > 0 || documents.length > 0 || preservedAttachments.length > 0)) {
+            if (event.key === "Enter" && !event.shiftKey && (attachments.length > 0 || documents.length > 0 || preservedAttachments.length > 0 || preservedDocuments.length > 0)) {
               event.preventDefault();
               void onSubmit(undefined, attachments, documents);
               return;
@@ -407,7 +428,7 @@ export function ChatComposer({
               type="submit"
               className="send-button"
               aria-label="Send message"
-              disabled={disabled || (!draft.trim() && attachments.length === 0 && documents.length === 0 && preservedAttachments.length === 0)}
+              disabled={disabled || (!draft.trim() && attachments.length === 0 && documents.length === 0 && preservedAttachments.length === 0 && preservedDocuments.length === 0)}
             >
               ↑
             </button>
