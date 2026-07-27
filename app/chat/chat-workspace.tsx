@@ -17,6 +17,7 @@ import type { PendingChatImage } from "./chat-image-attachments";
 import type { PendingChatDocument } from "./chat-document-attachments";
 import { ChatSidebar } from "./chat-sidebar";
 import { ChatTranscript } from "./chat-transcript";
+import { isTranscriptNearBottom } from "./transcript-scroll";
 import { fetchChatUsage } from "./chat-usage-service";
 import { createConversation, DEFAULT_CHAT_SETTINGS } from "./conversation-defaults";
 import { DeleteConfirmationDialog } from "./delete-confirmation-dialog";
@@ -66,7 +67,8 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
-  const endRef = useRef<HTMLDivElement>(null);
+  const transcriptRef = useRef<HTMLDivElement>(null);
+  const shouldAutoScrollRef = useRef(true);
   const longPressTimerRef = useRef<number | null>(null);
   const conversationLongPressTimerRef = useRef<number | null>(null);
   const loadUsage = useCallback(async (range: Parameters<typeof fetchChatUsage>[0]) => {
@@ -155,6 +157,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
   const activeStreaming = Boolean(streamingByConversation[state.activeId]);
 
   const startNewChat = useCallback(() => {
+    shouldAutoScrollRef.current = true;
     const blank = state.conversations.find(({ turns }) => turns.length === 0);
     if (blank) dispatch({ type: "SELECT_CONVERSATION", conversationId: blank.id });
     else dispatch({ type: "CREATE_CONVERSATION", conversation: createConversation() });
@@ -216,8 +219,14 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
   const latestMessage = latestTurn?.versions[latestTurn.activeVersion]?.assistant;
   const latestActivity = latestMessage?.activities?.at(-1);
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
+    const transcript = transcriptRef.current;
+    if (!transcript || !shouldAutoScrollRef.current) return;
+    transcript.scrollTo({
+      top: transcript.scrollHeight,
+      behavior: "auto",
+    });
   }, [
+    active?.id,
     active?.turns.length,
     latestActivity?.kind,
     latestActivity?.status,
@@ -227,7 +236,16 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
     latestMessage?.reasoning?.length,
   ]);
 
+  const handleTranscriptScroll = useCallback((element: HTMLDivElement) => {
+    shouldAutoScrollRef.current = isTranscriptNearBottom({
+      scrollHeight: element.scrollHeight,
+      scrollTop: element.scrollTop,
+      clientHeight: element.clientHeight,
+    });
+  }, []);
+
   const selectConversation = (conversationId: string) => {
+    shouldAutoScrollRef.current = true;
     dispatch({ type: "SELECT_CONVERSATION", conversationId });
     setOpenConversationActions(null);
     setSidebarOpen(false);
@@ -452,7 +470,8 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
           thinkingByMessage={generation.thinkingByMessage}
           copiedMessageId={copiedMessageId}
           getAccessToken={getAccessToken}
-          endRef={endRef}
+          transcriptRef={transcriptRef}
+          onTranscriptScroll={handleTranscriptScroll}
           onSetOpenMessageActions={setOpenMessageActions}
           onStartLongPress={startLongPress}
           onCancelLongPress={cancelLongPress}
