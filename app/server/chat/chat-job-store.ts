@@ -18,14 +18,22 @@ export async function createOrGetChatJob(ownerId: string, request: ChatRequest) 
   const conversationId = request.conversationId!;
   const jobId = request.jobId!;
   const idempotencyKey = request.idempotencyKey!;
+  if (!(request.messages.at(-1)?.attachments?.length)) {
+    const { data, error } = await table().rpc("submit_and_claim_chat_job", {
+      p_owner_id: ownerId,
+      p_request: request,
+    });
+    if (error) throw error;
+    return data as { jobId: string; status: ChatJobStatus; resumed: boolean; request: ChatRequest };
+  }
   await ensureChatSubmission(ownerId, request);
   const row = { owner_id: ownerId, conversation_id: conversationId, job_id: jobId, idempotency_key: idempotencyKey, request, status: "queued" };
   const { error } = await table().from("chat_jobs").insert(row);
-  if (!error) return { jobId, status: "queued" as ChatJobStatus, resumed: false };
+  if (!error) return { jobId, status: "queued" as ChatJobStatus, resumed: false, request: undefined };
   if (error.code !== "23505") throw error;
   const { data, error: readError } = await table().from("chat_jobs").select("job_id,status").eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("idempotency_key", idempotencyKey).single();
   if (readError) throw readError;
-  return { jobId: data.job_id as string, status: data.status as ChatJobStatus, resumed: true };
+  return { jobId: data.job_id as string, status: data.status as ChatJobStatus, resumed: true, request: undefined };
 }
 
 export async function claimChatJob(ownerId: string, conversationId: string, jobId: string) {

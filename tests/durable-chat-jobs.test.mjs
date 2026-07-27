@@ -37,6 +37,21 @@ test("chat submission is durable, idempotent, and uses per-job event ordinals", 
   assert.doesNotMatch(route, /request\.signal/);
 });
 
+test("attachment-free submission and claim use one atomic RPC", async () => {
+  const [migration, store, runner, route] = await Promise.all([
+    source("supabase/migrations/20260727210000_submit_and_claim_chat_job.sql"),
+    source("app/server/chat/chat-job-store.ts"),
+    source("app/server/chat/chat-job-runner.ts"),
+    source("app/api/chat/route.ts"),
+  ]);
+  assert.match(migration, /submit_and_claim_chat_job/);
+  assert.match(migration, /status[^\n]*'running'/);
+  assert.match(migration, /exception when unique_violation/);
+  assert.match(store, /\.rpc\("submit_and_claim_chat_job"/);
+  assert.match(runner, /options\.claimedRequest \?\?/);
+  assert.match(route, /claimedRequest: submission\.request/);
+});
+
 test("replay is ordered, exclusive, and owner isolated", async () => {
   const store = await source("app/server/chat/chat-job-store.ts");
   assert.match(store, /eq\("owner_id", ownerId\)/);

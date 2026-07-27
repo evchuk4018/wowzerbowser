@@ -65,6 +65,7 @@ export async function POST(request: Request) {
     const execution = submission.resumed
       ? Promise.resolve()
       : runChatJob(user.id, chatRequest.conversationId, submission.jobId, {
+          ...(submission.request ? { claimedRequest: submission.request } : {}),
           onEvent: (event) => send({ type: "event", event }),
         })
           .then((terminal) => {

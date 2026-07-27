@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseCitationMarkup, sourceForUrl, stableSourceId } from "../lib/chat-citations.ts";
+import { IncrementalCitationFilter, parseCitationMarkup, sourceForUrl, stableSourceId } from "../lib/chat-citations.ts";
 
 test("source ids are stable across equivalent URLs", () => {
   assert.equal(stableSourceId("https://Example.com/story/#top"), stableSourceId("https://example.com/story"));
@@ -20,4 +20,14 @@ test("unknown and malformed source references are removed without annotations", 
   const parsed = parseCitationMarkup(`A⟦cite:src_missing⟧ B⟦cite:not-a-source⟧ C`, [source]);
   assert.equal(parsed.content, "A B C");
   assert.deepEqual(parsed.annotations, []);
+});
+
+test("citation filtering streams normal text and holds only a split marker", () => {
+  const filter = new IncrementalCitationFilter();
+  assert.equal(filter.push("An immediate answer. ⟦ci"), "An immediate answer. ");
+  assert.equal(filter.push("te:src_1234567890abcdef⟧ More"), " More");
+  assert.deepEqual(filter.finish(), {
+    trailingContent: "",
+    markup: "An immediate answer. ⟦cite:src_1234567890abcdef⟧ More",
+  });
 });

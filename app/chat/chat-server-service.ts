@@ -20,7 +20,7 @@ import { availablePdfTools, executePdfTool } from "../server/agent/pdf-tool";
 import { getAuthorizedDocument, getDocumentPages } from "../server/chat/chat-document-store";
 import { ingestDocx, ingestPdf } from "../server/chat/chat-document-service";
 import { DOCX_CONTENT_TYPE, documentContext } from "../../lib/chat-document";
-import { parseCitationMarkup, validCitationSources, type ChatSource } from "../../lib/chat-citations";
+import { IncrementalCitationFilter, parseCitationMarkup, validCitationSources, type ChatSource } from "../../lib/chat-citations";
 
 const MAX_RESPONSE_MS = 240_000;
 const MAX_TOOL_CALLS = 6;
@@ -101,6 +101,7 @@ export async function generateChatResponse(
           ];
           const reasoningParts: string[] = [];
           const contentParts: string[] = [];
+          const citationFilter = new IncrementalCitationFilter();
           const calls: ChatToolCall[] = [];
           const roundUsageIndex = roundUsages.push(null) - 1;
           let providerAccepted = false;
@@ -122,6 +123,8 @@ export async function generateChatResponse(
                 await enqueue(event);
               } else if (event.type === "content") {
                 contentParts.push(event.delta);
+                const delta = citationFilter.push(event.delta);
+                if (delta) await enqueue({ type: "content", delta });
               } else if (event.type === "tool_call") {
                 calls.push(event.call);
               } else if (event.type === "done") {
@@ -151,8 +154,9 @@ export async function generateChatResponse(
           }
 
           if (!calls.length) {
-            const parsed = parseCitationMarkup(contentParts.join(""), validCitationSources([...sourceCatalog.values()]));
-            if (parsed.content) await enqueue({ type: "content", delta: parsed.content });
+            const finished = citationFilter.finish();
+            if (finished.trailingContent) await enqueue({ type: "content", delta: finished.trailingContent });
+            const parsed = parseCitationMarkup(finished.markup, validCitationSources([...sourceCatalog.values()]));
             await enqueue({ type: "annotations", annotations: parsed.annotations, sources: validCitationSources([...sourceCatalog.values()]) });
             break;
           }

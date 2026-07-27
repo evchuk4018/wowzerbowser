@@ -12,6 +12,7 @@ import type { ChatCitation, ChatSource } from "../../../lib/chat-citations";
 
 export type RunChatJobOptions = {
   onEvent?: (event: SequencedChatStreamEvent) => void;
+  claimedRequest?: import("../../../lib/chat-protocol").ChatRequest;
 };
 
 /** Runs from Next's server-owned `after` lifecycle, never from the request signal. */
@@ -21,7 +22,7 @@ export async function runChatJob(
   jobId: string,
   options: RunChatJobOptions = {},
 ): Promise<ChatJobTerminalResponse | null> {
-  const request = await claimChatJob(ownerId, conversationId, jobId);
+  const request = options.claimedRequest ?? await claimChatJob(ownerId, conversationId, jobId);
   if (!request) return null; // another route instance already claimed this idempotent job
   const controller = new AbortController();
   const poll = setInterval(() => void isChatJobCancelled(ownerId, conversationId, jobId).then((cancelled) => cancelled && controller.abort()), 750);

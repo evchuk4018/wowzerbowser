@@ -14,6 +14,59 @@ export type ChatCitation = {
 };
 
 export const CITATION_MARKER_PATTERN = /⟦cite:([^⟧]+)⟧/g;
+const CITATION_MARKER_START = "⟦cite:";
+
+/**
+ * Removes citation markup without delaying ordinary provider output. Only a
+ * suffix that could be the beginning of a citation marker is retained between
+ * chunks; completed markers are handled by the final annotation pass.
+ */
+export class IncrementalCitationFilter {
+  private pending = "";
+  private complete = "";
+
+  push(delta: string): string {
+    this.pending += delta;
+    let visible = "";
+    while (this.pending) {
+      const marker = this.pending.indexOf(CITATION_MARKER_START);
+      if (marker >= 0) {
+        visible += this.pending.slice(0, marker);
+        const end = this.pending.indexOf("⟧", marker + CITATION_MARKER_START.length);
+        if (end < 0) {
+          this.pending = this.pending.slice(marker);
+          break;
+        }
+        this.complete += visible + this.pending.slice(marker, end + 1);
+        visible = "";
+        this.pending = this.pending.slice(end + 1);
+        continue;
+      }
+
+      let retained = 0;
+      const maximum = Math.min(this.pending.length, CITATION_MARKER_START.length - 1);
+      for (let length = maximum; length > 0; length -= 1) {
+        if (CITATION_MARKER_START.startsWith(this.pending.slice(-length))) {
+          retained = length;
+          break;
+        }
+      }
+      const boundary = this.pending.length - retained;
+      visible += this.pending.slice(0, boundary);
+      this.pending = this.pending.slice(boundary);
+      break;
+    }
+    this.complete += visible;
+    return visible;
+  }
+
+  finish(): { trailingContent: string; markup: string } {
+    const trailingContent = this.pending.startsWith(CITATION_MARKER_START) ? "" : this.pending;
+    this.complete += this.pending;
+    this.pending = "";
+    return { trailingContent, markup: this.complete };
+  }
+}
 
 export function canonicalSourceUrl(value: string): string {
   try {
