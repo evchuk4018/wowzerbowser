@@ -10,6 +10,7 @@ import {
 
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 export const OPENROUTER_IMAGE_MODEL = "openrouter/free";
+export const PDF_PAGE_OCR_PROMPT = "Extract all visible text from this PDF page. Preserve reading order and line breaks where practical. Return only the text; do not describe the page, add markdown, or summarize.";
 
 export type OpenRouterImageAnswer = {
   content: string;
@@ -119,7 +120,14 @@ export async function askOpenRouterAboutImage(
   }
   if (!response.ok) {
     await response.text().catch(() => "");
-    throw new OpenRouterImageError(response.status === 429 ? "rate_limit" : response.status === 404 || response.status === 400 ? "no_vision_model" : "upstream", safeProviderMessage("", response.status), response.status === 429 ? 429 : 502);
+    const code = response.status === 429
+      ? "rate_limit"
+      : response.status === 408 || response.status >= 500
+        ? "upstream"
+        : response.status === 404 || response.status === 400
+          ? "no_vision_model"
+          : "provider_validation";
+    throw new OpenRouterImageError(code, safeProviderMessage("", response.status), response.status);
   }
   let payload: OpenRouterResponse;
   try {
@@ -137,6 +145,18 @@ export async function askOpenRouterAboutImage(
     model: typeof payload.model === "string" && payload.model ? payload.model : null,
     usage: usageFromResponse(payload.usage),
   };
+}
+
+/**
+ * OCR is intentionally a thin specialization of the existing image adapter.
+ * Keeping transport, timeouts, safe provider errors, and cancellation in one
+ * adapter prevents PDF ingestion from growing a second OpenRouter client.
+ */
+export async function askOpenRouterToOcrPdfPage(
+  bytes: Uint8Array,
+  options: Pick<OpenRouterImageRequestOptions, "signal" | "fetchImpl" | "timeoutMs"> = {},
+): Promise<OpenRouterImageAnswer> {
+  return askOpenRouterAboutImage(PDF_PAGE_OCR_PROMPT, bytes, "image/png", options);
 }
 
 export function assertOpenRouterConfigured(): void {

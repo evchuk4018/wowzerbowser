@@ -1,9 +1,24 @@
 import "server-only";
-import { CHAT_DOCUMENT_BUCKET, DOCX_CONTENT_TYPE, ChatDocumentError, type ChatDocumentAttachment, type ChatDocumentPage } from "../../../lib/chat-document";
+import { CHAT_DOCUMENT_BUCKET, DOCX_CONTENT_TYPE, ChatDocumentError, PDF_PAGE_EXTRACTION_METHODS, type ChatDocumentAttachment, type ChatDocumentPage, type ChatDocumentPageFailure } from "../../../lib/chat-document";
 import { getServerClient } from "../../auth/supabase-server-adapter";
 import { DOCUMENT_INGESTION_STAGES, type DocumentIngestionTiming } from "./document-ingestion-timing";
 
 export const CHAT_DOCUMENT_DOWNLOAD_URL_EXPIRATION_SECONDS = 60;
+
+function storedPageFailure(value: unknown): ChatDocumentPageFailure | undefined {
+  if (!value || typeof value !== "object" || !("code" in value) || !("message" in value) || typeof value.code !== "string" || typeof value.message !== "string") return undefined;
+  const attempts = "attempts" in value ? value.attempts : undefined;
+  return {
+    code: value.code.slice(0, 80),
+    message: value.message.slice(0, 300),
+    ...(typeof attempts === "number" && Number.isSafeInteger(attempts) && attempts >= 0 ? { attempts } : {}),
+  };
+}
+
+function storedPageMethod(value: unknown, text: unknown): ChatDocumentPage["extractionMethod"] {
+  if (typeof value === "string" && PDF_PAGE_EXTRACTION_METHODS.includes(value as ChatDocumentPage["extractionMethod"])) return value as ChatDocumentPage["extractionMethod"];
+  return typeof text === "string" && text.trim() ? "native" : "blank";
+}
 
 function configuredSupabaseOrigin(): string | null {
   const configuredUrl = process.env.SUPABASE_URL?.trim() || process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
@@ -60,7 +75,7 @@ export async function registerDocument(input: { ownerId: string; conversationId:
     if (conversationError) throw conversationError;
     const { error } = await db.from("chat_documents").insert({ owner_id: input.ownerId, conversation_id: input.conversationId, document_id: input.document.id, user_message_id: input.userMessageId, job_id: input.jobId, storage_path: documentStoragePath(input.ownerId, input.conversationId, input.document.id, input.document.contentType), filename: input.document.name, content_type: input.document.contentType, size: input.document.size, page_count: input.document.pageCount, token_estimate: input.document.tokenEstimate, has_images: input.document.hasImages, image_count: input.document.imageCount, analyzed_image_count: input.document.analyzedImageCount, image_analyses: input.document.imageAnalyses, status: "complete" });
     if (error) throw error;
-    const { error: pageError } = await db.from("chat_document_pages").insert(input.pages.map((page) => ({ owner_id: input.ownerId, conversation_id: input.conversationId, document_id: input.document.id, page_number: page.pageNumber, text: page.text })));
+    const { error: pageError } = await db.from("chat_document_pages").insert(input.pages.map((page) => ({ owner_id: input.ownerId, conversation_id: input.conversationId, document_id: input.document.id, page_number: page.pageNumber, text: page.text, extraction_method: page.extractionMethod, failure: page.failure ?? null })));
     if (pageError) throw pageError;
   };
   if (input.timing) await input.timing.measure(DOCUMENT_INGESTION_STAGES.DATABASE_REGISTRATION, register);
@@ -74,8 +89,8 @@ export async function getAuthorizedDocument(ownerId: string, conversationId: str
 }
 
 export async function getDocumentPages(ownerId: string, conversationId: string, pdfId: string, start = 1, end = 100000): Promise<ChatDocumentPage[]> {
-  const { data, error } = await getServerClient().from("chat_document_pages").select("page_number,text").eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("document_id", pdfId).gte("page_number", start).lte("page_number", end).order("page_number");
-  if (error) throw error; return (data ?? []).map((p) => ({ pageNumber: Number(p.page_number), text: p.text }));
+  const { data, error } = await getServerClient().from("chat_document_pages").select("page_number,text,extraction_method,failure").eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("document_id", pdfId).gte("page_number", start).lte("page_number", end).order("page_number");
+  if (error) throw error; return (data ?? []).map((p) => ({ pageNumber: Number(p.page_number), text: p.text, extractionMethod: storedPageMethod(p.extraction_method, p.text), ...(storedPageFailure(p.failure) ? { failure: storedPageFailure(p.failure) } : {}) }));
 }
 
 export async function uploadDocumentBytes(path: string, bytes: Uint8Array, contentType: ChatDocumentAttachment["contentType"]) {

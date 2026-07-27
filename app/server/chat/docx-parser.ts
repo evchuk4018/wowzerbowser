@@ -46,7 +46,7 @@ export function splitDocxLogicalPages(text: string): ChatDocumentPage[] {
     else { flush(); current = paragraph; }
   }
   flush();
-  return pages.map((page, index) => ({ pageNumber: index + 1, text: page }));
+  return pages.map((page, index) => ({ pageNumber: index + 1, text: page, extractionMethod: "native" as const }));
 }
 
 export async function parseDocx(bytes: Uint8Array): Promise<ParsedDocx> {

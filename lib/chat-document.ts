@@ -21,7 +21,21 @@ export type ChatDocumentAttachment = {
   imageAnalyses: ChatDocumentImageAnalysis[];
 };
 
-export type ChatDocumentPage = { pageNumber: number; text: string };
+export const PDF_PAGE_EXTRACTION_METHODS = ["native", "ocr", "blank"] as const;
+export type PdfPageExtractionMethod = (typeof PDF_PAGE_EXTRACTION_METHODS)[number];
+
+export type ChatDocumentPageFailure = {
+  code: string;
+  message: string;
+  attempts?: number;
+};
+
+export type ChatDocumentPage = {
+  pageNumber: number;
+  text: string;
+  extractionMethod: PdfPageExtractionMethod;
+  failure?: ChatDocumentPageFailure;
+};
 
 export type PdfPageOcrDecision = {
   needsOcr: boolean;
@@ -30,7 +44,9 @@ export type PdfPageOcrDecision = {
   nativeTextConfidence: number;
 };
 
-export type ChatDocumentPageCandidate = ChatDocumentPage & {
+export type ChatDocumentPageCandidate = {
+  pageNumber: number;
+  text: string;
   textItemCount: number;
   imageObjectCount: number;
   pageWidth: number;

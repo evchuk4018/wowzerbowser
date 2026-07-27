@@ -39,7 +39,7 @@ export async function parsePdfWithOpenRouter(downloadUrl: string, filename: stri
     const clean = content.replace(/^```(?:json)?\s*|\s*```$/g, "");
     const parsed = JSON.parse(clean) as { pages?: Array<{ pageNumber?: unknown; text?: unknown }> };
     if (!Array.isArray(parsed.pages) || !parsed.pages.length) throw new Error();
-    return parsed.pages.map((page, index) => ({ pageNumber: index + 1, text: typeof page.text === "string" ? page.text : "" }));
+    return parsed.pages.map((page, index) => ({ pageNumber: index + 1, text: typeof page.text === "string" ? page.text : "", extractionMethod: typeof page.text === "string" && page.text.trim() ? "native" : "blank" }));
   } catch { throw new ChatDocumentError("parser_failed", "The free PDF parser returned invalid page data.", 502); }
  };
  return timing ? timing.measure(DOCUMENT_INGESTION_STAGES.EXTERNAL_PARSING, parse) : parse();

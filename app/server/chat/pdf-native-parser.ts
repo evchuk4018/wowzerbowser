@@ -234,6 +234,7 @@ export async function parsePdfNatively(bytes: Uint8Array, options: PdfNativePars
       ...page,
       repeatedHeaderFooterOnly: repeatedHeaderFooterFlags[index],
     }));
+    throwIfAborted(signal);
 
     return {
       pageCount: pdf.numPages,

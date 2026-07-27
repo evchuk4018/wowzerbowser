@@ -1,11 +1,12 @@
 import "server-only";
-import { ChatDocumentError, DOCX_CONTENT_TYPE, estimatePdfTokens, MAX_PDF_BYTES, type ChatDocumentAttachment, type ChatDocumentPage, type NativePdfExtraction } from "../../../lib/chat-document";
-import { parsePdfWithOpenRouter } from "../../providers/openrouter/openrouter-document-adapter";
-import { assertSignedDocumentDownloadUrl, createSignedDocumentDownloadUrl, documentStoragePath, registerDocument, uploadDocumentBytes } from "./chat-document-store";
+import { DOCX_CONTENT_TYPE, estimatePdfTokens, MAX_PDF_BYTES, type ChatDocumentAttachment, type ChatDocumentPage } from "../../../lib/chat-document";
+import { documentStoragePath, registerDocument, uploadDocumentBytes } from "./chat-document-store";
 import { parseDocx } from "./docx-parser";
 import { analyzeDocumentImage } from "./chat-image-service";
 import { DOCUMENT_INGESTION_STAGES, DocumentIngestionTiming, type DocumentIngestionStage } from "./document-ingestion-timing";
 import { parsePdfNatively } from "./pdf-native-parser";
+import { renderPdfPagesSettled } from "./pdf-page-renderer";
+import { getPdfOcrConcurrency, ocrPdfPages } from "./pdf-page-ocr";
 
 function finishOwnedTiming(timing: DocumentIngestionTiming, skipped: readonly DocumentIngestionStage[]) {
   markSkippedStages(timing, skipped);
@@ -21,17 +22,25 @@ function createTiming(input: { documentType: string; byteSize: number; alreadyUp
   return input.timing ?? new DocumentIngestionTiming({ documentType: input.documentType, byteSize: input.byteSize, cacheStatus: input.alreadyUploaded ? "bypass" : "unknown" });
 }
 
-function shouldUseExternalPdfFallback(native: NativePdfExtraction): boolean {
-  return native.pageOcrDecisions.some((decision) => decision.needsOcr);
-}
-
-async function createPdfDownloadUrl(input: { ownerId: string; conversationId: string; documentId: string }): Promise<string> {
-  try {
-    return await createSignedDocumentDownloadUrl({ ...input, contentType: "application/pdf" });
-  } catch (error) {
-    if (error instanceof ChatDocumentError) throw error;
-    throw new ChatDocumentError("parser_unavailable", "The free PDF parser could not access the uploaded document.", 502);
+async function processSelectedPdfPages(input: {
+  bytes: Uint8Array;
+  pages: Array<{ pageNumber: number; nativeText: string; needsOcr: boolean }>;
+  signal?: AbortSignal;
+  timing: DocumentIngestionTiming;
+}): Promise<ChatDocumentPage[]> {
+  const results = new Map<number, ChatDocumentPage>();
+  for (const page of input.pages) {
+    if (!page.needsOcr) results.set(page.pageNumber, { pageNumber: page.pageNumber, text: page.nativeText, extractionMethod: page.nativeText.trim() ? "native" : "blank" });
   }
+  const selected = input.pages.filter((page) => page.needsOcr);
+  const batchSize = getPdfOcrConcurrency();
+  for (let start = 0; start < selected.length; start += batchSize) {
+    const batch = selected.slice(start, start + batchSize);
+    const rendered = await input.timing.measure(DOCUMENT_INGESTION_STAGES.PAGE_RENDERING, () => renderPdfPagesSettled(input.bytes, batch.map((page) => page.pageNumber), { signal: input.signal }));
+    const processed = await input.timing.measure(DOCUMENT_INGESTION_STAGES.OCR, () => ocrPdfPages({ pages: batch, renderedPages: rendered.renderedPages, renderFailures: rendered.failures, signal: input.signal }));
+    for (const page of processed) results.set(page.pageNumber, page);
+  }
+  return input.pages.slice().sort((left, right) => left.pageNumber - right.pageNumber).map((page) => results.get(page.pageNumber) ?? { pageNumber: page.pageNumber, text: page.nativeText, extractionMethod: page.nativeText.trim() ? "native" : "blank" });
 }
 
 export async function ingestPdf(input: { ownerId: string; conversationId: string; pdfId: string; filename: string; bytes: Uint8Array; downloadUrl?: string; userMessageId?: string; jobId?: string; alreadyUploaded?: boolean; signal?: AbortSignal; timing?: DocumentIngestionTiming }): Promise<ChatDocumentAttachment> {
@@ -40,23 +49,18 @@ export async function ingestPdf(input: { ownerId: string; conversationId: string
   try {
     const native = await timing.measure(DOCUMENT_INGESTION_STAGES.NATIVE_PARSING, () => parsePdfNatively(input.bytes, { signal: input.signal }));
     if (!input.alreadyUploaded) await timing.measure(DOCUMENT_INGESTION_STAGES.SUPABASE_UPLOAD, () => uploadDocumentBytes(documentStoragePath(input.ownerId, input.conversationId, input.pdfId, "application/pdf"), input.bytes, "application/pdf"));
-    let pages: ChatDocumentPage[] = native.pages.map(({ pageNumber, text }) => ({ pageNumber, text }));
-    if (shouldUseExternalPdfFallback(native)) {
-      const externalPages = await timing.measure(DOCUMENT_INGESTION_STAGES.EXTERNAL_PARSING, async () => {
-        const downloadUrl = input.downloadUrl
-          ? assertSignedDocumentDownloadUrl({ ownerId: input.ownerId, conversationId: input.conversationId, documentId: input.pdfId, contentType: "application/pdf", signedUrl: input.downloadUrl })
-          : await createPdfDownloadUrl({ ownerId: input.ownerId, conversationId: input.conversationId, documentId: input.pdfId });
-        return parsePdfWithOpenRouter(downloadUrl, input.filename, input.signal);
-      });
-      // Keep the native page map authoritative so a provider response cannot
-      // silently drop an empty page or change the document's page count.
-      pages = native.pages.map((page, index) => {
-        const decision = native.pageOcrDecisions[index];
-        const externalText = externalPages[index]?.text;
-        return decision?.needsOcr
-          ? { pageNumber: page.pageNumber, text: externalText?.trim() ? externalText : page.text }
-          : { pageNumber: page.pageNumber, text: page.text };
-      });
+    const ocrInputs = native.pages.map((page, index) => ({
+      pageNumber: page.pageNumber,
+      nativeText: page.text,
+      needsOcr: native.pageOcrDecisions[index]?.needsOcr ?? false,
+    }));
+    const pagesNeedingOcr = ocrInputs.filter((page) => page.needsOcr).map((page) => page.pageNumber);
+    let pages: ChatDocumentPage[];
+    if (pagesNeedingOcr.length > 0) {
+      pages = await processSelectedPdfPages({ bytes: input.bytes, pages: ocrInputs, signal: input.signal, timing });
+      if (pages.some((page) => page.failure)) timing.markFailed(DOCUMENT_INGESTION_STAGES.OCR);
+    } else {
+      pages = ocrInputs.map((page) => ({ pageNumber: page.pageNumber, text: page.nativeText, extractionMethod: page.nativeText.trim() ? "native" : "blank" }));
     }
     timing.updateMetadata({ pageCount: native.pageCount, ocrPageCount: native.pageOcrDecisions.filter((decision) => decision.needsOcr).length });
     const document: ChatDocumentAttachment = { id: input.pdfId, name: input.filename, contentType: "application/pdf", size: input.bytes.length, pageCount: native.pageCount, tokenEstimate: estimatePdfTokens(pages.map((p) => p.text).join("")), hasImages: native.imageObjectCount > 0, imageCount: native.imageObjectCount, analyzedImageCount: 0, imageAnalyses: [] };
