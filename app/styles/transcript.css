@@ -150,20 +150,20 @@
 
 .message-document-attachments {
   display: grid;
-  gap: 10px;
+  gap: 7px;
 }
 
 .message-document-attachment {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   width: 100%;
   min-width: 0;
-  min-height: 86px;
+  min-height: 46px;
   border: 1px solid #494a45;
-  border-radius: 14px;
+  border-radius: 10px;
   background: #353632;
-  padding: 12px 14px;
+  padding: 6px 9px;
 }
 
 .message-document-icon {
@@ -171,14 +171,14 @@
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  flex: 0 0 54px;
-  width: 54px;
-  height: 62px;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 34px;
   overflow: hidden;
-  border-radius: 7px;
+  border-radius: 5px;
   background: #c8463d;
-  padding: 0 4px 8px;
-  box-shadow: 0 4px 12px rgb(0 0 0 / 18%);
+  padding: 0 2px 4px;
+  box-shadow: 0 2px 7px rgb(0 0 0 / 18%);
   color: #fff;
 }
 
@@ -190,15 +190,15 @@
   position: absolute;
   top: 0;
   right: 0;
-  width: 16px;
-  height: 16px;
-  border-bottom-left-radius: 3px;
+  width: 9px;
+  height: 9px;
+  border-bottom-left-radius: 2px;
   background: rgb(255 255 255 / 35%);
 }
 
 .message-document-type {
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: 8px;
   font-weight: 750;
   letter-spacing: .06em;
   line-height: 1.2;
@@ -208,13 +208,13 @@
   display: grid;
   flex: 1;
   min-width: 0;
-  gap: 6px;
+  gap: 2px;
 }
 
 .message-document-name {
   overflow: hidden;
   color: #ecece5;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 620;
   line-height: 1.35;
   text-overflow: ellipsis;
@@ -223,7 +223,7 @@
 
 .message-document-meta {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.4;
 }
 
@@ -233,14 +233,14 @@
   }
 
   .message-document-attachment {
-    gap: 12px;
-    min-height: 78px;
-    padding: 10px 12px;
+    gap: 9px;
+    min-height: 44px;
+    padding: 5px 8px;
   }
 
   .message-document-icon {
-    flex-basis: 48px;
-    width: 48px;
-    height: 56px;
+    flex-basis: 30px;
+    width: 30px;
+    height: 34px;
   }
 }

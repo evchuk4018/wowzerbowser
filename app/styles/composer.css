@@ -125,6 +125,56 @@
   color: var(--text);
 }
 
+.composer-document-attachment {
+  position: relative;
+  width: min(310px, calc(100vw - 86px));
+  flex: 0 0 min(310px, calc(100vw - 86px));
+  padding-right: 38px;
+}
+
+.composer-document-attachment .message-document-details {
+  gap: 2px;
+}
+
+.composer-document-status {
+  overflow: hidden;
+  color: var(--quiet);
+  font-size: 11px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-document-status--error {
+  color: #ffaaa4;
+}
+
+.composer-document-remove {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--quiet);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.composer-document-remove:hover:not(:disabled) {
+  background: #454640;
+  color: var(--text);
+}
+
+.composer-document-remove:disabled {
+  cursor: default;
+  opacity: .45;
+}
+
 .composer-file-input {
   display: none;
 }

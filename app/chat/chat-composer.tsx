@@ -19,7 +19,28 @@ import {
   validateChatImages,
 } from "./chat-image-attachments";
 import { validateChatDocument, type PendingChatDocument } from "./chat-document-attachments";
-import { DOCUMENT_CONTENT_TYPES, type ChatDocumentAttachment } from "../../lib/chat-document";
+import { DOCX_CONTENT_TYPE, DOCUMENT_CONTENT_TYPES, type ChatDocumentAttachment } from "../../lib/chat-document";
+
+function formatDocumentSize(size: number): string {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(size < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
+function documentType(contentType: string, name: string): "PDF" | "DOCX" {
+  if (contentType === "application/pdf") return "PDF";
+  if (contentType === DOCX_CONTENT_TYPE) return "DOCX";
+  return name.toLowerCase().endsWith(".pdf") ? "PDF" : "DOCX";
+}
+
+function DocumentIcon({ type }: { type: "PDF" | "DOCX" }) {
+  return (
+    <span className="message-document-icon" aria-hidden="true">
+      <span className="message-document-icon-fold" />
+      <span className="message-document-type">{type}</span>
+    </span>
+  );
+}
 
 export type ChatComposerProps = {
   draft: string;
@@ -214,15 +235,31 @@ export function ChatComposer({
           <div className="composer-attachments" aria-label="Attached documents">
             {documents.map((document) => {
               const status = documentStatus(document);
+              const type = documentType(document.file.type, document.file.name);
               return (
-                <div className="composer-attachment" key={document.id}>
-                  <span title={document.file.name}>{document.file.name}</span>
-                  {status && (
-                    <span role={document.preparationStatus === "error" ? "alert" : "status"}>
-                      {status}
+                <div
+                  className={`message-document-attachment message-document-attachment--${type.toLowerCase()} composer-document-attachment`}
+                  key={document.id}
+                  role="group"
+                  aria-label={`${type} document: ${document.file.name}, ${formatDocumentSize(document.file.size)}`}
+                >
+                  <DocumentIcon type={type} />
+                  <span className="message-document-details">
+                    <span className="message-document-name" title={document.file.name}>{document.file.name}</span>
+                    <span className="message-document-meta">
+                      {type} <span aria-hidden="true">·</span> {formatDocumentSize(document.file.size)}
                     </span>
-                  )}
+                    {status && (
+                      <span
+                        className={`composer-document-status ${document.preparationStatus === "error" ? "composer-document-status--error" : ""}`}
+                        role={document.preparationStatus === "error" ? "alert" : "status"}
+                      >
+                        {status}
+                      </span>
+                    )}
+                  </span>
                   <button
+                    className="composer-document-remove"
                     type="button"
                     aria-label={`Remove ${document.file.name}`}
                     disabled={disabled}
@@ -254,19 +291,35 @@ export function ChatComposer({
         )}
         {preservedDocuments.length > 0 && (
           <div className="composer-attachments" aria-label="Attached documents from the edited prompt">
-            {preservedDocuments.map((document) => (
-              <div className="composer-attachment" key={document.id}>
-                <span title={document.name}>{document.name}</span>
-                <button
-                  type="button"
-                  aria-label={`Remove ${document.name}`}
-                  disabled={disabled}
-                  onClick={() => onRemovePreservedDocument?.(document.id)}
+            {preservedDocuments.map((document) => {
+              const type = documentType(document.contentType, document.name);
+              const pages = `${document.pageCount} ${document.pageCount === 1 ? "page" : "pages"}`;
+              return (
+                <div
+                  className={`message-document-attachment message-document-attachment--${type.toLowerCase()} composer-document-attachment`}
+                  key={document.id}
+                  role="group"
+                  aria-label={`${type} document: ${document.name}, ${formatDocumentSize(document.size)}, ${pages}`}
                 >
-                  ×
-                </button>
-              </div>
-            ))}
+                  <DocumentIcon type={type} />
+                  <span className="message-document-details">
+                    <span className="message-document-name" title={document.name}>{document.name}</span>
+                    <span className="message-document-meta" aria-hidden="true">
+                      {type} <span aria-hidden="true">·</span> {formatDocumentSize(document.size)} <span aria-hidden="true">·</span> {pages}
+                    </span>
+                  </span>
+                  <button
+                    className="composer-document-remove"
+                    type="button"
+                    aria-label={`Remove ${document.name}`}
+                    disabled={disabled}
+                    onClick={() => onRemovePreservedDocument?.(document.id)}
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
         <textarea
