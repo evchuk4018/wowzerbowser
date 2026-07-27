@@ -3,11 +3,39 @@ import assert from "node:assert/strict";
 import { ChatDocumentError } from "../lib/chat-document.ts";
 import { CHAT_DOCUMENT_DOWNLOAD_URL_EXPIRATION_SECONDS, createSignedDocumentDownloadUrl } from "../app/server/chat/chat-document-store.ts";
 import { createUploadUrlHandler } from "../app/api/chat/documents/upload-url/route.ts";
-import { createFinalizeHandler } from "../app/api/chat/documents/finalize/route.ts";
+import { createFinalizeHandler, maxDuration, runtime } from "../app/api/chat/documents/finalize/route.ts";
 import { createDeleteHandler } from "../app/api/chat/documents/delete/route.ts";
+import nextConfig from "../next.config.ts";
 
-test("upload URL route rejects unauthorized calls without reading PDF bytes",async()=>{const handler=createUploadUrlHandler({authorizeOwnerSession:async()=>null,createSignedDocumentUpload:async()=>{throw Error("not called")}});const response=await handler(new Request("http://test",{method:"POST"}));assert.equal(response.status,401);});
-test("upload URL route reports a safe signed-upload timing stage",async()=>{const logs=[];const original=console.info;console.info=(entry)=>logs.push(entry);try{const handler=createUploadUrlHandler({authorizeOwnerSession:async()=>({id:"owner"}),createSignedDocumentUpload:async()=>({path:"owner/conversation/document.pdf",token:"secret-token",signedUrl:"https://storage.test/signed?token=secret-token"})});const response=await handler(new Request("http://test",{method:"POST",headers:{authorization:"Bearer access-token", "content-type":"application/json"},body:JSON.stringify({conversationId:"conversation",documentId:"document",size:12,contentType:"application/pdf"})}));assert.equal(response.status,200);assert.match(response.headers.get("Server-Timing"),/signed-upload-url;dur=/);assert.doesNotMatch(JSON.stringify(logs),/secret-token|access-token|owner\/conversation/);}finally{console.info=original;}});
+test("upload URL route rejects unauthorized calls without reading PDF bytes",async()=>{const handler=createUploadUrlHandler({authorizeOwnerSession:async()=>null,createSignedDocumentUpload:async()=>{throw Error("not called")},ensureChatDocumentSchema:async()=>{throw Error("not called")}});const response=await handler(new Request("http://test",{method:"POST"}));assert.equal(response.status,401);});
+test("upload URL route reports a safe signed-upload timing stage",async()=>{const logs=[];const original=console.info;console.info=(entry)=>logs.push(entry);try{const handler=createUploadUrlHandler({authorizeOwnerSession:async()=>({id:"owner"}),createSignedDocumentUpload:async()=>({path:"owner/conversation/document.pdf",token:"secret-token",signedUrl:"https://storage.test/signed?token=secret-token"}),ensureChatDocumentSchema:async()=>{}});const response=await handler(new Request("http://test",{method:"POST",headers:{authorization:"Bearer access-token", "content-type":"application/json"},body:JSON.stringify({conversationId:"conversation",documentId:"document",size:12,contentType:"application/pdf"})}));assert.equal(response.status,200);assert.match(response.headers.get("Server-Timing"),/signed-upload-url;dur=/);assert.doesNotMatch(JSON.stringify(logs),/secret-token|access-token|owner\/conversation/);}finally{console.info=original;}});
+
+test("upload URL route reports missing document schema as a structured 503",async()=>{
+ const handler=createUploadUrlHandler({
+  authorizeOwnerSession:async()=>({id:"owner"}),
+  createSignedDocumentUpload:async()=>{throw Error("not called")},
+  ensureChatDocumentSchema:async()=>{throw new ChatDocumentError("document_schema_unavailable","The document database schema is not ready. Apply the document migrations and retry.",503);},
+ });
+ const response=await handler(new Request("http://test",{method:"POST",headers:{authorization:"Bearer access-token","content-type":"application/json"},body:JSON.stringify({conversationId:"conversation",documentId:"document",size:12,contentType:"application/pdf"})}));
+ assert.equal(response.status,503);
+ assert.deepEqual(await response.json(),{error:"The document database schema is not ready. Apply the document migrations and retry.",code:"document_schema_unavailable",failedStage:"database-registration"});
+});
+
+test("finalize route uses the Node runtime and long duration required for PDF ingestion",()=>{
+ assert.equal(runtime,"nodejs");
+ assert.equal(maxDuration,300);
+});
+
+test("Next traces native canvas for both PDF execution routes",()=>{
+ assert.deepEqual(nextConfig.serverExternalPackages,["@napi-rs/canvas"]);
+ const includes=nextConfig.outputFileTracingIncludes;
+ for(const route of ["/api/chat","/api/chat/documents/finalize"]){
+  assert.ok(includes?.[route]?.some((entry)=>entry.includes("@napi-rs/canvas-linux-x64-gnu")));
+  assert.ok(includes?.[route]?.some((entry)=>entry.includes("@napi-rs/canvas-linux-x64-musl")));
+  assert.ok(includes?.[route]?.some((entry)=>entry.includes("@napi-rs/canvas-linux-arm64-gnu")));
+  assert.ok(includes?.[route]?.some((entry)=>entry.includes("@napi-rs/canvas-linux-arm64-musl")));
+ }
+});
 
 test("signed PDF download URLs use a 60-second expiration and an exact object path",async()=>{
  const calls=[];

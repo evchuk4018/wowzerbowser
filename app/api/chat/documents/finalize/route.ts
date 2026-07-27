@@ -6,6 +6,9 @@ import { createSignedDocumentDownloadUrl, documentStoragePath } from "../../../.
 import { ingestDocx, ingestPdf } from "../../../../server/chat/chat-document-service";
 import { DOCUMENT_INGESTION_STAGES, DocumentIngestionTiming } from "../../../../server/chat/document-ingestion-timing";
 
+export const runtime = "nodejs";
+export const maxDuration = 300;
+
 function respond(body: unknown, init: ResponseInit, timing: DocumentIngestionTiming) {
  const response = NextResponse.json(body, init); const serverTiming = timing.serverTiming(); if (serverTiming) response.headers.set("Server-Timing", serverTiming); return response;
 }

@@ -93,3 +93,11 @@ then returns a clear "not configured" result.
 
 ### Document attachments
 PDF and DOCX documents (up to 25 MiB) upload directly from the browser to the private `chat-documents` Supabase bucket through a signed upload URL. PDF text uses the existing free OpenRouter parser with no paid fallback, while DOCX text is extracted locally with Mammoth and divided into bounded logical pages that do not claim to match Word's rendered pages. Embedded DOCX images use only the existing free OpenRouter image analyzer. Configure `OPENROUTER_API_KEY` and apply the Supabase migrations. Small documents are included verbatim in context, while large documents are available through gated `search_document` and `read_document_pages` tools.
+
+PDF finalization runs on the Node.js runtime because PDF.js and `@napi-rs/canvas` require native server dependencies. The production build runs `npm run verify:pdf-runtime` before Next.js build output is generated and inspects both emitted function traces afterward; a missing native canvas package must fail the deployment rather than first appearing as a document-upload 500. After changing native dependencies, deploy with a clean dependency install and verify the emitted Vercel function trace contains the Linux canvas package. The configured 300-second duration remains subject to the active Vercel plan's maximum.
+
+The document schema is deployed separately from the application. Apply these migrations to the production Supabase project before enabling document uploads, and refresh the PostgREST schema cache if the API reports stale columns:
+
+- `supabase/migrations/20260726090000_chat_documents.sql`
+- `supabase/migrations/20260726120000_docx_documents.sql`
+- `supabase/migrations/20260726130000_pdf_page_extraction.sql`
