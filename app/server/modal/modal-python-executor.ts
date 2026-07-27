@@ -7,6 +7,7 @@ import {
   waitForPythonDeadline,
 } from "../../../lib/python-execution-deadlines";
 import { PYTHON_TOOL_INPUT_LIMITS, relativeWorkspacePath, validatePythonToolInput } from "../../../lib/python-tool-policy";
+import { PYTHON_RUNTIME_PACKAGE_INSTALL_COMMAND } from "../agent/python-runtime-packages";
 
 export { relativeWorkspacePath, validatePythonToolInput } from "../../../lib/python-tool-policy";
 
@@ -308,7 +309,9 @@ async function createWorkspaceSandbox(
       deadlineAt,
       PYTHON_DEADLINE_ERROR,
     );
-    const image = client.images.fromRegistry("python:3.13-slim");
+    const image = client.images
+      .fromRegistry("python:3.13-slim")
+      .dockerfileCommands([PYTHON_RUNTIME_PACKAGE_INSTALL_COMMAND]);
     sandboxCreation = client.sandboxes.create(app, image, {
       name: options.name,
       cpu: PYTHON_TOOL_LIMITS.cpu,
@@ -408,7 +411,19 @@ export class ModalPythonExecutor {
     this.sandbox = created.sandbox;
     const venv = await runProcess(
       this.sandbox,
-      ["sh", "-lc", `test -x ${VENV_PYTHON} || python3 -m venv ${WORKSPACE}/.venv`],
+      [
+        "sh",
+        "-lc",
+        [
+          `if [ ! -x ${VENV_PYTHON} ] || [ ! -f ${WORKSPACE}/.venv/pyvenv.cfg ]; then`,
+          `  python3 -m venv --system-site-packages ${WORKSPACE}/.venv;`,
+          `elif ! grep -q '^include-system-site-packages = true$' ${WORKSPACE}/.venv/pyvenv.cfg; then`,
+          // --upgrade updates the venv metadata and launchers in place. Do not
+          // use --clear: the volume may contain user-installed packages.
+          `  python3 -m venv --system-site-packages --upgrade ${WORKSPACE}/.venv;`,
+          "fi",
+        ].join("\n"),
+      ],
       { timeoutMs: PYTHON_TOOL_LIMITS.callTimeoutMs, deadlineAt },
     );
     if (venv.exitCode !== 0) throw new Error(venv.stderr || "Unable to initialize Python.");

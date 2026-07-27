@@ -1,3 +1,5 @@
+import { PYTHON_RUNTIME_PACKAGE_INSTRUCTIONS } from "./python-runtime-packages";
+
 /**
  * Provider-neutral guidance for the model when the run_python tool is
  * available. This is deliberately kept outside the UI prompt: execution
@@ -9,6 +11,7 @@ export const RUN_PYTHON_INSTRUCTIONS = [
   "You may make at most six (6) run_python calls in one response.",
   "Call run_python with a JSON object. Each call must provide exactly one of code (non-empty inline Python) or file (an existing relative Python file path), never both. For example: {\"code\":\"print(sum([2, 3, 5]))\"}.",
   "The code/file runs in a persistent conversation workspace. File paths must stay relative to that workspace; do not use absolute paths, parent traversal, .venv, or .runs.",
+  `The runtime image preinstalls these trusted packages. Use the exact pip package/import pairs shown here: ${PYTHON_RUNTIME_PACKAGE_INSTRUCTIONS}.`,
   "packages is optional and may contain at most 20 package specifiers; args is optional and may contain at most 32 strings; stdin is optional.",
   "Request files with artifacts when the user needs a downloadable output. Artifact paths are relative workspace paths and at most 20 may be requested.",
   "After each call, inspect the result fields ok, stdout, stderr, exitCode, timedOut, stdoutTruncated, stderrTruncated, and artifacts before deciding what to do next.",
