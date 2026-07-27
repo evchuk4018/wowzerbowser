@@ -11,7 +11,9 @@ import type {
   PythonActivity,
   ReasoningActivity,
   WebActivity,
+  DocumentActivity,
 } from "./assistant-activity-types";
+import { DocumentEditActivity } from "./document-edit-activity";
 import { fetchChatArtifact } from "./chat-service";
 import { formatDuration } from "./format-duration";
 import type { ChatCitation, ChatSource } from "../../lib/chat-citations";
@@ -21,6 +23,7 @@ export type {
   PythonActivity,
   ReasoningActivity,
   WebActivity,
+  DocumentActivity,
 } from "./assistant-activity-types";
 
 function useLiveDuration(startedAt?: number, running = false) {
@@ -241,14 +244,15 @@ export function AssistantActivityTimeline({
   sources?: ChatSource[];
   getAccessToken: () => Promise<string | null>;
 }) {
-  const rounds = activities.reduce<Map<number, { reasoning?: ReasoningActivity; python: PythonActivity[]; web: WebActivity[]; image: ImageActivity[] }>>((grouped, activity) => {
-    const round = grouped.get(activity.round) ?? { python: [], web: [], image: [] };
+  const rounds = activities.reduce<Map<number, { reasoning?: ReasoningActivity; python: PythonActivity[]; web: WebActivity[]; image: ImageActivity[]; document: DocumentActivity[] }>>((grouped, activity) => {
+    const round = grouped.get(activity.round) ?? { python: [], web: [], image: [], document: [] };
     if (activity.kind === "reasoning") round.reasoning = round.reasoning
       ? { ...round.reasoning, content: `${round.reasoning.content}${activity.content}`, status: activity.status }
       : activity;
     else if (activity.kind === "python") round.python.push(activity);
     else if (activity.kind === "web") round.web.push(activity);
-    else round.image.push(activity);
+    else if (activity.kind === "image") round.image.push(activity);
+    else round.document.push(activity);
     grouped.set(activity.round, round);
     return grouped;
   }, new Map());
@@ -267,6 +271,7 @@ export function AssistantActivityTimeline({
           return <ReasoningCard key={reasoning.id} activity={reasoning} pythonActivities={group.python} webActivities={group.web} imageActivities={group.image} />;
         })}
       </div>
+      {activities.filter((activity): activity is DocumentActivity => activity.kind === "document").map((activity) => <DocumentEditActivity key={activity.id} activity={activity} />)}
       {content && (
         <div className="message-bubble">
           <AssistantResponse content={content} annotations={annotations} sources={sources} />

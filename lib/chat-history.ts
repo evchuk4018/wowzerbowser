@@ -22,7 +22,7 @@ export type ChatReasoningActivity = {
 
 export type ChatToolActivity = {
   id: string;
-  kind: "python" | "web" | "image";
+  kind: "python" | "web" | "image" | "document";
   round: number;
   call: ChatToolCall;
   result?: ChatToolResult;
@@ -34,7 +34,8 @@ export type ChatToolActivity = {
 export type ChatPythonActivity = Omit<ChatToolActivity, "kind"> & { kind: "python" };
 export type ChatWebActivity = Omit<ChatToolActivity, "kind"> & { kind: "web" };
 export type ChatImageActivity = Omit<ChatToolActivity, "kind"> & { kind: "image" };
-export type ChatAssistantActivity = ChatReasoningActivity | ChatPythonActivity | ChatWebActivity | ChatImageActivity;
+export type ChatDocumentActivity = Omit<ChatToolActivity, "kind"> & { kind: "document" };
+export type ChatAssistantActivity = ChatReasoningActivity | ChatPythonActivity | ChatWebActivity | ChatImageActivity | ChatDocumentActivity;
 
 export type ChatHistoryMessage = {
   id: string;
@@ -111,6 +112,7 @@ function activityForTool(call: ChatToolCall, round: number, startedAt: number): 
   } as const;
   if (call.name === "run_python") return { ...base, kind: "python" };
   if (call.name === "inspect_image") return { ...base, kind: "image" };
+  if (["inspect_pdf_editability", "edit_source_backed_document", "edit_pdf", "compare_document_revisions"].includes(call.name)) return { ...base, kind: "document" };
   return { ...base, kind: legacyToolKind(call) };
 }
 

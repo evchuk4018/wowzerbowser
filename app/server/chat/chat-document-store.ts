@@ -73,7 +73,7 @@ export async function registerDocument(input: { ownerId: string; conversationId:
       updated_at: new Date().toISOString(),
     }, { onConflict: "owner_id,conversation_id", ignoreDuplicates: true });
     if (conversationError) throw conversationError;
-    const { error } = await db.from("chat_documents").insert({ owner_id: input.ownerId, conversation_id: input.conversationId, document_id: input.document.id, user_message_id: input.userMessageId, job_id: input.jobId, storage_path: documentStoragePath(input.ownerId, input.conversationId, input.document.id, input.document.contentType), filename: input.document.name, content_type: input.document.contentType, size: input.document.size, page_count: input.document.pageCount, token_estimate: input.document.tokenEstimate, has_images: input.document.hasImages, image_count: input.document.imageCount, analyzed_image_count: input.document.analyzedImageCount, image_analyses: input.document.imageAnalyses, project_id: input.document.projectId ?? null, revision_id: input.document.revisionId ?? null, origin: input.document.origin ?? null, status: "complete" });
+    const { error } = await db.from("chat_documents").insert({ owner_id: input.ownerId, conversation_id: input.conversationId, document_id: input.document.id, user_message_id: input.userMessageId, job_id: input.jobId, storage_path: documentStoragePath(input.ownerId, input.conversationId, input.document.id, input.document.contentType), filename: input.document.name, content_type: input.document.contentType, size: input.document.size, page_count: input.document.pageCount, token_estimate: input.document.tokenEstimate, has_images: input.document.hasImages, image_count: input.document.imageCount, analyzed_image_count: input.document.analyzedImageCount, image_analyses: input.document.imageAnalyses, project_id: input.document.projectId ?? null, revision_id: input.document.revisionId ?? null, parent_revision_id: input.document.parentRevisionId ?? null, origin: input.document.origin ?? null, editable: input.document.editable ?? false, source_completeness: input.document.sourceCompleteness ?? null, status: "complete" });
     if (error) throw error;
     const { error: pageError } = await db.from("chat_document_pages").insert(input.pages.map((page) => ({ owner_id: input.ownerId, conversation_id: input.conversationId, document_id: input.document.id, page_number: page.pageNumber, text: page.text, extraction_method: page.extractionMethod, failure: page.failure ?? null })));
     if (pageError) throw pageError;
@@ -83,9 +83,18 @@ export async function registerDocument(input: { ownerId: string; conversationId:
 }
 
 export async function getAuthorizedDocument(ownerId: string, conversationId: string, pdfId: string): Promise<ChatDocumentAttachment | null> {
-  const { data, error } = await getServerClient().from("chat_documents").select("document_id,filename,content_type,size,page_count,token_estimate,has_images,image_count,analyzed_image_count,image_analyses,project_id,revision_id,origin").eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("document_id", pdfId).eq("status", "complete").maybeSingle();
+  const { data, error } = await getServerClient().from("chat_documents").select("document_id,filename,content_type,size,page_count,token_estimate,has_images,image_count,analyzed_image_count,image_analyses,project_id,revision_id,parent_revision_id,origin,editable,source_completeness").eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("document_id", pdfId).eq("status", "complete").maybeSingle();
   if (error) throw error; if (!data) return null;
-  return { id: data.document_id, name: data.filename, contentType: data.content_type as ChatDocumentAttachment["contentType"], size: Number(data.size), pageCount: Number(data.page_count), tokenEstimate: Number(data.token_estimate), hasImages: Boolean(data.has_images), imageCount: Number(data.image_count ?? 0), analyzedImageCount: Number(data.analyzed_image_count ?? 0), imageAnalyses: Array.isArray(data.image_analyses) ? data.image_analyses : [], ...(data.project_id ? { projectId: data.project_id, revisionId: data.revision_id, origin: data.origin, editable: data.origin === "generated" } : {}) };
+  return { id: data.document_id, name: data.filename, contentType: data.content_type as ChatDocumentAttachment["contentType"], size: Number(data.size), pageCount: Number(data.page_count), tokenEstimate: Number(data.token_estimate), hasImages: Boolean(data.has_images), imageCount: Number(data.image_count ?? 0), analyzedImageCount: Number(data.analyzed_image_count ?? 0), imageAnalyses: Array.isArray(data.image_analyses) ? data.image_analyses : [], ...(data.project_id ? { projectId: data.project_id, revisionId: data.revision_id, parentRevisionId: data.parent_revision_id ?? null, origin: data.origin, editable: Boolean(data.editable), sourceCompleteness: data.source_completeness ?? undefined } : {}) };
+}
+
+export async function downloadAuthorizedDocumentBytes(ownerId: string, conversationId: string, documentId: string): Promise<Uint8Array | null> {
+  const { data, error } = await getServerClient().from("chat_documents").select("storage_path,content_type").eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("document_id", documentId).eq("status", "complete").maybeSingle();
+  if (error) throw error;
+  if (!data?.storage_path) return null;
+  const result = await getServerClient().storage.from(CHAT_DOCUMENT_BUCKET).download(data.storage_path);
+  if (result.error) throw result.error;
+  return new Uint8Array(await result.data.arrayBuffer());
 }
 
 export async function getDocumentPages(ownerId: string, conversationId: string, pdfId: string, start = 1, end = 100000): Promise<ChatDocumentPage[]> {

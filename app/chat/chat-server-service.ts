@@ -18,6 +18,9 @@ import { getAuthoritativeChatImageIdsForRequest } from "../server/chat/chat-hist
 import { latestNonNullUsage, sumRoundUsage } from "./chat-usage";
 import { availablePdfTools, executePdfTool } from "../server/agent/pdf-tool";
 import { getAuthorizedDocument, getDocumentPages } from "../server/chat/chat-document-store";
+import { availablePdfEditTools } from "../server/agent/pdf-edit-tool-manifest";
+import { executePdfEditTool } from "../server/agent/pdf-edit-tool";
+import { PDF_EDIT_TOOL_INSTRUCTIONS } from "../server/agent/pdf-edit-tool-instructions";
 import { ingestDocx, ingestPdf } from "../server/chat/chat-document-service";
 import { DOCX_CONTENT_TYPE, documentContext } from "../../lib/chat-document";
 import { IncrementalCitationFilter, parseCitationMarkup, validCitationSources, type ChatSource } from "../../lib/chat-citations";
@@ -67,7 +70,9 @@ export async function generateChatResponse(
   }));
   chatRequest = { ...chatRequest, messages: contextualMessages };
   const imageTools = availableImageTools(allowedImageIds.length > 0);
-  const baseToolDefinitions = [...pythonTools, ...imageTools, ...webTools];
+  const pdfEditTools = availablePdfEditTools([...authoritativePdfs.values()].some((document) => document.contentType === "application/pdf"));
+  const allowedProjectIds = new Set([...authoritativePdfs.values()].map((document) => document.projectId).filter((projectId): projectId is string => Boolean(projectId)));
+  const baseToolDefinitions = [...pythonTools, ...imageTools, ...webTools, ...pdfEditTools];
   const imageToolAdvertised = imageTools.some((tool) => tool.function.name === INSPECT_IMAGE_TOOL_NAME);
 
   const enqueue = async (event: ChatStreamEvent) => {
@@ -98,6 +103,7 @@ export async function generateChatResponse(
           const systemInstructions = [
             ...runPythonInstructionsFor(Boolean(pythonTools.length && canCallTools)),
             ...webToolInstructionsFor(Boolean(webTools.length && canCallTools)),
+            ...(pdfEditTools.length && canCallTools ? PDF_EDIT_TOOL_INSTRUCTIONS : []),
           ];
           const reasoningParts: string[] = [];
           const contentParts: string[] = [];
@@ -191,6 +197,11 @@ export async function generateChatResponse(
               });
             } else if (webTools.some((tool) => tool.function.name === call.name)) {
               result = await executeWebTool(call);
+            } else if (pdfEditTools.some((tool) => tool.function.name === call.name)) {
+              if (!isModalConfigured() && call.name !== "inspect_pdf_editability" && call.name !== "compare_document_revisions") throw new Error("PDF editing is not configured.");
+              if (!executor && call.name !== "inspect_pdf_editability" && call.name !== "compare_document_revisions") executor = new ModalPythonExecutor(ownerId, conversationId, responseDeadlineAt);
+              result = await executePdfEditTool(call, { ownerId, conversationId, allowedPdfIds, allowedImageIds: new Set(allowedImageIds), allowedProjectIds, executor: executor ?? undefined, jobId: responseId });
+              for (const artifact of result.artifacts ?? []) if (artifact.contentType === "application/pdf") allowedPdfIds.add(artifact.id);
             } else if (availablePdfTools(allowedPdfIds.size > 0).some((tool) => tool.function.name === call.name)) {
               result = await executePdfTool(call, { ownerId, conversationId, allowedPdfIds });
             } else {

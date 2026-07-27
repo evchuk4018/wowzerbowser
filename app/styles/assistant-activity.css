@@ -183,3 +183,8 @@
 
 .image-output p { margin: 0 0 6px; }
 .image-output p:last-child { margin-bottom: 0; }
+.document-edit-activity { margin-top: .5rem; border: 1px solid var(--border-subtle, #ddd); border-radius: .5rem; padding: .6rem .75rem; font-size: .85rem; }
+.document-edit-summary, .document-edit-details { display: flex; gap: .75rem; flex-wrap: wrap; }
+.document-edit-summary { font-weight: 600; }
+.document-edit-details { margin-top: .35rem; opacity: .8; }
+.document-edit-error { margin-top: .35rem; color: var(--error, #b42318); }

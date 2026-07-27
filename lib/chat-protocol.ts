@@ -109,6 +109,55 @@ export type ChatImageToolResult = {
   model: string | null;
 };
 
+export type ChatDocumentEditPage = {
+  pageNumber: number;
+  nativeTextCharacters: number;
+  imageCount: number;
+  likelyScanned: boolean;
+  rotation: number;
+  width: number;
+  height: number;
+};
+
+export type ChatDocumentEditResult =
+  | {
+      kind: "inspection";
+      documentId: string;
+      projectId: string | null;
+      revisionId: string | null;
+      origin: "generated" | "uploaded";
+      sourceBacked: boolean;
+      sourceCompleteness: "complete" | "entrypoint-only" | null;
+      encrypted: boolean;
+      signed: boolean;
+      hasAcroForm: boolean;
+      pageCount: number;
+      pages: ChatDocumentEditPage[];
+      recommendedMethod: "source-rerender" | "pdf-objects" | "overlay" | "raster-rebuild" | "unsupported";
+    }
+  | {
+      kind: "revision";
+      projectId: string;
+      revisionId: string;
+      parentRevisionId: string;
+      documentId: string;
+      method: "source-rerender" | "pdf-objects" | "overlay" | "raster-rebuild";
+      changedPages: number[];
+      warnings: string[];
+    }
+  | {
+      kind: "comparison";
+      projectId: string;
+      leftRevisionId: string;
+      rightRevisionId: string;
+      pageCountChange: number;
+      changedPages: number[];
+      sourceFilesChanged: string[];
+      leftOutput: { size: number; sha256: string };
+      rightOutput: { size: number; sha256: string };
+      method: "source-rerender" | "pdf-objects" | "overlay" | "raster-rebuild";
+    };
+
 export type ChatToolResult = {
   id: string;
   name: string;
@@ -131,6 +180,7 @@ export type ChatToolResult = {
     | { kind: "location"; available: true; location: string; source: "deployment_metadata" }
     | { kind: "location"; available: false; message: string };
   image?: ChatImageToolResult;
+  documentEdit?: ChatDocumentEditResult;
 };
 
 export type ChatRequest = {
@@ -466,6 +516,30 @@ export function parseChatImageToolResult(value: unknown, field = "image"): ChatI
   return readImageToolResult(value, field);
 }
 
+function readDocumentEditResult(value: unknown, field: string): ChatDocumentEditResult {
+  if (!isRecord(value) || typeof value.kind !== "string") throw new ChatRequestValidationError(`${field} is invalid.`);
+  if (value.kind === "inspection") {
+    if ((value.origin !== "generated" && value.origin !== "uploaded") || typeof value.sourceBacked !== "boolean" || typeof value.encrypted !== "boolean" || typeof value.signed !== "boolean" || typeof value.hasAcroForm !== "boolean" || typeof value.pageCount !== "number" || !Number.isInteger(value.pageCount) || value.pageCount < 1 || !Array.isArray(value.pages)) throw new ChatRequestValidationError(`${field} inspection is invalid.`);
+    const pages = value.pages.slice(0, 200).map((page, index) => {
+      if (!isRecord(page) || typeof page.pageNumber !== "number" || !Number.isInteger(page.pageNumber) || page.pageNumber < 1 || typeof page.nativeTextCharacters !== "number" || !Number.isFinite(page.nativeTextCharacters) || typeof page.imageCount !== "number" || !Number.isFinite(page.imageCount) || typeof page.likelyScanned !== "boolean" || typeof page.rotation !== "number" || !Number.isFinite(page.rotation) || typeof page.width !== "number" || !Number.isFinite(page.width) || typeof page.height !== "number" || !Number.isFinite(page.height)) throw new ChatRequestValidationError(`${field}.pages[${index}] is invalid.`);
+      return { pageNumber: Number(page.pageNumber), nativeTextCharacters: Number(page.nativeTextCharacters), imageCount: Number(page.imageCount), likelyScanned: page.likelyScanned, rotation: Number(page.rotation), width: Number(page.width), height: Number(page.height) };
+    });
+    if (!["source-rerender", "pdf-objects", "overlay", "raster-rebuild", "unsupported"].includes(String(value.recommendedMethod))) throw new ChatRequestValidationError(`${field}.recommendedMethod is invalid.`);
+    return { kind: "inspection", documentId: readBoundedNonEmptyString(value.documentId, `${field}.documentId`, 128), projectId: value.projectId === null ? null : readBoundedNonEmptyString(value.projectId, `${field}.projectId`, 128), revisionId: value.revisionId === null ? null : readBoundedNonEmptyString(value.revisionId, `${field}.revisionId`, 128), origin: value.origin, sourceBacked: value.sourceBacked, sourceCompleteness: value.sourceCompleteness === null ? null : value.sourceCompleteness as "complete" | "entrypoint-only", encrypted: value.encrypted, signed: value.signed, hasAcroForm: value.hasAcroForm, pageCount: Number(value.pageCount), pages, recommendedMethod: value.recommendedMethod as never };
+  }
+  if (value.kind === "revision") {
+    if (!["source-rerender", "pdf-objects", "overlay", "raster-rebuild"].includes(String(value.method)) || !Array.isArray(value.changedPages) || !Array.isArray(value.warnings)) throw new ChatRequestValidationError(`${field} revision is invalid.`);
+    return { kind: "revision", projectId: readBoundedNonEmptyString(value.projectId, `${field}.projectId`, 128), revisionId: readBoundedNonEmptyString(value.revisionId, `${field}.revisionId`, 128), parentRevisionId: readBoundedNonEmptyString(value.parentRevisionId, `${field}.parentRevisionId`, 128), documentId: readBoundedNonEmptyString(value.documentId, `${field}.documentId`, 128), method: value.method as never, changedPages: value.changedPages.filter((page): page is number => Number.isInteger(page) && page > 0).slice(0, 200), warnings: value.warnings.filter((warning): warning is string => typeof warning === "string").map((warning) => warning.slice(0, 500)).slice(0, 50) };
+  }
+  if (value.kind === "comparison") {
+    if (!Number.isInteger(value.pageCountChange) || !Array.isArray(value.changedPages) || !Array.isArray(value.sourceFilesChanged) || !isRecord(value.leftOutput) || !isRecord(value.rightOutput)) throw new ChatRequestValidationError(`${field} comparison is invalid.`);
+    return { kind: "comparison", projectId: readBoundedNonEmptyString(value.projectId, `${field}.projectId`, 128), leftRevisionId: readBoundedNonEmptyString(value.leftRevisionId, `${field}.leftRevisionId`, 128), rightRevisionId: readBoundedNonEmptyString(value.rightRevisionId, `${field}.rightRevisionId`, 128), pageCountChange: Number(value.pageCountChange), changedPages: value.changedPages.filter((page): page is number => Number.isInteger(page) && page > 0).slice(0, 200), sourceFilesChanged: value.sourceFilesChanged.filter((path): path is string => typeof path === "string").map((path) => path.slice(0, 1_024)).slice(0, 100), leftOutput: { size: Number(value.leftOutput.size), sha256: String(value.leftOutput.sha256) }, rightOutput: { size: Number(value.rightOutput.size), sha256: String(value.rightOutput.sha256) }, method: value.method as never };
+  }
+  throw new ChatRequestValidationError(`${field}.kind is invalid.`);
+}
+
+export function parseChatDocumentEditResult(value: unknown, field = "documentEdit"): ChatDocumentEditResult { return readDocumentEditResult(value, field); }
+
 function readLocationSource(value: unknown, field: string): "deployment_metadata" {
   if (value !== "deployment_metadata") throw new ChatRequestValidationError(`${field} is invalid.`);
   return value;
@@ -546,6 +620,9 @@ function readToolCalls(value: unknown, field: string): ChatToolCall[] | undefine
         ...(call.result.image === undefined
           ? {}
           : { image: readImageToolResult(call.result.image, `${field}[${index}].result.image`) }),
+        ...(call.result.documentEdit === undefined
+          ? {}
+          : { documentEdit: readDocumentEditResult(call.result.documentEdit, `${field}[${index}].result.documentEdit`) }),
       };
     }
     return {

@@ -16,10 +16,10 @@ export type DocumentSourceCompleteness = "complete" | "entrypoint-only";
 export type DocumentProjectSourceFile = { path: string; size: number; sha256: string; contentType: string };
 export type DocumentProjectManifestV1 = {
   schemaVersion: 1; projectId: string; revisionId: string; parentRevisionId: string | null;
-  origin: "generated"; createdAt: string; createdByJobId: string | null; entrypoint: string;
+  origin: "generated" | "uploaded"; createdAt: string; createdByJobId: string | null; entrypoint: string;
   outputPath: string; outputFilename: string; outputContentType: DocumentOutputContentType;
   sourceFiles: DocumentProjectSourceFile[]; outputSha256: string;
-  sourceCompleteness: DocumentSourceCompleteness;
+  sourceCompleteness: DocumentSourceCompleteness | null;
 };
 
 const ID = /^[A-Za-z0-9_-]{8,80}$/;
@@ -58,13 +58,13 @@ export function validateDocumentProjectManifest(value: unknown): DocumentProject
   const manifest = value as DocumentProjectManifestV1;
   const encoded = new TextEncoder().encode(JSON.stringify(manifest));
   if (encoded.byteLength > DOCUMENT_PROJECT_LIMITS.maxManifestBytes) throw new Error("Document project manifest exceeds 256 KiB.");
-  if (manifest.schemaVersion !== 1 || manifest.origin !== "generated") throw new Error("Unsupported document project manifest.");
+  if (manifest.schemaVersion !== 1 || (manifest.origin !== "generated" && manifest.origin !== "uploaded")) throw new Error("Unsupported document project manifest.");
   documentProjectId(manifest.projectId); documentProjectId(manifest.revisionId, "revision identifier");
   if (manifest.parentRevisionId !== null) documentProjectId(manifest.parentRevisionId, "parent revision identifier");
   if (!Number.isFinite(Date.parse(manifest.createdAt)) || (manifest.createdByJobId !== null && typeof manifest.createdByJobId !== "string")) throw new Error("Manifest creation metadata is invalid.");
   if (!DOCUMENT_OUTPUT_CONTENT_TYPES.includes(manifest.outputContentType)) throw new Error("Manifest output content type is invalid.");
   if (!SHA.test(manifest.outputSha256)) throw new Error("Manifest output SHA-256 is invalid.");
-  if (!Array.isArray(manifest.sourceFiles) || !manifest.sourceFiles.length || manifest.sourceFiles.length > DOCUMENT_PROJECT_LIMITS.maxSourceFiles) throw new Error("Manifest source file count is invalid.");
+  if (!Array.isArray(manifest.sourceFiles) || (manifest.origin === "generated" && !manifest.sourceFiles.length) || manifest.sourceFiles.length > DOCUMENT_PROJECT_LIMITS.maxSourceFiles) throw new Error("Manifest source file count is invalid.");
   if (!(["complete", "entrypoint-only"] as unknown[]).includes(manifest.sourceCompleteness)) throw new Error("Manifest source completeness is invalid.");
   const root = documentRevisionRoot(manifest.projectId, manifest.revisionId);
   const sourceRoot = `${root}/source`; const outputRoot = `${root}/output`;

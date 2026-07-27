@@ -55,7 +55,7 @@ export async function executePythonTool(
           path: provenance.canonicalOutputPath, size: item.size, sha256: item.sha256, contentType,
           projectId: provenance.projectId, revisionId: provenance.revisionId,
           parentRevisionId: provenance.manifest.parentRevisionId, origin: "generated", editable: true,
-          sourceCompleteness: provenance.sourceCompleteness,
+          ...(provenance.sourceCompleteness === null ? {} : { sourceCompleteness: provenance.sourceCompleteness }),
         }));
       } else artifacts.push(registerArtifact({
         ownerId,
