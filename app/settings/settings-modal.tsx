@@ -333,14 +333,14 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage }: Settings
   const navigationId = useId();
 
   useEffect(() => {
-    const initialFocusSelector = window.matchMedia("(max-width: 700px)").matches
+    const initialFocusSelector = window.matchMedia("(max-width: 820px)").matches
       ? ".settings-menu-toggle"
       : ".settings-nav-item";
     dialogRef.current?.querySelector<HTMLButtonElement>(initialFocusSelector)?.focus();
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") onClose();
       if (event.key !== "Tab" || !dialogRef.current) return;
-      const mobileViewport = window.matchMedia("(max-width: 700px)").matches;
+      const mobileViewport = window.matchMedia("(max-width: 820px)").matches;
       const focusable = Array.from(
         dialogRef.current.querySelectorAll<HTMLElement>(
           'button:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
@@ -404,7 +404,7 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage }: Settings
                   setActiveSection(section.id);
                   setMobileMenuOpen(false);
                   requestAnimationFrame(() => {
-                    if (!window.matchMedia("(max-width: 700px)").matches) return;
+                    if (!window.matchMedia("(max-width: 820px)").matches) return;
                     dialogRef.current?.querySelector<HTMLButtonElement>(".settings-menu-toggle")?.focus();
                   });
                 }}
