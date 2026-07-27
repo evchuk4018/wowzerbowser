@@ -190,11 +190,19 @@ export async function fetchChatImage(
   imageId: string,
   conversationId: string,
   accessToken: string,
+  signal?: AbortSignal,
 ): Promise<Blob> {
   const response = await fetch(
     `/api/chat/images/${encodeURIComponent(imageId)}?conversationId=${encodeURIComponent(conversationId)}`,
-    { headers: { authorization: `Bearer ${accessToken}` } },
+    { headers: { authorization: `Bearer ${accessToken}` }, signal },
   );
-  if (!response.ok) throw new Error(await readError(response));
+  if (!response.ok) throw new ChatImageFetchError(response.status, await readError(response));
   return response.blob();
+}
+
+export class ChatImageFetchError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = "ChatImageFetchError";
+  }
 }

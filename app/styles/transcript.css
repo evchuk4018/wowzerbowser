@@ -194,8 +194,10 @@
 }
 .message-image-attachments {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(120px, 100%), 160px));
   gap: 8px;
   margin-bottom: 8px;
+  max-width: 100%;
 }
 
 .message-image-attachment {
@@ -203,14 +205,43 @@
   gap: 5px;
   color: var(--muted);
   font-size: 11px;
+  min-width: 0;
 }
 
-.message-image-attachment img {
-  display: block;
-  max-width: min(360px, 100%);
-  max-height: 260px;
+.message-image-preview {
+  display: grid;
+  place-items: center;
+  width: 160px;
+  max-width: 100%;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border: 1px solid #494a45;
   border-radius: 10px;
+  background: #2f302d;
+  text-align: center;
+}
+
+.message-image-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
+}
+
+.message-image-preview button {
+  display: block;
+  margin: 4px auto 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+}
+
+.message-image-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .message-document-attachments {

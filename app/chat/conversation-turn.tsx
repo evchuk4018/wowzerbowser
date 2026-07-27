@@ -11,6 +11,7 @@ import type { ChatImageAttachment } from "../../lib/chat-protocol";
 import type { ChatDocumentAttachment } from "../../lib/chat-document";
 import { fetchChatImage } from "./chat-service";
 import { useEffect, useState } from "react";
+import { loadChatImagePreview } from "./chat-image-preview-loader";
 
 export type ThinkingTiming = { startedAt: number; now: number };
 
@@ -19,28 +20,43 @@ function UserImage({ image, conversationId, getAccessToken }: {
   conversationId: string;
   getAccessToken: () => Promise<string | null>;
 }) {
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ status: "loading" | "loaded" | "error"; url?: string }>({ status: "loading" });
+  const [retryKey, setRetryKey] = useState(0);
   useEffect(() => {
-    let active = true;
+    const controller = new AbortController();
     let objectUrl: string | null = null;
-    void getAccessToken()
-      .then((token) => token ? fetchChatImage(image.id, conversationId, token) : null)
+    void loadChatImagePreview({
+      imageId: image.id,
+      conversationId,
+      signal: controller.signal,
+      getAccessToken,
+      fetchImage: fetchChatImage,
+    })
       .then((blob) => {
-        if (!blob || !active) return;
+        if (controller.signal.aborted) return;
         objectUrl = URL.createObjectURL(blob);
-        setPreviewUrl(objectUrl);
+        setPreview({ status: "loaded", url: objectUrl });
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          console.error("Image preview could not be loaded.", error);
+          setPreview({ status: "error" });
+        }
+      });
     return () => {
-      active = false;
+      controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [conversationId, getAccessToken, image.id]);
+  }, [conversationId, getAccessToken, image.id, retryKey]);
   return (
     <div className="message-image-attachment">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      {previewUrl ? <img src={previewUrl} alt={image.name ?? "Attached image"} /> : <span>Loading image…</span>}
-      {image.name && <span>{image.name}</span>}
+      <div className="message-image-preview">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        {preview.status === "loaded" ? <img src={preview.url} alt={image.name ?? "Attached image"} /> : null}
+        {preview.status === "loading" ? <span>Loading image…</span> : null}
+        {preview.status === "error" ? <span>Image unavailable <button type="button" onClick={() => { setPreview({ status: "loading" }); setRetryKey((key) => key + 1); }}>Retry</button></span> : null}
+      </div>
+      {image.name && <span className="message-image-name" title={image.name}>{image.name}</span>}
     </div>
   );
 }
