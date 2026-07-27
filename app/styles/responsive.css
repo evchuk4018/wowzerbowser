@@ -8,6 +8,10 @@
     -webkit-user-select: none;
   }
 
+  .message.assistant .message-bubble {
+    max-width: 100%;
+  }
+
   .conversation-item,
   .conversation-title {
     user-select: none;

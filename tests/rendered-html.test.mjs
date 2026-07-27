@@ -418,6 +418,15 @@ test("keeps mobile prompt actions prominent and ephemeral", async () => {
   assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.conversation-item,[\s\S]*?\.conversation-title \{[\s\S]*?user-select: none;[\s\S]*?-webkit-user-select: none;/);
 });
 
+test("expands assistant responses across the mobile transcript", async () => {
+  const styles = await readStyles();
+
+  assert.match(
+    styles,
+    /@media \(max-width: 760px\) \{[\s\S]*?\.message\.assistant \.message-bubble \{\s*max-width: 100%;\s*\}/,
+  );
+});
+
 test("validates and preserves ordered assistant tool rounds", () => {
   const artifact = {
     id: "signed-artifact-token",
