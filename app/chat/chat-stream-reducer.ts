@@ -86,6 +86,7 @@ export function reduceChatStreamEvent(
       );
       break;
     case "meta":
+    case "reasoning_details":
       break;
     default: {
       const exhaustiveEvent: never = event;

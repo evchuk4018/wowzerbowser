@@ -6,12 +6,12 @@ import { getServerClient } from "../../auth/supabase-server-adapter";
 export async function listChatModelPreferences(ownerId: string) {
   const { data, error } = await getServerClient()
     .from("chat_model_preferences")
-    .select("conversation_id,model,thinking,reasoning_effort")
+    .select("conversation_id,provider,model,thinking,reasoning_effort")
     .eq("owner_id", ownerId);
   if (error) throw error;
   return (data ?? []).map((row) => ({
     conversationId: row.conversation_id as string,
-    model: row.model,
+    model: { provider: row.provider ?? "deepseek", model: row.model },
     thinking: row.thinking,
     reasoningEffort: row.reasoning_effort,
   }));
@@ -25,7 +25,8 @@ export async function saveChatModelPreference(
   const { error } = await getServerClient().from("chat_model_preferences").upsert({
     owner_id: ownerId,
     conversation_id: conversationId,
-    model: preference.model,
+    provider: preference.model.provider,
+    model: preference.model.model,
     thinking: preference.thinking,
     reasoning_effort: preference.reasoningEffort,
     updated_at: new Date().toISOString(),

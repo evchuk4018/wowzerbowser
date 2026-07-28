@@ -8,6 +8,7 @@ import type {
 } from "../../lib/usage-protocol";
 import type { ChatSettings } from "../chat/conversation-types";
 import { ToolsSettings } from "./tools-settings";
+import { ModelsSettings } from "./models-settings";
 
 export type SettingsModalProps = {
   settings: ChatSettings;
@@ -21,7 +22,7 @@ type SettingsSection =
   | "general"
   | "usage"
   | "tools"
-  | "personalization"
+  | "models"
   | "plugins"
   | "storage"
   | "safety"
@@ -33,7 +34,7 @@ const sections: Array<{ id: SettingsSection; label: string; description: string;
   { id: "general", label: "General", description: "Conversation context and app preferences.", icon: "⚙" },
   { id: "usage", label: "Usage", description: "Review token volume and estimated costs.", icon: "◫" },
   { id: "tools", label: "Tools", description: "Create Python tools and securely connect APIs.", icon: "♢" },
-  { id: "personalization", label: "Personalization", description: "Shape how the experience works for you.", icon: "✦" },
+  { id: "models", label: "Models", description: "Enable built-in and OpenRouter chat models.", icon: "✦" },
   { id: "plugins", label: "Plugins", description: "Manage connected tools and extensions.", icon: "⌘" },
   { id: "storage", label: "Storage", description: "Review stored data and retention options.", icon: "▱" },
   { id: "safety", label: "Safety", description: "Control safeguards and content preferences.", icon: "◇" },
@@ -401,6 +402,8 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage, getAccessT
               <UsageSettings loadUsage={loadUsage} />
             ) : activeSection === "tools" ? (
               <ToolsSettings getAccessToken={getAccessToken} />
+            ) : activeSection === "models" ? (
+              <ModelsSettings getAccessToken={getAccessToken} />
             ) : (
               <PlaceholderSettings label={activeLabel} />
             )}

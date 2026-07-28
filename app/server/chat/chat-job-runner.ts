@@ -90,16 +90,26 @@ export async function runChatJob(
         if (event.type === "done") usage = event.usage;
         if (event.type === "error") generationError = event.message;
       },
-      async ({ round, usage: providerUsage, estimatedUsage }) => {
+      async ({ round, usage: providerUsage, estimatedUsage, provider, model, exactCostUsd, pricing }) => {
         await recordUsage({
           ownerId,
-          provider: "deepseek",
-          model: request.model,
+          provider,
+          model,
           requestKind: "chat",
           requestId: jobId,
           round,
           usage: providerUsage ?? estimatedUsage,
           source: providerUsage ? "exact" : "estimated",
+          exactCostUsd,
+          pricingSnapshot: pricing ? {
+            provider,
+            model,
+            label: model,
+            inputUsdPerMillion: pricing.inputUsdPerMillion ?? 0,
+            cachedInputUsdPerMillion: pricing.cachedInputUsdPerMillion,
+            outputUsdPerMillion: pricing.outputUsdPerMillion ?? 0,
+          } : null,
+          unpriced: exactCostUsd === undefined && (!pricing || pricing.inputUsdPerMillion === null || pricing.outputUsdPerMillion === null),
         });
       },
       async ({ provider, model, usage: summaryUsage, phase, revision }) => {

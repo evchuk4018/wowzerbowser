@@ -1,9 +1,10 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import type { ChatAssistantRound, ChatRequest, ChatStreamEvent, ChatToolCall, ChatToolResult, ChatUsage } from "../../lib/chat-protocol";
+import type { ChatAssistantRound, ChatModelPricing, ChatRequest, ChatStreamEvent, ChatToolCall, ChatToolResult, ChatUsage } from "../../lib/chat-protocol";
 import { estimateUsageFromText } from "../../lib/usage-pricing";
-import { streamDeepSeekChatRound } from "../providers/deepseek/deepseek-adapter";
+import { chatProviderAdapter } from "../server/chat/chat-provider-registry";
+import { authorizeChatModel } from "../server/chat/chat-model-catalog-service";
 import { availableChatTools, executePythonTool } from "../server/agent/python-tool";
 import { runPythonInstructionsFor } from "../server/agent/python-tool-instructions";
 import { availableWebTools, executeWebTool } from "../server/agent/web-tools";
@@ -39,6 +40,10 @@ export type ChatRoundUsage = {
   round: number;
   usage: ChatUsage | null;
   estimatedUsage: ChatUsage;
+  provider: "deepseek" | "openrouter";
+  model: string;
+  exactCostUsd?: number;
+  pricing?: ChatModelPricing | null;
 };
 
 export type ChatSummaryUsage = ReasoningTitleUsage;
@@ -59,6 +64,12 @@ export async function generateChatResponse(
   persistUsage?: (usage: ChatRoundUsage) => Promise<void>,
   persistSummaryUsage?: (usage: ChatSummaryUsage) => Promise<void>,
 ): Promise<void> {
+  if (typeof chatRequest.model === "string") {
+    chatRequest = { ...chatRequest, model: { provider: "deepseek", model: chatRequest.model } };
+  }
+  const selectedMetadata = await authorizeChatModel(ownerId, chatRequest.model);
+  const providerAdapter = chatProviderAdapter(chatRequest.model.provider);
+  providerAdapter.assertConfigured();
   const responseDeadlineAt = Date.now() + MAX_RESPONSE_MS;
   const responseId = chatRequest.jobId;
   const conversationId = stableConversationId(chatRequest);
@@ -136,11 +147,16 @@ export async function generateChatResponse(
           const contentParts: string[] = [];
           const citationFilter = new IncrementalCitationFilter();
           const calls: ChatToolCall[] = [];
+          const reasoningDetails: unknown[] = [];
           const roundUsageIndex = roundUsages.push(null) - 1;
           let providerAccepted = false;
+          let actualModel = chatRequest.model.model;
+          let exactCostUsd: number | undefined;
+          let pricing: ChatModelPricing | null | undefined = selectedMetadata.pricing;
           try {
-            for await (const event of streamDeepSeekChatRound(
+            for await (const event of providerAdapter.streamRound(
               chatRequest,
+              selectedMetadata,
               {
                 replayRounds,
                 systemInstructions,
@@ -155,6 +171,8 @@ export async function generateChatResponse(
                 reasoningParts.push(event.delta);
                 titleCoordinator.append(event.delta);
                 await enqueue(event);
+              } else if (event.type === "reasoning_details") {
+                reasoningDetails.push(...event.details);
               } else if (event.type === "content") {
                 contentParts.push(event.delta);
                 const delta = citationFilter.push(event.delta);
@@ -163,6 +181,9 @@ export async function generateChatResponse(
                 calls.push(event.call);
               } else if (event.type === "done") {
                 roundUsages[roundUsageIndex] = latestNonNullUsage(roundUsages[roundUsageIndex], event.usage);
+                actualModel = event.model ?? actualModel;
+                exactCostUsd = event.exactCostUsd ?? exactCostUsd;
+                pricing = event.pricing ?? pricing;
               } else if (event.type === "error") {
                 await enqueue(event);
               }
@@ -183,6 +204,10 @@ export async function generateChatResponse(
                   }),
                   `${reasoningParts.join("")} ${contentParts.join("")} ${calls.map((call) => call.arguments).join(" ")}`,
                 ),
+                provider: chatRequest.model.provider,
+                model: actualModel,
+                ...(exactCostUsd === undefined ? {} : { exactCostUsd }),
+                pricing,
               });
             }
           }
@@ -282,6 +307,7 @@ export async function generateChatResponse(
           replayRounds.push({
             content: contentParts.join(""),
             ...(reasoningParts.length ? { reasoning: reasoningParts.join("") } : {}),
+            ...(reasoningDetails.length ? { reasoningDetails } : {}),
             toolCalls: calls,
           });
         }

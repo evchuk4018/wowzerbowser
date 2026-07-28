@@ -11,7 +11,7 @@ import {
   type RefObject,
   type SetStateAction,
 } from "react";
-import type { ChatImageAttachment, ChatModelId, ChatModelInfo, ChatReasoningEffort } from "../../lib/chat-protocol";
+import { chatModelIdentity, type ChatImageAttachment, type ChatModelRef, type ChatModelInfo, type ChatReasoningEffort } from "../../lib/chat-protocol";
 import type { ChatModelPreference } from "../../lib/chat-model-preference";
 import {
   ACCEPTED_CHAT_IMAGE_TYPES,
@@ -33,6 +33,10 @@ function documentType(contentType: string, name: string): "PDF" | "DOCX" {
   return name.toLowerCase().endsWith(".pdf") ? "PDF" : "DOCX";
 }
 
+const REASONING_LABELS: Record<ChatReasoningEffort, string> = {
+  minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra High", max: "Max",
+};
+
 function DocumentIcon({ type }: { type: "PDF" | "DOCX" }) {
   return (
     <span className="message-document-icon" aria-hidden="true">
@@ -49,8 +53,8 @@ export type ChatComposerProps = {
   isStreaming: boolean;
   startupPending?: boolean;
   models: ChatModelInfo[];
-  model: ChatModelId;
-  setModel: Dispatch<SetStateAction<ChatModelId>>;
+  model: ChatModelRef;
+  setModel: Dispatch<SetStateAction<ChatModelRef>>;
   selectedModel?: ChatModelInfo;
   openMenu: "model" | "thinking" | null;
   setOpenMenu: Dispatch<SetStateAction<"model" | "thinking" | null>>;
@@ -386,7 +390,7 @@ export function ChatComposer({
               disabled={disabled || !models.length}
               onClick={() => setOpenMenu((current) => (current === "model" ? null : "model"))}
             >
-              <span className="menu-trigger-label">{selectedModel?.label ?? "Model"}</span>
+              <span className="menu-trigger-label">{selectedModel?.displayName ?? "Model"}</span>
               <span className="menu-chevron" aria-hidden="true">⌄</span>
             </button>
             {openMenu === "model" && (
@@ -398,25 +402,25 @@ export function ChatComposer({
               >
                 {models.map((availableModel) => (
                   <button
-                    key={availableModel.id}
+                    key={chatModelIdentity(availableModel.ref)}
                     type="button"
-                    aria-pressed={availableModel.id === model}
-                    className={`composer-menu-option ${availableModel.id === model ? "selected" : ""}`}
+                    aria-pressed={chatModelIdentity(availableModel.ref) === chatModelIdentity(model)}
+                    className={`composer-menu-option ${chatModelIdentity(availableModel.ref) === chatModelIdentity(model) ? "selected" : ""}`}
                     disabled={disabled}
                     onClick={() => {
-                      setModel(availableModel.id);
-                      const nextThinking = thinking && availableModel.thinkingSupported && Boolean(availableModel.supportedEfforts.length);
+                      setModel(availableModel.ref);
+                      const nextThinking = availableModel.reasoningRequired || (thinking && Boolean(availableModel.supportedEfforts.length));
                       const nextEffort = availableModel.supportedEfforts.includes(effort)
                         ? effort
                         : (availableModel.supportedEfforts[0] ?? "high");
                       setThinking(nextThinking);
                       setEffort(nextEffort);
-                      onPreferenceChange({ model: availableModel.id, thinking: nextThinking, reasoningEffort: nextEffort });
+                      onPreferenceChange({ model: availableModel.ref, thinking: nextThinking, reasoningEffort: nextEffort });
                       setOpenMenu(null);
                     }}
                   >
-                    <span>{availableModel.label}</span>
-                    {availableModel.id === model && <span aria-hidden="true">✓</span>}
+                    <span>{availableModel.displayName}</span>
+                    {chatModelIdentity(availableModel.ref) === chatModelIdentity(model) && <span aria-hidden="true">✓</span>}
                   </button>
                 ))}
               </div>
@@ -442,7 +446,7 @@ export function ChatComposer({
                 role="group"
                 aria-label="Thinking mode"
               >
-                <button
+                {!selectedModel?.reasoningRequired && <button
                   type="button"
                   aria-pressed={!thinking}
                   className={`composer-menu-option ${!thinking ? "selected" : ""}`}
@@ -455,7 +459,7 @@ export function ChatComposer({
                 >
                   <span>Off</span>
                   {!thinking && <span aria-hidden="true">✓</span>}
-                </button>
+                </button>}
                 {supportedEfforts.map((supportedEffort) => (
                   <button
                     key={supportedEffort}
@@ -470,7 +474,7 @@ export function ChatComposer({
                       setOpenMenu(null);
                     }}
                   >
-                    <span>On · {supportedEffort[0].toUpperCase() + supportedEffort.slice(1)}</span>
+                    <span>{REASONING_LABELS[supportedEffort]}</span>
                     {thinking && effort === supportedEffort && <span aria-hidden="true">✓</span>}
                   </button>
                 ))}

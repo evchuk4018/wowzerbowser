@@ -47,6 +47,9 @@ function usageColumns(input: UsageRecordInput) {
     recorded_at: input.recordedAt ?? new Date().toISOString(),
     conversation_id: input.conversationId ?? null,
     job_id: input.jobId ?? null,
+    exact_cost_usd: input.exactCostUsd ?? null,
+    pricing_snapshot: input.pricingSnapshot ?? null,
+    unpriced: input.unpriced ?? false,
   };
 }
 
@@ -72,7 +75,8 @@ async function writeUsageRecord(input: UsageRecordInput): Promise<void> {
     ?? DEFAULT_DEEPSEEK_USAGE_PRICING.find((entry) => entry.provider === input.provider && entry.model === input.model)
     ?? null;
   const usage = normalizeUsage(input.usage);
-  const costUsd = calculateUsageCost(usage, pricing);
+  const effectivePricing = input.pricingSnapshot ?? pricing;
+  const costUsd = input.exactCostUsd ?? calculateUsageCost(usage, effectivePricing);
   const { error } = await table().from("chat_usage_records").upsert({
     owner_id: input.ownerId,
     provider: input.provider,
@@ -90,10 +94,13 @@ async function writeUsageRecord(input: UsageRecordInput): Promise<void> {
     reasoning_tokens: usage.reasoningTokens ?? 0,
     cost_usd: costUsd,
     usage_source: input.source,
-    input_usd_per_million: pricing?.inputUsdPerMillion ?? null,
-    cached_input_usd_per_million: pricing?.cachedInputUsdPerMillion ?? null,
-    output_usd_per_million: pricing?.outputUsdPerMillion ?? null,
-    pricing_label: pricing?.label ?? null,
+    exact_cost_usd: input.exactCostUsd ?? null,
+    pricing_snapshot: effectivePricing,
+    unpriced: input.unpriced ?? (costUsd === null),
+    input_usd_per_million: effectivePricing?.inputUsdPerMillion ?? null,
+    cached_input_usd_per_million: effectivePricing?.cachedInputUsdPerMillion ?? null,
+    output_usd_per_million: effectivePricing?.outputUsdPerMillion ?? null,
+    pricing_label: effectivePricing?.label ?? null,
   }, {
     onConflict: "owner_id,provider,request_kind,request_id,round",
     ignoreDuplicates: true,
@@ -105,7 +112,7 @@ export async function flushUsageOutbox(ownerId: string): Promise<void> {
   while (true) {
     const { data, error } = await table()
       .from("chat_usage_outbox")
-      .select("id,provider,model,request_kind,request_id,round,prompt_tokens,completion_tokens,total_tokens,cached_prompt_tokens,reasoning_tokens,usage_source,recorded_at,conversation_id,job_id")
+      .select("id,provider,model,request_kind,request_id,round,prompt_tokens,completion_tokens,total_tokens,cached_prompt_tokens,reasoning_tokens,usage_source,recorded_at,conversation_id,job_id,exact_cost_usd,pricing_snapshot,unpriced")
       .eq("owner_id", ownerId)
       .order("id")
       .limit(100);
@@ -132,6 +139,9 @@ export async function flushUsageOutbox(ownerId: string): Promise<void> {
       recordedAt: String(value.recorded_at),
       conversationId: typeof value.conversation_id === "string" ? value.conversation_id : undefined,
       jobId: typeof value.job_id === "string" ? value.job_id : undefined,
+      exactCostUsd: value.exact_cost_usd === null ? null : numberValue(value.exact_cost_usd),
+      pricingSnapshot: value.pricing_snapshot && typeof value.pricing_snapshot === "object" ? value.pricing_snapshot as UsagePricing : null,
+      unpriced: value.unpriced === true,
     };
     try {
       await writeUsageRecord(input);

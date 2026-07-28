@@ -342,7 +342,9 @@ test("keeps DeepSeek access server-side and uses the V4 thinking contract", asyn
   assert.match(route, /authorizeOwnerSession/);
   assert.match(route, /after\(\(\) => completion\)/);
   assert.match(route, /text\/event-stream/);
-  assert.match(modelsRoute, /listDeepSeekModels/);
+  assert.match(modelsRoute, /composerChatModels/);
+  assert.match(modelsRoute, /discoverChatModels/);
+  assert.match(modelsRoute, /enableChatModel/);
 });
 
 test("keeps composer model and thinking controls accessible and responsive", async () => {
@@ -391,7 +393,8 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(settings, /All time/);
   assert.match(settings, /Tools/);
   assert.doesNotMatch(settings, /Notifications/);
-  assert.match(settings, /Personalization/);
+  assert.match(settings, /Models/);
+  assert.match(settings, /ModelsSettings/);
   assert.match(settings, /Plugins/);
   assert.match(settings, /Storage/);
   assert.match(settings, /Safety/);

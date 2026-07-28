@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./openrouter-chat.test.mjs";
 import test from "node:test";
 import { DeepSeekDsmlParser, parseDeepSeekDsml } from "../app/providers/deepseek/deepseek-dsml.ts";
 import { streamDeepSeekChatRound } from "../app/providers/deepseek/deepseek-adapter.ts";

@@ -35,15 +35,17 @@ bobert may use Markdown for structure and readability, and LaTeX for mathematica
 When tools are available, bobert may call phase_break to begin a genuinely new stage of work. A phase break may include a brief userUpdate when a progress update would be useful before continuing. bobert uses phase breaks for meaningful changes of objective or work stage, not after every tool call or for cosmetic separation.
 
 </bobert_behavior>`;
-export const CHAT_MODEL_IDS = ["deepseek-v4-flash", "deepseek-v4-pro"] as const;
-export type ChatModelId = (typeof CHAT_MODEL_IDS)[number];
+export const CHAT_PROVIDERS = ["deepseek", "openrouter"] as const;
+export type ChatProvider = (typeof CHAT_PROVIDERS)[number];
+export type ChatModelRef = { provider: ChatProvider; model: string };
 
 const MAX_PROMPT_LENGTH = 12000;
 const MAX_TRACE_LENGTH = 128 * 1024;
 const MAX_MESSAGES = 100;
 const MAX_SERIALIZED_HISTORY_LENGTH = 1024 * 1024;
 
-export type ChatReasoningEffort = "high" | "max";
+export const CHAT_REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export type ChatReasoningEffort = (typeof CHAT_REASONING_EFFORTS)[number];
 
 export type ChatMessageInput = {
   role: "user" | "assistant";
@@ -86,6 +88,8 @@ export type ChatToolCall = {
 
 export type ChatAssistantRound = {
   reasoning?: string;
+  /** Opaque provider reasoning state retained only for server-side replay. */
+  reasoningDetails?: unknown[];
   content: string;
   toolCalls?: ChatToolCall[];
 };
@@ -189,7 +193,7 @@ export type ChatRequest = {
   systemPrompt: string;
   userPresence: string;
   messages: ChatMessageInput[];
-  model: ChatModelId;
+  model: ChatModelRef;
   thinking: boolean;
   reasoningEffort: ChatReasoningEffort;
   /** Stable client-generated id used to persist the execution volume. */
@@ -248,15 +252,35 @@ export type ChatLiveStreamEnvelope =
   | { type: "terminal"; terminal: ChatJobTerminalResponse };
 
 export type ChatModelInfo = {
-  id: ChatModelId;
-  label: string;
-  thinkingSupported: boolean;
+  ref: ChatModelRef;
+  displayName: string;
+  description: string | null;
+  author: string | null;
+  architecture: string | null;
+  inputModalities: string[];
+  outputModalities: string[];
+  toolSupport: boolean;
+  supportedParameters: string[];
+  reasoningRequired: boolean;
   supportedEfforts: ChatReasoningEffort[];
+  defaultReasoningEffort: ChatReasoningEffort | null;
+  contextLength: number;
+  createdAt: string | null;
+  pricing: ChatModelPricing | null;
+};
+
+export type ChatModelPricing = {
+  inputUsdPerMillion: number | null;
+  cachedInputUsdPerMillion: number | null;
+  outputUsdPerMillion: number | null;
+  requestUsd: number | null;
+  reasoningUsdPerMillion: number | null;
 };
 
 export type ChatStreamEvent =
   | { type: "round"; round: number }
   | { type: "reasoning"; delta: string }
+  | { type: "reasoning_details"; details: unknown[] }
   | { type: "phase_summary"; phase: number; summary: string; revision: number }
   | { type: "phase_break"; phase: number; update?: string; call: ChatToolCall; result: ChatToolResult }
   | { type: "content"; delta: string }
@@ -266,13 +290,13 @@ export type ChatStreamEvent =
   | { type: "artifact"; artifact: ChatArtifact }
   | {
       type: "meta";
-      model: ChatModelId;
+      model: ChatModelRef;
       thinking: boolean;
       reasoningEffort: ChatReasoningEffort;
       responseId?: string;
       tools?: string[];
     }
-  | { type: "done"; usage: ChatUsage | null }
+  | { type: "done"; usage: ChatUsage | null; provider?: ChatProvider; model?: string; exactCostUsd?: number; pricing?: ChatModelPricing | null }
   | { type: "cancelled" }
   | { type: "error"; message: string };
 
@@ -288,18 +312,51 @@ export class ChatRequestValidationError extends Error {}
 
 export const DEFAULT_CHAT_MODELS: ChatModelInfo[] = [
   {
-    id: "deepseek-v4-flash",
-    label: "V4 Flash",
-    thinkingSupported: true,
+    ref: { provider: "deepseek", model: "deepseek-v4-flash" },
+    displayName: "DeepSeek V4 Flash",
+    description: "Fast built-in general-purpose chat model.",
+    author: "DeepSeek",
+    architecture: "DeepSeek V4",
+    inputModalities: ["text"],
+    outputModalities: ["text"],
+    toolSupport: true,
+    supportedParameters: ["tools", "reasoning"],
+    reasoningRequired: false,
     supportedEfforts: ["high", "max"],
+    defaultReasoningEffort: "high",
+    contextLength: 1_000_000,
+    createdAt: null,
+    pricing: { inputUsdPerMillion: 0.14, cachedInputUsdPerMillion: 0.0028, outputUsdPerMillion: 0.28, requestUsd: null, reasoningUsdPerMillion: null },
   },
   {
-    id: "deepseek-v4-pro",
-    label: "V4 Pro",
-    thinkingSupported: true,
+    ref: { provider: "deepseek", model: "deepseek-v4-pro" },
+    displayName: "DeepSeek V4 Pro",
+    description: "Built-in high-capability general-purpose chat model.",
+    author: "DeepSeek",
+    architecture: "DeepSeek V4",
+    inputModalities: ["text"],
+    outputModalities: ["text"],
+    toolSupport: true,
+    supportedParameters: ["tools", "reasoning"],
+    reasoningRequired: false,
     supportedEfforts: ["high", "max"],
+    defaultReasoningEffort: "high",
+    contextLength: 1_000_000,
+    createdAt: null,
+    pricing: { inputUsdPerMillion: 0.435, cachedInputUsdPerMillion: 0.003625, outputUsdPerMillion: 0.87, requestUsd: null, reasoningUsdPerMillion: null },
   },
 ];
+
+export function chatModelIdentity(ref: ChatModelRef): string {
+  return `${ref.provider}:${ref.model}`;
+}
+
+export function isChatModelRef(value: unknown): value is ChatModelRef {
+  if (!isRecord(value)) return false;
+  return CHAT_PROVIDERS.includes(value.provider as ChatProvider)
+    && typeof value.model === "string"
+    && /^[a-zA-Z0-9._:/-]{1,256}$/.test(value.model);
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -714,16 +771,19 @@ export function parseChatRequest(value: unknown): ChatRequest {
     throw new ChatRequestValidationError("messages must end with a user message.");
   }
 
-  if (!CHAT_MODEL_IDS.includes(value.model as ChatModelId)) {
-    throw new ChatRequestValidationError("model is not supported.");
+  const model = typeof value.model === "string"
+    ? { provider: "deepseek" as const, model: value.model }
+    : value.model;
+  if (!isChatModelRef(model)) {
+    throw new ChatRequestValidationError("model must be a valid provider/model reference.");
   }
 
   if (typeof value.thinking !== "boolean") {
     throw new ChatRequestValidationError("thinking must be a boolean.");
   }
 
-  if (value.reasoningEffort !== "high" && value.reasoningEffort !== "max") {
-    throw new ChatRequestValidationError("reasoningEffort must be high or max.");
+  if (!CHAT_REASONING_EFFORTS.includes(value.reasoningEffort as ChatReasoningEffort)) {
+    throw new ChatRequestValidationError("reasoningEffort is invalid.");
   }
 
   let conversationId: string | undefined;
@@ -774,9 +834,9 @@ export function parseChatRequest(value: unknown): ChatRequest {
     systemPrompt: DEFAULT_CHAT_SYSTEM_PROMPT,
     userPresence,
     messages,
-    model: value.model as ChatModelId,
+    model,
     thinking: value.thinking,
-    reasoningEffort: value.reasoningEffort,
+    reasoningEffort: value.reasoningEffort as ChatReasoningEffort,
     conversationId,
     jobId,
     idempotencyKey,

@@ -1,21 +1,38 @@
 import { NextResponse } from "next/server";
+import { isChatModelRef } from "../../../../lib/chat-protocol";
 import { authorizeOwnerSession } from "../../../auth/owner-auth-service";
-import { DeepSeekError, listDeepSeekModels } from "../../../providers/deepseek/deepseek-adapter";
+import { CatalogQueryError } from "../../../server/chat/chat-model-catalog-query";
+import { ChatModelAuthorizationError, composerChatModels, discoverChatModels, enableChatModel } from "../../../server/chat/chat-model-catalog-service";
+import { OpenRouterError } from "../../../providers/openrouter/openrouter-catalog-adapter";
 
-export async function GET(request: Request) {
+async function ownerFor(request: Request) {
   const authorization = request.headers.get("authorization");
-  if (!authorization?.startsWith("Bearer ")) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-  }
-
-  const user = await authorizeOwnerSession(authorization.slice(7));
-  if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-
+  return authorization?.startsWith("Bearer ") ? authorizeOwnerSession(authorization.slice(7)) : null;
+}
+export async function GET(request: Request) {
+  const owner = await ownerFor(request);
+  if (!owner) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   try {
-    return NextResponse.json({ models: await listDeepSeekModels() });
-  } catch (error: unknown) {
-    const status = error instanceof DeepSeekError ? error.status : 503;
-    const message = error instanceof Error ? error.message : "DeepSeek is unavailable.";
-    return NextResponse.json({ error: message }, { status });
+    const url = new URL(request.url);
+    if (url.searchParams.get("scope") === "catalog") return NextResponse.json(await discoverChatModels(owner.id, url.searchParams));
+    if ([...url.searchParams.keys()].length) return NextResponse.json({ error: "scope must be catalog." }, { status: 400 });
+    return NextResponse.json({ models: await composerChatModels(owner.id) });
+  } catch (error) {
+    const status = error instanceof CatalogQueryError ? 400 : error instanceof OpenRouterError ? error.status : 503;
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Models are unavailable." }, { status });
+  }
+}
+export async function PUT(request: Request) {
+  const owner = await ownerFor(request);
+  if (!owner) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  try {
+    const body = await request.json() as Record<string, unknown>;
+    const ref = { provider: body.provider, model: body.model };
+    if (!isChatModelRef(ref) || ref.provider !== "openrouter" || typeof body.enabled !== "boolean") return NextResponse.json({ error: "Invalid model enablement." }, { status: 400 });
+    await enableChatModel(owner.id, ref, body.enabled);
+    return new NextResponse(null, { status: 204 });
+  } catch (error) {
+    const status = error instanceof ChatModelAuthorizationError ? 400 : error instanceof OpenRouterError ? error.status : 503;
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Model enablement is unavailable." }, { status });
   }
 }

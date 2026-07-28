@@ -367,12 +367,10 @@ export function createChatStartupSnapshot(input: ChatStartupSnapshotInput): Chat
     activeConversation,
     activeConversationId: activeConversation?.id ?? input.activeConversationId,
     userPresence: input.userPresence,
-    modelPreferences: input.modelPreferences.map(({ conversationId, model, thinking, reasoningEffort }) => ({
-      conversationId,
-      model,
-      thinking,
-      reasoningEffort,
-    })),
+    modelPreferences: input.modelPreferences.flatMap(({ conversationId, ...preference }) => {
+      const parsed = parseChatModelPreference(preference);
+      return parsed ? [{ conversationId, ...parsed }] : [];
+    }),
     originalTurnCount: input.activeConversation?.turns.length ?? 0,
   };
 }

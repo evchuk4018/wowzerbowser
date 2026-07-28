@@ -112,7 +112,7 @@ test("model preference rows normalize into a record and skip malformed entries",
   });
   assert.deepEqual(modelPreferencesRecord(parsed.modelPreferences), {
     [existingId]: {
-      model: "deepseek-v4-flash",
+      model: { provider: "deepseek", model: "deepseek-v4-flash" },
       thinking: true,
       reasoningEffort: "high",
     },

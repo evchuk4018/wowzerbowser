@@ -281,7 +281,7 @@ export async function* streamDeepSeekChatRound(
     headers: deepSeekHeaders(),
     signal,
     body: JSON.stringify({
-      model: request.model,
+      model: typeof request.model === "string" ? request.model : request.model.model,
       messages: options.messages ?? buildDeepSeekMessages(request, options),
       stream: true,
       thinking: { type: request.thinking ? "enabled" : "disabled" },
@@ -315,7 +315,7 @@ export async function listDeepSeekModels(): Promise<ChatModelInfo[]> {
     const availableIds = new Set(
       (body.data ?? []).filter((item) => typeof item.id === "string").map((item) => item.id),
     );
-    const models = DEFAULT_CHAT_MODELS.filter((model) => availableIds.has(model.id));
+    const models = DEFAULT_CHAT_MODELS.filter((model) => availableIds.has(model.ref.model));
     cachedModels = { expiresAt: Date.now() + MODEL_CACHE_TTL_MS, models: models.length ? models : DEFAULT_CHAT_MODELS };
     return cachedModels.models;
   } catch {

@@ -8,7 +8,7 @@ import {
 } from "react";
 import type {
   ChatMessageInput,
-  ChatModelId,
+  ChatModelRef,
   ChatReasoningEffort,
   ChatRequest,
   SequencedChatStreamEvent,
@@ -59,7 +59,7 @@ export type ThinkingTiming = {
 export type ChatGenerationOptions = {
   state: ConversationState;
   settings: ChatSettings;
-  model: ChatModelId;
+  model: ChatModelRef;
   thinking: boolean;
   reasoningEffort: ChatReasoningEffort;
   getAccessToken: () => Promise<string | null>;
@@ -100,7 +100,7 @@ export type ChatGenerationResult = {
 type GenerationInput = {
   state: ConversationState;
   settings: ChatSettings;
-  model: ChatModelId;
+  model: ChatModelRef;
   thinking: boolean;
   reasoningEffort: ChatReasoningEffort;
   getAccessToken: () => Promise<string | null>;
@@ -138,7 +138,7 @@ export function buildChatGenerationRequest(input: {
   assistantMessageId: string;
   jobId: string;
   settings: ChatSettings;
-  model: ChatModelId;
+  model: ChatModelRef;
   thinking: boolean;
   reasoningEffort: ChatReasoningEffort;
   attachments?: UploadedChatImage[];

@@ -103,4 +103,7 @@ export type UsageRecordInput = {
   recordedAt?: string;
   conversationId?: string;
   jobId?: string;
+  exactCostUsd?: number | null;
+  pricingSnapshot?: UsagePricing | null;
+  unpriced?: boolean;
 };

@@ -101,7 +101,8 @@ test("usage persistence and API keep provider data server-side and owner-scoped"
   assert.match(route, /authorizeOwnerSession/);
   assert.match(route, /assertTimeZone/);
   assert.match(runner, /requestKind: "chat"/);
-  assert.match(runner, /provider: "deepseek"/);
+  assert.match(runner, /provider,/);
+  assert.match(runner, /exactCostUsd/);
   assert.match(title, /persistUsage/);
   assert.match(title, /estimateUsageFromText/);
   assert.match(service, /\/api\/chat\/usage/);
