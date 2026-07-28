@@ -143,7 +143,16 @@ export function AssistantResponse({
         </a>
       );
     };
-    return { p: wrap("p"), h1: wrap("h1"), h2: wrap("h2"), h3: wrap("h3"), h4: wrap("h4"), li: wrap("li"), blockquote: wrap("blockquote"), strong: wrap("strong"), em: wrap("em"), a: MarkdownLink, td: wrap("td"), th: wrap("th") } as unknown as Components;
+    const MarkdownTable = ({ children, ...props }: { children?: React.ReactNode; [key: string]: unknown }) => {
+      const tableProps = { ...props };
+      delete tableProps.node;
+      return (
+        <div className="assistant-markdown-table">
+          {React.createElement("table", tableProps, children)}
+        </div>
+      );
+    };
+    return { p: wrap("p"), h1: wrap("h1"), h2: wrap("h2"), h3: wrap("h3"), h4: wrap("h4"), li: wrap("li"), blockquote: wrap("blockquote"), strong: wrap("strong"), em: wrap("em"), a: MarkdownLink, table: MarkdownTable, td: wrap("td"), th: wrap("th") } as unknown as Components;
   }, [annotations, artifacts, onOpenArtifact, sources]);
   return (
     <>

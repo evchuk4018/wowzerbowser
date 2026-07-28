@@ -530,6 +530,19 @@ test("uses normal whitespace flow for rendered assistant Markdown", async () => 
   assert.match(styles, /\.assistant-markdown \{\s*white-space: normal;\s*\}/);
 });
 
+test("keeps wide assistant Markdown tables on one line with horizontal scrolling", async () => {
+  const [renderer, styles] = await Promise.all([
+    readFile(new URL("../app/chat/assistant-response.tsx", import.meta.url), "utf8"),
+    readStyles(),
+  ]);
+
+  assert.match(renderer, /className="assistant-markdown-table"/);
+  assert.match(renderer, /table: MarkdownTable/);
+  assert.match(styles, /\.assistant-markdown-table \{[\s\S]*?max-width: 100%;[\s\S]*?overflow-x: auto;/);
+  assert.match(styles, /\.assistant-markdown-table table \{[\s\S]*?width: max-content;[\s\S]*?min-width: 100%;/);
+  assert.match(styles, /\.assistant-markdown td \{[\s\S]*?white-space: nowrap;/);
+});
+
 test("validates and preserves ordered assistant tool rounds", () => {
   const artifact = {
     id: "signed-artifact-token",

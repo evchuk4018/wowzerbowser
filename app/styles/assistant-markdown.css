@@ -5,8 +5,7 @@
 .assistant-markdown ul,
 .assistant-markdown ol,
 .assistant-markdown blockquote,
-.assistant-markdown pre,
-.assistant-markdown table { margin: 0 0 12px; }
+.assistant-markdown pre { margin: 0 0 12px; }
 .assistant-markdown h1,
 .assistant-markdown h2,
 .assistant-markdown h3,
@@ -51,10 +50,16 @@
   padding: 14px 16px;
 }
 .assistant-markdown pre code { background: transparent; padding: 0; font-size: .86em; }
-.assistant-markdown table {
-  display: block;
+.assistant-markdown-table {
   max-width: 100%;
   overflow-x: auto;
+  margin: 0 0 12px;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.assistant-markdown-table table {
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
 }
 
@@ -106,6 +111,7 @@
   border: 1px solid #454740;
   padding: 7px 10px;
   text-align: left;
+  white-space: nowrap;
 }
 .assistant-markdown th { background: #2b2c29; color: var(--text); }
 .assistant-markdown .katex {
