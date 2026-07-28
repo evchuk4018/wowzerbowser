@@ -13,6 +13,7 @@ export const USAGE_REQUEST_KINDS = [
   "image_text_analysis",
   "image_visual_analysis",
   "image_followup",
+  "chat_summary",
 ] as const;
 export type UsageRequestKind = (typeof USAGE_REQUEST_KINDS)[number];
 
