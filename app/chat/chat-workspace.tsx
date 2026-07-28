@@ -24,18 +24,18 @@ import { isTranscriptNearBottom } from "./transcript-scroll";
 import { fetchChatUsage } from "./chat-usage-service";
 import { createConversation, DEFAULT_CHAT_SETTINGS } from "./conversation-defaults";
 import {
-  mergeRequestedConversation,
+  UUID_PATTERN,
   resolveConversationRoute,
 } from "./conversation-routing";
 import { DeleteConfirmationDialog } from "./delete-confirmation-dialog";
 import { conversationReducer, createInitialConversationState } from "./conversation-reducer";
 import {
   deleteConversation,
-  loadConversations,
+  loadConversation,
+  loadConversationIndex,
   loadSettings,
   saveConversationSelection,
   saveSettings,
-  type LoadedConversations,
 } from "./conversation-storage";
 import type { ConversationTurn, Message } from "./conversation-types";
 import { useChatGeneration } from "./use-chat-generation";
@@ -45,6 +45,7 @@ import { useMobileHistoryNavigation } from "./use-mobile-history-navigation";
 import { usePersistedJobRecovery } from "./use-persisted-job-recovery";
 import type { ChatArtifact, ChatImageAttachment } from "../../lib/chat-protocol";
 import type { ChatDocumentAttachment } from "../../lib/chat-document";
+import type { ChatConversationSummary } from "../../lib/chat-history";
 import { fetchChatArtifact } from "./chat-service";
 import { defaultPdfPreviewWidth, clampPdfPreviewWidth } from "./pdf-preview-layout";
 import { PdfPreviewPanel, type PdfPreviewLoadState } from "./pdf-preview-panel";
@@ -81,6 +82,9 @@ export function ChatWorkspace({
   const [openMessageActions, setOpenMessageActions] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [recoveredStreaming, setRecoveredStreaming] = useState<Record<string, string>>({});
+  const [conversationSummaries, setConversationSummaries] = useState<ChatConversationSummary[]>([]);
+  const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
+  const [conversationLoadError, setConversationLoadError] = useState<string | null>(null);
   const [pdfPreview, setPdfPreview] = useState<{
     artifact: ChatArtifact;
     loadState: PdfPreviewLoadState;
@@ -95,6 +99,7 @@ export function ChatWorkspace({
   const conversationLongPressTimerRef = useRef<number | null>(null);
   const pdfPreviewUrlRef = useRef<string | null>(null);
   const pdfPreviewRequestRef = useRef(0);
+  const conversationLoadRequestRef = useRef(0);
   const requestedConversationId = typeof params.conversationId === "string"
     ? params.conversationId.trim() || undefined
     : undefined;
@@ -110,40 +115,158 @@ export function ChatWorkspace({
 
   useEffect(() => {
     let mounted = true;
+    const requestId = ++conversationLoadRequestRef.current;
     void (async () => {
-      let loaded: LoadedConversations = { conversations: [], streamingByConversation: {} };
       try {
         const token = await getAccessToken();
-        if (token) loaded = await loadConversations(token);
-      } catch {
-        // Session/storage failures are nonfatal; start with a blank conversation.
+        const index = token
+          ? await loadConversationIndex(token)
+          : {
+              summaries: [],
+              streamingByConversation: {},
+            };
+        if (!mounted || requestId !== conversationLoadRequestRef.current) {
+          return;
+        }
+        setConversationSummaries(index.summaries);
+        setRecoveredStreaming(index.streamingByConversation);
+        const requestedId = initialConversationIdRef.current;
+        const requestedSummary = index.summaries.find(
+          ({ id }) => id === requestedId,
+        );
+        if (requestedSummary) {
+          handledRouteRef.current = requestedId;
+        }
+        // Load a known requested conversation, or the newest conversation
+        // when opening /chat or an invalid route.
+        const remoteId =
+          requestedSummary?.id ??
+          (!requestedId || !UUID_PATTERN.test(requestedId)
+            ? index.summaries[0]?.id
+            : undefined);
+        let initialConversation = null;
+        if (remoteId && token) {
+          initialConversation = await loadConversation(remoteId, token);
+        }
+        // A valid unknown UUID represents a new client-only conversation.
+        if (!initialConversation) {
+          initialConversation =
+            requestedId &&
+            UUID_PATTERN.test(requestedId) &&
+            !requestedSummary
+              ? { ...createConversation(), id: requestedId }
+              : createConversation();
+        }
+        if (!mounted || requestId !== conversationLoadRequestRef.current) {
+          return;
+        }
+        dispatch({
+          type: "LOAD_CONVERSATIONS",
+          conversations: [initialConversation],
+          activeId: initialConversation.id,
+        });
+        setReady(true);
+      } catch (error) {
+        if (!mounted || requestId !== conversationLoadRequestRef.current) return;
+        setConversationLoadError(
+          error instanceof Error
+            ? error.message
+            : "The conversation could not be loaded.",
+        );
+        const fallback = createConversation();
+        dispatch({
+          type: "LOAD_CONVERSATIONS",
+          conversations: [fallback],
+          activeId: fallback.id,
+        });
+        setReady(true);
       }
-      if (!mounted) return;
-      const requestedId = initialConversationIdRef.current;
-      const conversations = mergeRequestedConversation(loaded, requestedId);
-      dispatch({ type: "LOAD_CONVERSATIONS", conversations, activeId: requestedId });
-      setRecoveredStreaming(loaded.streamingByConversation);
-      setReady(true);
     })();
     return () => {
       mounted = false;
     };
   }, [getAccessToken]);
 
+  const hydrateAndSelectConversation = useCallback(
+    async (conversationId: string) => {
+      const requestId = ++conversationLoadRequestRef.current;
+      const cached = state.conversations.find(
+        ({ id }) => id === conversationId,
+      );
+      if (cached) {
+        setLoadingConversationId(null);
+        setConversationLoadError(null);
+        dispatch({
+          type: "SELECT_CONVERSATION",
+          conversationId,
+        });
+        return;
+      }
+      setLoadingConversationId(conversationId);
+      setConversationLoadError(null);
+      try {
+        const token = await getAccessToken();
+        if (!token) throw new Error("Your session expired.");
+        const conversation = await loadConversation(
+          conversationId,
+          token,
+        );
+        if (!conversation) {
+          throw new Error("Conversation not found.");
+        }
+        if (requestId !== conversationLoadRequestRef.current) return;
+        dispatch({
+          type: "HYDRATE_CONVERSATION",
+          conversation,
+          select: true,
+        });
+      } catch (error) {
+        if (requestId !== conversationLoadRequestRef.current) return;
+        setConversationLoadError(
+          error instanceof Error
+            ? error.message
+            : "The conversation could not be loaded.",
+        );
+      } finally {
+        if (requestId === conversationLoadRequestRef.current) {
+          setLoadingConversationId(null);
+        }
+      }
+    },
+    [getAccessToken, state.conversations],
+  );
+
   useEffect(() => {
     if (!ready || !state.activeId) return;
     if (handledRouteRef.current === requestedConversationId) return;
     handledRouteRef.current = requestedConversationId;
-
-    const resolution = resolveConversationRoute(state, requestedConversationId);
+    const knownIds = new Set(
+      conversationSummaries.map(({ id }) => id),
+    );
+    const resolution = resolveConversationRoute(
+      state,
+      requestedConversationId,
+      knownIds,
+    );
     if (resolution.type === "select") {
       dispatch({ type: "SELECT_CONVERSATION", conversationId: resolution.conversationId });
+    } else if (resolution.type === "load") {
+      // The route resolution starts an asynchronous remote hydration request.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      void hydrateAndSelectConversation(resolution.conversationId);
     } else if (resolution.type === "create") {
       dispatch({ type: "CREATE_CONVERSATION", conversation: resolution.conversation });
     } else if (resolution.type === "redirect") {
       router.replace(`/chat/${resolution.conversationId}`);
     }
-  }, [ready, requestedConversationId, router, state]);
+  }, [
+    conversationSummaries,
+    hydrateAndSelectConversation,
+    ready,
+    requestedConversationId,
+    router,
+    state,
+  ]);
 
   useEffect(() => {
     let mounted = true;
@@ -201,6 +324,28 @@ export function ChatWorkspace({
     [generation.streamingByConversation, recoveredStreaming],
   );
   const activeStreaming = Boolean(streamingByConversation[state.activeId]);
+  const sidebarConversations = useMemo(() => {
+    const summariesById = new Map(
+      conversationSummaries.map((summary) => [summary.id, summary]),
+    );
+    const loadedById = new Map(
+      state.conversations.map((conversation) => [
+        conversation.id,
+        conversation,
+      ]),
+    );
+    const localConversations = state.conversations
+      .filter(({ id }) => !summariesById.has(id))
+      .map(({ id, title }) => ({ id, title }));
+    const persistedConversations = conversationSummaries.map(
+      (summary) => ({
+        id: summary.id,
+        // Use the hydrated title so generated titles update immediately.
+        title: loadedById.get(summary.id)?.title ?? summary.title,
+      }),
+    );
+    return [...localConversations, ...persistedConversations];
+  }, [conversationSummaries, state.conversations]);
 
   const releasePdfPreviewUrl = useCallback(() => {
     if (!pdfPreviewUrlRef.current) return;
@@ -266,6 +411,9 @@ export function ChatWorkspace({
 
   const startNewChat = useCallback(() => {
     shouldAutoScrollRef.current = true;
+    conversationLoadRequestRef.current += 1;
+    setLoadingConversationId(null);
+    setConversationLoadError(null);
     const blank = state.conversations.find(({ turns }) => turns.length === 0);
     const conversation = blank ?? createConversation();
     if (blank) dispatch({ type: "SELECT_CONVERSATION", conversationId: blank.id });
@@ -356,8 +504,9 @@ export function ChatWorkspace({
 
   const selectConversation = (conversationId: string) => {
     shouldAutoScrollRef.current = true;
-    dispatch({ type: "SELECT_CONVERSATION", conversationId });
+    handledRouteRef.current = conversationId;
     router.push(`/chat/${conversationId}`);
+    void hydrateAndSelectConversation(conversationId);
     setOpenConversationActions(null);
     setSidebarOpen(false);
     requestAnimationFrame(() => textareaRef.current?.focus());
@@ -439,11 +588,7 @@ export function ChatWorkspace({
   const confirmDeleteConversation = async () => {
     const conversationId = deleteConversationId;
     if (!conversationId || deletingConversationId) return;
-    const conversation = state.conversations.find(({ id }) => id === conversationId);
-    if (!conversation) {
-      setDeleteConversationId(null);
-      return;
-    }
+    const wasActive = conversationId === state.activeId;
 
     setDeletingConversationId(conversationId);
     setDeleteConversationError(null);
@@ -452,7 +597,14 @@ export function ChatWorkspace({
       const token = await getAccessToken();
       if (!token) throw new Error("Your session expired. Please sign in again.");
       await deleteConversation(conversationId, token);
-      const replacement = conversationId === state.activeId ? createConversation() : undefined;
+      setConversationSummaries((current) =>
+        current.filter(({ id }) => id !== conversationId),
+      );
+      if (loadingConversationId === conversationId) {
+        conversationLoadRequestRef.current += 1;
+        setLoadingConversationId(null);
+      }
+      const replacement = wasActive ? createConversation() : undefined;
       dispatch({ type: "REMOVE_CONVERSATION", conversationId, replacement });
       setRecoveredStreaming((current) => {
         if (!(conversationId in current)) return current;
@@ -460,7 +612,7 @@ export function ChatWorkspace({
         delete next[conversationId];
         return next;
       });
-      if (conversationId === state.activeId) {
+      if (wasActive) {
         setEditingTurnId(null);
         setEditingAttachments([]);
         setEditingDocuments([]);
@@ -519,8 +671,8 @@ export function ChatWorkspace({
     >
       <ChatSidebar
         sidebarOpen={sidebarOpen}
-        conversations={state.conversations}
-        activeConversationId={state.activeId}
+        conversations={sidebarConversations}
+        activeConversationId={loadingConversationId ?? state.activeId}
         streamingByConversation={streamingByConversation}
         openConversationActions={openConversationActions}
         userEmail={user.email}
@@ -555,7 +707,9 @@ export function ChatWorkspace({
         />
       )}
       {deleteConversationId && (() => {
-        const conversation = state.conversations.find(({ id }) => id === deleteConversationId);
+        const conversation = sidebarConversations.find(
+          ({ id }) => id === deleteConversationId,
+        );
         if (!conversation) return null;
         return (
           <DeleteConfirmationDialog
@@ -594,38 +748,51 @@ export function ChatWorkspace({
             onClick={() => setOpenMessageActions(null)}
           />
         )}
-        <ChatTranscript
-          conversationId={active.id}
-          turns={active.turns}
-          openMessageActions={openMessageActions}
-          isStreamingConversation={activeStreaming}
-          waitingByMessage={generation.waitingByMessage}
-          thinkingByMessage={generation.thinkingByMessage}
-          copiedMessageId={copiedMessageId}
-          getAccessToken={getAccessToken}
-          transcriptRef={transcriptRef}
-          onTranscriptScroll={handleTranscriptScroll}
-          onSetOpenMessageActions={setOpenMessageActions}
-          onStartLongPress={startLongPress}
-          onCancelLongPress={cancelLongPress}
-          onSelectVersion={selectVersion}
-          onCopy={copyPrompt}
-          onRetry={retryTurn}
-          onEdit={editTurn}
-          onShare={sharePrompt}
-          onOpenArtifact={openPdfPreview}
-        />
+        {loadingConversationId ? (
+          <div
+            className="conversation-loading"
+            role="status"
+            aria-label="Loading conversation"
+          >
+            Loading conversation…
+          </div>
+        ) : (
+          <ChatTranscript
+            conversationId={active.id}
+            turns={active.turns}
+            openMessageActions={openMessageActions}
+            isStreamingConversation={activeStreaming || Boolean(loadingConversationId)}
+            waitingByMessage={generation.waitingByMessage}
+            thinkingByMessage={generation.thinkingByMessage}
+            copiedMessageId={copiedMessageId}
+            getAccessToken={getAccessToken}
+            transcriptRef={transcriptRef}
+            onTranscriptScroll={handleTranscriptScroll}
+            onSetOpenMessageActions={setOpenMessageActions}
+            onStartLongPress={startLongPress}
+            onCancelLongPress={cancelLongPress}
+            onSelectVersion={selectVersion}
+            onCopy={copyPrompt}
+            onRetry={retryTurn}
+            onEdit={editTurn}
+            onShare={sharePrompt}
+            onOpenArtifact={openPdfPreview}
+          />
+        )}
+        {conversationLoadError && !loadingConversationId && (
+          <div role="alert">{conversationLoadError}</div>
+        )}
         <ChatComposer
           key={`${active.id}:${attachmentResetKey}`}
           draft={draft}
           setDraft={setDraft}
           textareaRef={textareaRef}
-          isStreaming={activeStreaming}
+          isStreaming={activeStreaming || Boolean(loadingConversationId)}
           models={preferences.models}
           model={preferences.model}
           setModel={preferences.setModel}
           selectedModel={preferences.selectedModel}
-          openMenu={activeStreaming ? null : openMenu}
+          openMenu={activeStreaming || loadingConversationId ? null : openMenu}
           setOpenMenu={setOpenMenu}
           thinking={preferences.thinking}
           setThinking={preferences.setThinking}

@@ -1,12 +1,16 @@
 "use client";
 
 import type { RefObject } from "react";
-import type { Conversation } from "./conversation-types";
 import { ConversationActions } from "./conversation-actions";
+
+export type SidebarConversation = {
+  id: string;
+  title: string;
+};
 
 export type ChatSidebarProps = {
   sidebarOpen: boolean;
-  conversations: Conversation[];
+  conversations: SidebarConversation[];
   activeConversationId: string;
   streamingByConversation: Record<string, string>;
   openConversationActions: string | null;

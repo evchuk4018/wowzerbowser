@@ -18,6 +18,12 @@ export type LoadConversationsAction = {
   activeId?: string | null;
 };
 
+export type HydrateConversationAction = {
+  type: "HYDRATE_CONVERSATION";
+  conversation: ChatConversation;
+  select?: boolean;
+};
+
 export type CreateConversationAction = {
   type: "CREATE_CONVERSATION";
   conversation: ChatConversation;
@@ -92,6 +98,7 @@ export type MarkMessageErrorAction = {
 
 export type ConversationAction =
   | LoadConversationsAction
+  | HydrateConversationAction
   | CreateConversationAction
   | SelectConversationAction
   | RemoveConversationAction

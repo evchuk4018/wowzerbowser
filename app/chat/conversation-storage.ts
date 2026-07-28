@@ -4,7 +4,11 @@ import type {
   ChatToolResult,
 } from "../../lib/chat-protocol";
 import { normalizeChatImageAttachments, parseChatImageToolResult } from "../../lib/chat-protocol";
-import type { ChatAssistantActivity } from "../../lib/chat-history";
+import type {
+  ChatAssistantActivity,
+  ChatConversation,
+  ChatConversationSummary,
+} from "../../lib/chat-history";
 import { DOCUMENT_CONTENT_TYPES, type ChatDocumentAttachment } from "../../lib/chat-document";
 import { sourceForUrl } from "../../lib/chat-citations";
 import {
@@ -33,9 +37,8 @@ import {
   parseChatUserPreferences,
 } from "../../lib/chat-user-preferences";
 
-/** The result used by the workspace when hydrating remote conversation history. */
-export type LoadedConversations = {
-  conversations: Conversation[];
+export type LoadedConversationIndex = {
+  summaries: ChatConversationSummary[];
   streamingByConversation: Record<string, string>;
 };
 
@@ -371,46 +374,50 @@ export function normalizeConversation(
 /** Backward-compatible name for callers migrating old flat conversations. */
 export const migrateConversation = normalizeConversation;
 
-function validSummary(value: unknown): { id: string; isStreaming: boolean } | null {
+function validSummary(value: unknown): ChatConversationSummary | null {
   const candidate = asRecord(value);
   const id = nonEmptyString(candidate?.id);
-  if (!id) return null;
-  return { id, isStreaming: candidate?.isStreaming === true };
+  const title = typeof candidate?.title === "string" ? candidate.title : null;
+  const updatedAt = typeof candidate?.updatedAt === "string" ? candidate.updatedAt : null;
+  if (!id || title === null || updatedAt === null) return null;
+  return {
+    id,
+    title,
+    updatedAt,
+    hasMessages: candidate?.hasMessages === true,
+    isStreaming: candidate?.isStreaming === true,
+  };
 }
 
-/**
- * Load remote history and retain only valid records. A failed detail request
- * does not discard conversations that loaded successfully; a failed list
- * request returns an empty result so the workspace can create a blank chat.
- */
-export async function loadConversations(accessToken: string): Promise<LoadedConversations> {
-  try {
-    const rawSummaries = await fetchChatConversations(accessToken);
-    if (!Array.isArray(rawSummaries)) return { conversations: [], streamingByConversation: {} };
-    const summaries = rawSummaries
-      .map(validSummary)
-      .filter((summary): summary is { id: string; isStreaming: boolean } => summary !== null);
-    const loaded = await Promise.allSettled(
-      summaries.map(async (summary) => normalizeConversation(
-        await fetchChatConversation(summary.id, accessToken),
-        { freezeRunningActivities: false },
-      )),
-    );
-    const conversations: Conversation[] = [];
-    const seen = new Set<string>();
-    loaded.forEach((result) => {
-      if (result.status !== "fulfilled" || !result.value || seen.has(result.value.id)) return;
-      seen.add(result.value.id);
-      conversations.push(result.value);
-    });
-    const streamingByConversation: Record<string, string> = {};
-    summaries.forEach((summary) => {
-      if (summary.isStreaming && seen.has(summary.id)) streamingByConversation[summary.id] = "persisted";
-    });
-    return { conversations, streamingByConversation };
-  } catch {
-    return { conversations: [], streamingByConversation: {} };
-  }
+export async function loadConversationIndex(
+  accessToken: string,
+): Promise<LoadedConversationIndex> {
+  const raw = await fetchChatConversations(accessToken);
+  const summaries = Array.isArray(raw)
+    ? raw
+        .map(validSummary)
+        .filter(
+          (summary): summary is ChatConversationSummary => summary !== null,
+        )
+    : [];
+  return {
+    summaries,
+    streamingByConversation: Object.fromEntries(
+      summaries
+        .filter((summary) => summary.isStreaming)
+        .map((summary) => [summary.id, "persisted"]),
+    ),
+  };
+}
+
+export async function loadConversation(
+  conversationId: string,
+  accessToken: string,
+): Promise<ChatConversation | null> {
+  return normalizeConversation(
+    await fetchChatConversation(conversationId, accessToken),
+    { freezeRunningActivities: false },
+  );
 }
 
 /** Save server-owned conversation metadata. Transcript writes happen in jobs. */

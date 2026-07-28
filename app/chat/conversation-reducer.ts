@@ -88,6 +88,26 @@ export function conversationReducer(
       return { conversations, activeId };
     }
 
+    case "HYDRATE_CONVERSATION": {
+      const exists = state.conversations.some(
+        ({ id }) => id === action.conversation.id,
+      );
+      const conversations = exists
+        ? state.conversations.map((conversation) =>
+            conversation.id === action.conversation.id
+              ? action.conversation
+              : conversation,
+          )
+        : [action.conversation, ...state.conversations];
+      return {
+        conversations,
+        activeId:
+          action.select || !state.activeId
+            ? action.conversation.id
+            : state.activeId,
+      };
+    }
+
     case "CREATE_CONVERSATION": {
       // Creating an existing id is treated as a replacement at the front. It
       // keeps the state invariant (one entry per id) during retry races.

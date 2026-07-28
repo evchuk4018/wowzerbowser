@@ -25,6 +25,14 @@
     var(--bg);
 }
 
+.conversation-loading {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  place-items: center;
+  color: var(--muted);
+}
+
 .chat-area.chat-active {
   justify-content: flex-start;
 }
