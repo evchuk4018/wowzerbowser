@@ -148,18 +148,18 @@ export function ConversationTurn({
   };
 
   return (
-    <article
-      className={`message-pair ${actionsOpen ? "message-actions-open" : ""}`}
-      onContextMenu={handleContextMenu}
-      onPointerDown={handlePointerDown}
-      onPointerUp={onCancelLongPress}
-      onPointerCancel={onCancelLongPress}
-      onPointerMove={onCancelLongPress}
-    >
+    <article className={`message-pair ${actionsOpen ? "message-actions-open" : ""}`}>
       <div className="message-user-container">
         <article className="message user">
           <div className="message-label">You</div>
-          <div className={`message-bubble ${hasUserAttachments ? "message-bubble--with-attachments" : ""}`}>
+          <div
+            className={`message-bubble ${hasUserAttachments ? "message-bubble--with-attachments" : ""}`}
+            onContextMenu={handleContextMenu}
+            onPointerDown={handlePointerDown}
+            onPointerUp={onCancelLongPress}
+            onPointerCancel={onCancelLongPress}
+            onPointerMove={onCancelLongPress}
+          >
             {userMessage.attachments?.length ? (
               <div className="message-image-attachments">
                 {userMessage.attachments.map((image) => (

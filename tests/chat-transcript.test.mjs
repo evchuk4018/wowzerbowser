@@ -15,6 +15,9 @@ test("transcript extraction keeps controlled transcript and prompt-action hooks"
   assert.match(transcript, /className=\"empty-state\"/);
   assert.match(turn, /onContextMenu/);
   assert.match(turn, /onPointerDown/);
+  assert.match(turn, /className=\{`message-bubble \$\{hasUserAttachments \? "message-bubble--with-attachments" : ""\}`\}[\s\S]*onContextMenu=\{handleContextMenu\}/);
+  assert.match(turn, /className=\{`message-pair \$\{actionsOpen \? "message-actions-open" : ""\}`\}>\s*<div className="message-user-container">/);
+  assert.doesNotMatch(turn, /className=\{`message-pair \$\{actionsOpen \? "message-actions-open" : ""\}`\}[^>]*on(?:ContextMenu|PointerDown)/);
   assert.match(turn, /version-controls/);
   assert.match(turn, /response-controls/);
   assert.match(turn, /"Copy response"/);
