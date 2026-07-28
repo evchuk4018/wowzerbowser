@@ -224,7 +224,7 @@ export async function claimNextChatSummaryTask(
   return data ? taskFromRow(data as SummaryJobRow) : null;
 }
 
-export async function completeChatSummaryTask(task: ChatSummaryTask): Promise<void> {
+export async function completeChatSummaryTask(task: ChatSummaryTask, resultSummary: string): Promise<void> {
   const now = new Date().toISOString();
   const { error } = await client()
     .from("chat_summary_jobs")
@@ -232,6 +232,7 @@ export async function completeChatSummaryTask(task: ChatSummaryTask): Promise<vo
       status: "completed",
       lease_expires_at: null,
       completed_at: now,
+      result_summary: resultSummary,
       updated_at: now,
     })
     .eq("owner_id", task.ownerId)

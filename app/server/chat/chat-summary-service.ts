@@ -27,7 +27,9 @@ import {
 } from "./chat-summary-store";
 
 function enabled(): boolean {
-  return ["1", "true", "yes", "on"].includes(process.env.CHAT_DURABLE_SUMMARIES_ENABLED?.trim().toLowerCase() ?? "");
+  const summaries = ["1", "true", "yes", "on"].includes(process.env.CHAT_DURABLE_SUMMARIES_ENABLED?.trim().toLowerCase() ?? "");
+  const dreaming = !["0", "false", "no", "off"].includes(process.env.USER_MEMORY_DREAMING_ENABLED?.trim().toLowerCase() ?? "");
+  return summaries || dreaming;
 }
 
 function safeErrorCode(error: unknown): string {
@@ -110,7 +112,7 @@ async function executeChatSummaryTask(task: ChatSummaryTask): Promise<void> {
     && summaryState.lastSourcePosition >= task.sourcePosition
     && (summaryState.lastSourceVersionId === task.sourceVersionId || sourceIsActive);
   if (alreadyCovered) {
-    await completeChatSummaryTask(task);
+    await completeChatSummaryTask(task, summaryState?.summary ?? "");
     return;
   }
 
@@ -148,7 +150,7 @@ async function executeChatSummaryTask(task: ChatSummaryTask): Promise<void> {
       usage: answer.usage,
     });
   }
-  await completeChatSummaryTask(task);
+  await completeChatSummaryTask(task, summary);
 }
 
 async function processChatSummaryTasks(ownerId: string, conversationId: string): Promise<void> {

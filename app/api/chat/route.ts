@@ -9,6 +9,7 @@ import { createOrGetChatJob } from "../../server/chat/chat-job-store";
 import { runChatJob } from "../../server/chat/chat-job-runner";
 import { encodeChatLiveEnvelope } from "../../server/chat/encode-chat-live-envelope";
 import { processChatSummaryForCompletedJob } from "../../server/chat/chat-summary-service";
+import { processDreamingForCompletedJob } from "../../server/memory/dreaming-service";
 import type { ChatLiveStreamEnvelope } from "../../../lib/chat-protocol";
 
 export const maxDuration = 300;
@@ -99,6 +100,7 @@ export async function POST(request: Request) {
     after(async () => {
       await completion;
       await processChatSummaryForCompletedJob(user.id, chatRequest.conversationId!, submission.jobId).catch(() => undefined);
+      await processDreamingForCompletedJob(user.id, chatRequest.conversationId!, submission.jobId).catch(() => undefined);
     });
 
     return new Response(stream, {

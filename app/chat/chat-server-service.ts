@@ -32,6 +32,8 @@ import { listEnabledExecutableTools } from "../server/tools/custom-tool-reposito
 import { customToolDefinitions, customToolInstructions } from "../server/tools/custom-tool-manifest";
 import { executeCustomToolCall } from "../server/tools/custom-tool-executor";
 import { chatMemoryToolDefinitions, executeChatMemoryTool } from "../server/agent/chat-memory-tool";
+import { executeUserMemoryTool, userMemoryToolDefinitions } from "../server/agent/user-memory-tool";
+import { USER_MEMORY_TOOL_INSTRUCTIONS } from "../server/agent/user-memory-tool-instructions";
 import { recordUsage } from "../server/usage/usage-store";
 
 const MAX_RESPONSE_MS = 240_000;
@@ -84,6 +86,7 @@ export async function generateChatResponse(
   const customToolsByName = new Map(customTools.map((tool) => [tool.name, tool]));
   const customDefinitions = customToolDefinitions(customTools);
   const chatMemoryTools = chatMemoryToolDefinitions();
+  const userMemoryTools = userMemoryToolDefinitions();
   const allowedImageIds = await getAuthoritativeChatImageIdsForRequest(ownerId, chatRequest);
   const requestedPdfIds = [...new Set(chatRequest.messages.flatMap((message) => message.documents?.map((item) => item.id) ?? []))];
   const allowedPdfIds = new Set<string>();
@@ -103,7 +106,7 @@ export async function generateChatResponse(
   const pdfEditTools = availablePdfEditTools([...authoritativePdfs.values()].some((document) => document.contentType === "application/pdf"));
   const allowedProjectIds = new Set([...authoritativePdfs.values()].map((document) => document.projectId).filter((projectId): projectId is string => Boolean(projectId)));
   const phaseTools = chatRequest.thinking ? [PHASE_BREAK_TOOL_DEFINITION] : [];
-  const baseToolDefinitions = [...pythonTools, ...imageTools, ...webTools, ...pdfEditTools, ...phaseTools, ...customDefinitions, ...chatMemoryTools];
+  const baseToolDefinitions = [...pythonTools, ...imageTools, ...webTools, ...pdfEditTools, ...phaseTools, ...customDefinitions, ...chatMemoryTools, ...userMemoryTools];
   const imageToolAdvertised = imageTools.some((tool) => tool.function.name === INSPECT_IMAGE_TOOL_NAME);
 
   const enqueue = async (event: ChatStreamEvent) => {
@@ -142,6 +145,7 @@ export async function generateChatResponse(
             ...(pdfEditTools.length ? PDF_EDIT_TOOL_INSTRUCTIONS : []),
             ...(phaseTools.length ? [PHASE_BREAK_INSTRUCTIONS] : []),
             ...customToolInstructions(customTools),
+            USER_MEMORY_TOOL_INSTRUCTIONS,
           ];
           const reasoningParts: string[] = [];
           const contentParts: string[] = [];
@@ -280,6 +284,12 @@ export async function generateChatResponse(
                     jobId: responseId,
                   });
                 },
+              });
+            } else if (userMemoryTools.some((tool) => tool.function.name === call.name)) {
+              result = await executeUserMemoryTool(call, {
+                ownerId,
+                conversationId,
+                jobId: responseId ?? `chat-${conversationId}`,
               });
             } else if (pdfEditTools.some((tool) => tool.function.name === call.name)) {
               if (!isModalConfigured() && call.name !== "inspect_pdf_editability" && call.name !== "compare_document_revisions") throw new Error("PDF editing is not configured.");
