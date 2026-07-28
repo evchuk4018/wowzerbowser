@@ -7,9 +7,15 @@ import {
   type ChatImageContentType,
   ChatImageError,
 } from "../../../lib/chat-image";
+import {
+  OPENROUTER_BASE_URL,
+  OPENROUTER_FREE_MODEL,
+  OPENROUTER_IMAGE_MODELS,
+  shouldUseOpenRouterQuotaFallback,
+} from "./openrouter-config";
 
-export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
-export const OPENROUTER_IMAGE_MODEL = "openrouter/free";
+export { OPENROUTER_BASE_URL, OPENROUTER_QUOTA_FALLBACK_MODEL } from "./openrouter-config";
+export const OPENROUTER_IMAGE_MODEL = OPENROUTER_FREE_MODEL;
 export const PDF_PAGE_OCR_PROMPT = "Extract all visible text from this PDF page. Preserve reading order and line breaks where practical. Return only the text; do not describe the page, add markdown, or summarize.";
 
 export type OpenRouterImageAnswer = {
@@ -92,34 +98,36 @@ export async function askOpenRouterAboutImage(
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeout = AbortSignal.timeout(options.timeoutMs ?? OPENROUTER_IMAGE_TIMEOUT_MS);
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
-  const body = {
-    model: OPENROUTER_IMAGE_MODEL,
-    messages: [{
-      role: "user",
-      content: [
-        { type: "text", text: question },
-        { type: "image_url", image_url: { url: `data:${contentType};base64,${Buffer.from(bytes).toString("base64")}` } },
-      ],
-    }],
-  };
-  let response: Response;
-  try {
-    response = await fetchImpl(`${OPENROUTER_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${key}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(body),
-      signal,
-    });
-  } catch {
-    if (options.signal?.aborted) throw new OpenRouterImageError("cancelled", "Image analysis was cancelled.", 499);
-    if (timeout.aborted) throw new OpenRouterImageError("timeout", "Image analysis timed out.", 504);
-    throw new OpenRouterImageError("transport", "Image understanding is unavailable.", 502);
-  }
-  if (!response.ok) {
+  let response: Response | undefined;
+  for (const model of OPENROUTER_IMAGE_MODELS) {
+    const body = {
+      model,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: question },
+          { type: "image_url", image_url: { url: `data:${contentType};base64,${Buffer.from(bytes).toString("base64")}` } },
+        ],
+      }],
+    };
+    try {
+      response = await fetchImpl(`${OPENROUTER_BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${key}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal,
+      });
+    } catch {
+      if (options.signal?.aborted) throw new OpenRouterImageError("cancelled", "Image analysis was cancelled.", 499);
+      if (timeout.aborted) throw new OpenRouterImageError("timeout", "Image analysis timed out.", 504);
+      throw new OpenRouterImageError("transport", "Image understanding is unavailable.", 502);
+    }
+    if (response.ok) break;
     await response.text().catch(() => "");
+    if (shouldUseOpenRouterQuotaFallback(response.status, model)) continue;
     const code = response.status === 429
       ? "rate_limit"
       : response.status === 408 || response.status >= 500
@@ -129,6 +137,7 @@ export async function askOpenRouterAboutImage(
           : "provider_validation";
     throw new OpenRouterImageError(code, safeProviderMessage("", response.status), response.status);
   }
+  if (!response || !response.ok) throw new OpenRouterImageError("rate_limit", safeProviderMessage("", response?.status ?? 429), response?.status ?? 429);
   let payload: OpenRouterResponse;
   try {
     payload = await response.json() as OpenRouterResponse;

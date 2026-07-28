@@ -7,6 +7,7 @@ import {
 import {
   askOpenRouterAboutImage,
   OPENROUTER_IMAGE_MODEL,
+  OPENROUTER_QUOTA_FALLBACK_MODEL,
 } from "../app/providers/openrouter/openrouter-image-adapter.ts";
 
 process.env.OPENROUTER_API_KEY ??= "test-key";
@@ -62,4 +63,36 @@ test("OpenRouter rate limits and empty answers become controlled errors", async 
     }),
     /empty answer/,
   );
+});
+
+test("OpenRouter free quota exhaustion retries once with Qwen3.7 Flash", async () => {
+  const models = [];
+  const answer = await askOpenRouterAboutImage("Question", png, "image/png", {
+    fetchImpl: async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      models.push(body.model);
+      if (models.length === 1) return new Response("free quota exhausted", { status: 429 });
+      return new Response(JSON.stringify({
+        model: OPENROUTER_QUOTA_FALLBACK_MODEL,
+        choices: [{ message: { content: "Qwen answer" } }],
+      }), { status: 200 });
+    },
+  });
+  assert.deepEqual(models, [OPENROUTER_IMAGE_MODEL, OPENROUTER_QUOTA_FALLBACK_MODEL]);
+  assert.equal(answer.content, "Qwen answer");
+  assert.equal(answer.model, OPENROUTER_QUOTA_FALLBACK_MODEL);
+});
+
+test("OpenRouter non-quota failures do not invoke the paid fallback", async () => {
+  let calls = 0;
+  await assert.rejects(
+    askOpenRouterAboutImage("Question", png, "image/png", {
+      fetchImpl: async () => {
+        calls += 1;
+        return new Response("invalid request", { status: 400 });
+      },
+    }),
+    /No eligible free vision model/,
+  );
+  assert.equal(calls, 1);
 });

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { estimatePdfTokens, pdfContext, ChatDocumentError } from "../lib/chat-document.ts";
 import { parsePdfWithOpenRouter } from "../app/providers/openrouter/openrouter-document-adapter.ts";
+import { OPENROUTER_QUOTA_FALLBACK_MODEL } from "../app/providers/openrouter/openrouter-config.ts";
 import { DOCUMENT_INGESTION_STAGES, DocumentIngestionTiming } from "../app/server/chat/document-ingestion-timing.ts";
 
 test("PDF token estimate is conservative and small PDFs inline every page",()=>{ assert.equal(estimatePdfTokens("12345"),2); const doc={id:"p",name:"a.pdf",contentType:"application/pdf",size:10,pageCount:2,tokenEstimate:2}; assert.equal(pdfContext(doc,[{pageNumber:1,text:"one"},{pageNumber:2,text:"two"}]).includes("[PDF page 2]\ntwo"),true); });
@@ -44,6 +45,27 @@ test("external PDF provider transport failures remain ChatDocumentError instance
    parsePdfWithOpenRouter("https://storage.test/document.pdf?token=secret-download-token","document.pdf"),
    (error)=>error instanceof ChatDocumentError && error.code==="parser_unavailable" && error.status===502,
   );
+ } finally {
+  globalThis.fetch=originalFetch;
+  if(originalKey===undefined)delete process.env.OPENROUTER_API_KEY;else process.env.OPENROUTER_API_KEY=originalKey;
+ }
+});
+
+test("external PDF parsing retries with Qwen3.7 Flash after free quota exhaustion", async () => {
+ const originalFetch=globalThis.fetch;
+ const originalKey=process.env.OPENROUTER_API_KEY;
+ const models=[];
+ process.env.OPENROUTER_API_KEY="secret-provider-key";
+ globalThis.fetch=async(_url,init)=>{
+  const requestBody=JSON.parse(String(init.body));
+  models.push(requestBody.model);
+  if(models.length===1)return new Response("free quota exhausted",{status:429});
+  return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({pages:[{pageNumber:1,text:"qwen page"}]})}}]}),{status:200});
+ };
+ try {
+  const pages=await parsePdfWithOpenRouter("https://storage.test/document.pdf","document.pdf");
+  assert.deepEqual(models,["openrouter/free",OPENROUTER_QUOTA_FALLBACK_MODEL]);
+  assert.equal(pages[0].text,"qwen page");
  } finally {
   globalThis.fetch=originalFetch;
   if(originalKey===undefined)delete process.env.OPENROUTER_API_KEY;else process.env.OPENROUTER_API_KEY=originalKey;
