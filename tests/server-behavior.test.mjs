@@ -109,6 +109,10 @@ test("run_python instructions are absent unless the tool is advertised", () => {
   assert.match(RUN_PYTHON_INSTRUCTIONS, /packages.*20/i);
   assert.match(RUN_PYTHON_INSTRUCTIONS, /args.*32/i);
   assert.match(RUN_PYTHON_INSTRUCTIONS, /artifacts.*20/i);
+  assert.match(RUN_PYTHON_INSTRUCTIONS, /PDF.*actual run_python call/i);
+  assert.match(RUN_PYTHON_INSTRUCTIONS, /preinstalled ReportLab.*do not install.*separate probe/i);
+  assert.match(RUN_PYTHON_INSTRUCTIONS, /one call.*short_story\.pdf.*identical path.*artifacts/i);
+  assert.match(RUN_PYTHON_INSTRUCTIONS, /Do not claim.*ok: true.*expected file.*artifacts/i);
   assert.doesNotMatch(RUN_PYTHON_INSTRUCTIONS, /six \(6\) run_python calls/i);
   assert.match(RUN_PYTHON_INSTRUCTIONS, /ok.*stdout.*stderr.*exitCode.*artifacts/i);
 });
@@ -328,6 +332,7 @@ test("generated PDFs fall back to downloadable artifacts when provenance registr
 test("generated PDFs retain editable provenance when registration succeeds", async () => {
   const originalSecret = process.env.ARTIFACT_SIGNING_SECRET;
   process.env.ARTIFACT_SIGNING_SECRET = "test-secret";
+  const ingested = [];
   const executor = {
     async run() {
       return {
@@ -337,6 +342,10 @@ test("generated PDFs retain editable provenance when registration succeeds", asy
         artifacts: [{ path: "story.pdf", size: 3, sha256: "0".repeat(64) }],
       };
     },
+    async readArtifact(path) {
+      assert.equal(path, "documents/project-1/revisions/revision-1/output/story.pdf");
+      return new TextEncoder().encode("pdf");
+    },
   };
   try {
     const result = await executePythonTool(
@@ -344,7 +353,9 @@ test("generated PDFs retain editable provenance when registration succeeds", asy
       executor,
       "owner-1",
       "conversation-1",
-      undefined,
+      async (artifact, bytes) => {
+        ingested.push({ artifact, text: new TextDecoder().decode(bytes) });
+      },
       {
         registerProvenance: async () => ({
           projectId: "project-1",
@@ -360,10 +371,84 @@ test("generated PDFs retain editable provenance when registration succeeds", asy
     assert.equal(result.artifacts?.[0]?.editable, true);
     assert.equal(result.artifacts?.[0]?.projectId, "project-1");
     assert.equal(result.artifacts?.[0]?.revisionId, "revision-1");
+    assert.equal(ingested.length, 1);
+    assert.equal(ingested[0]?.artifact.name, "story.pdf");
+    assert.equal(ingested[0]?.text, "pdf");
   } finally {
     if (originalSecret === undefined) delete process.env.ARTIFACT_SIGNING_SECRET;
     else process.env.ARTIFACT_SIGNING_SECRET = originalSecret;
   }
+});
+
+test("generated PDFs remain downloadable when document attachment ingestion fails", async () => {
+  const originalSecret = process.env.ARTIFACT_SIGNING_SECRET;
+  const originalWarn = console.warn;
+  process.env.ARTIFACT_SIGNING_SECRET = "test-secret";
+  const warnings = [];
+  console.warn = (value) => warnings.push(value);
+  const executor = {
+    async run() {
+      return {
+        stdout: "created\n",
+        stderr: "",
+        exitCode: 0,
+        artifacts: [{ path: "story.pdf", size: 3, sha256: "0".repeat(64) }],
+      };
+    },
+    async readArtifact() {
+      return new TextEncoder().encode("pdf");
+    },
+  };
+  try {
+    const result = await executePythonTool(
+      { id: "call-pdf", name: "run_python", arguments: '{"code":"pass","artifacts":["story.pdf"]}' },
+      executor,
+      "owner-1",
+      "conversation-1",
+      async () => {
+        throw new Error("indexing details and secret-token must not escape");
+      },
+      { registerProvenance: async () => { throw new Error("provenance unavailable"); } },
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.stdout, "created\n");
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.artifacts?.[0]?.name, "story.pdf");
+    assert.equal(result.artifacts?.[0]?.editable, false);
+    assert.deepEqual(
+      warnings.map((warning) => warning.event),
+      ["generated-document-provenance-fallback", "generated-document-attachment-fallback"],
+    );
+    assert.equal(warnings[1]?.failure, "Error");
+    assert.doesNotMatch(JSON.stringify(warnings), /indexing details|secret-token|provenance unavailable/i);
+  } finally {
+    console.warn = originalWarn;
+    if (originalSecret === undefined) delete process.env.ARTIFACT_SIGNING_SECRET;
+    else process.env.ARTIFACT_SIGNING_SECRET = originalSecret;
+  }
+});
+
+test("genuine Python execution failures remain authoritative", async () => {
+  const executor = {
+    async run() {
+      return {
+        stdout: "before failure\n",
+        stderr: "Traceback: generation failed\n",
+        exitCode: 1,
+      };
+    },
+  };
+  const result = await executePythonTool(
+    { id: "call-failed-pdf", name: "run_python", arguments: '{"code":"raise RuntimeError()","artifacts":["story.pdf"]}' },
+    executor,
+    "owner-1",
+    "conversation-1",
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout, "before failure\n");
+  assert.equal(result.stderr, "Traceback: generation failed\n");
+  assert.equal(result.artifacts, undefined);
 });
 
 test("chat orchestration reserves one usage slot per round", async () => {

@@ -103,7 +103,18 @@ export async function executePythonTool(
         const descriptor = (result.artifacts ?? []).find((item) => item.path.split("/").pop() === artifact.name);
         if (descriptor) {
           const provenancePath = artifact.projectId && artifact.revisionId ? `documents/${artifact.projectId}/revisions/${artifact.revisionId}/output/${artifact.name}` : descriptor.path;
-          await onDocumentArtifact(artifact, await executor.readArtifact(provenancePath));
+          try {
+            await onDocumentArtifact(artifact, await executor.readArtifact(provenancePath));
+          } catch (error) {
+            console.warn({
+              event: "generated-document-attachment-fallback",
+              ownerId,
+              conversationId,
+              jobId: call.id,
+              artifactType: artifact.contentType,
+              failure: error instanceof Error ? error.name : "UnknownError",
+            });
+          }
         }
       }
     }
