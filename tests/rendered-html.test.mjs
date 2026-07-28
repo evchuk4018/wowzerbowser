@@ -521,6 +521,12 @@ test("expands assistant responses across the mobile transcript", async () => {
   );
 });
 
+test("uses normal whitespace flow for rendered assistant Markdown", async () => {
+  const styles = await readStyles();
+
+  assert.match(styles, /\.assistant-markdown \{\s*white-space: normal;\s*\}/);
+});
+
 test("validates and preserves ordered assistant tool rounds", () => {
   const artifact = {
     id: "signed-artifact-token",
