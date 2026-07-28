@@ -639,11 +639,11 @@ test("classifies mobile history swipes by viewport threshold and direction", () 
   const decide = (deltaX, deltaY, sidebarOpen, viewportWidth = 400) =>
     getMobileHistorySwipeAction({ deltaX, deltaY, sidebarOpen, viewportWidth });
 
-  assert.equal(decide(103, 0, false), null);
-  assert.equal(decide(104, 0, false), "open");
-  assert.equal(decide(-104, 0, true), "close");
-  assert.equal(decide(104, 0, true), null);
-  assert.equal(decide(-104, 0, false), null);
+  assert.equal(decide(107, 0, false), null);
+  assert.equal(decide(108, 0, false), "open");
+  assert.equal(decide(-108, 0, true), "close");
+  assert.equal(decide(108, 0, true), null);
+  assert.equal(decide(-108, 0, false), null);
   assert.equal(decide(120, 121, false), null);
   assert.equal(decide(120, 119, false), "open");
   assert.equal(decide(200, 0, false, 761), null);
@@ -704,8 +704,8 @@ test("keeps mobile history gesture tracking touch-safe and click-safe", () => {
     true,
   );
   assert.equal(gesture.hasClickSuppression(), true);
-  assert.equal(gesture.end({ clientX: 104, clientY: 0, pointerId: 1 }), "open");
-  assert.equal(gesture.end({ clientX: 104, clientY: 0, pointerId: 1 }), null);
+  assert.equal(gesture.end({ clientX: 108, clientY: 0, pointerId: 1 }), "open");
+  assert.equal(gesture.end({ clientX: 108, clientY: 0, pointerId: 1 }), null);
   assert.equal(gesture.consumeClickSuppression(), true);
   assert.equal(gesture.consumeClickSuppression(), false);
 
@@ -743,7 +743,7 @@ test("wires mobile history swipes without pointer capture", async () => {
   assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.app-shell \{[\s\S]*?touch-action: pan-y;/);
   assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.chat-area \{[\s\S]*?touch-action: pan-y;[\s\S]*?overscroll-behavior-x: none;/);
   assert.match(gestureSource, /MOBILE_HISTORY_MAX_WIDTH = 760/);
-  assert.match(gestureSource, /MOBILE_HISTORY_SWIPE_THRESHOLD = 0\.26/);
+  assert.match(gestureSource, /MOBILE_HISTORY_SWIPE_THRESHOLD = 0\.27/);
   assert.match(gestureSource, /pointerType !== "touch"/);
   assert.match(gestureSource, /!isPrimary/);
 });
