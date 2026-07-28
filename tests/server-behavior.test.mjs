@@ -127,7 +127,7 @@ test("run_python manifest uses the shared input limits", async () => {
 
 test("web tools have bounded manifests, configuration gates, and opaque key rotation", async () => {
   assert.deepEqual(WEB_TOOL_DEFINITIONS.map((tool) => tool.function.name), ["web_search", "fetch_page", "check_time", "check_date", "check_location"]);
-  assert.equal(WEB_TOOL_DEFINITIONS[0].function.parameters.properties.count.maximum, 5);
+  assert.equal(WEB_TOOL_DEFINITIONS[0].function.parameters.properties.count.maximum, 20);
   assert.equal(WEB_TOOL_DEFINITIONS[1].function.parameters.properties.url.maxLength, 2_000);
   assert.equal(WEB_TOOL_DEFINITIONS[2].function.parameters.properties.timeZone.maxLength, 100);
   assert.deepEqual(WEB_TOOL_DEFINITIONS[4].function.parameters.properties, {});
@@ -171,21 +171,26 @@ test("time, date, and location tools validate inputs and produce bounded structu
   if (original === undefined) delete process.env.DEPLOYMENT_LOCATION; else process.env.DEPLOYMENT_LOCATION = original;
 });
 
-test("web search accepts the provider-compatible q argument alias", async () => {
+test("web search passes 20 results to Brave and caps higher counts", async () => {
   const originalFetch = globalThis.fetch;
   const originalKeys = process.env.BRAVE_API_KEYS;
   process.env.BRAVE_API_KEYS = "test-key";
-  let requestedUrl = "";
+  const requestedUrls = [];
   globalThis.fetch = async (url) => {
-    requestedUrl = String(url);
+    requestedUrls.push(String(url));
     return Response.json({ web: { results: [] } });
   };
   try {
-    const result = await executeWebTool({ id: "search-1", name: "web_search", arguments: '{"q":"current date"}' });
+    const result = await executeWebTool({ id: "search-1", name: "web_search", arguments: '{"q":"current date","count":20}' });
     assert.equal(result.ok, true);
     assert.equal(result.web?.kind, "search");
     assert.equal(result.web?.query, "current date");
-    assert.equal(new URL(requestedUrl).searchParams.get("q"), "current date");
+    assert.equal(new URL(requestedUrls[0]).searchParams.get("q"), "current date");
+    assert.equal(new URL(requestedUrls[0]).searchParams.get("count"), "20");
+
+    const capped = await executeWebTool({ id: "search-2", name: "web_search", arguments: '{"query":"current date","count":21}' });
+    assert.equal(capped.ok, true);
+    assert.equal(new URL(requestedUrls[1]).searchParams.get("count"), "20");
   } finally {
     globalThis.fetch = originalFetch;
     if (originalKeys === undefined) delete process.env.BRAVE_API_KEYS; else process.env.BRAVE_API_KEYS = originalKeys;
