@@ -105,6 +105,11 @@
   text-align: left;
 }
 .assistant-markdown th { background: #2b2c29; color: var(--text); }
+.assistant-markdown .katex {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .assistant-markdown .katex-display {
   overflow-x: auto;
   overflow-y: hidden;

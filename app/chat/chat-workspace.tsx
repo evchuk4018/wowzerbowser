@@ -365,7 +365,9 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
   const startLongPress = (turnId: string, pointerType: string) => {
     cancelLongPress();
     if (pointerType !== "touch") return;
+
     longPressTimerRef.current = window.setTimeout(() => {
+      window.getSelection()?.removeAllRanges();
       setOpenMessageActions(turnId);
       longPressTimerRef.current = null;
     }, 500);

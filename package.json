@@ -19,7 +19,7 @@
   "dependencies": {
     "@napi-rs/canvas": "^1.0.2",
     "@supabase/supabase-js": "^2.110.8",
-    "katex": "^0.18.1",
+    "katex": "0.16.47",
     "mammoth": "^1.12.0",
     "modal": "^0.9.0",
     "next": "16.2.6",
