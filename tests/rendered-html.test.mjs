@@ -354,11 +354,35 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.doesNotMatch(client, /Messages stay on this device/);
   assert.doesNotMatch(styles, /privacy-note/);
   assert.match(styles, /bottom: calc\(100% \+ 8px\)/);
-  assert.match(styles, /padding: 34px 0 220px/);
+  assert.match(styles, /padding: 34px max\(21px, calc\(\(100% - 860px\) \/ 2\)\) 220px;/);
   assert.match(styles, /height: 100dvh;/);
   assert.match(styles, /\.chat-area[\s\S]*?overflow: hidden;/);
   assert.match(styles, /\.transcript[\s\S]*?overflow-x: hidden;[\s\S]*?overflow-y: auto;/);
   assert.match(styles, /\.chat-active \.composer-wrap[\s\S]*?position: absolute;/);
+});
+
+test("keeps the transcript scroll viewport full-width without changing mobile layout", async () => {
+  const [transcript, responsive] = await Promise.all([
+    readFile(new URL("../app/styles/transcript.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/styles/responsive.css", import.meta.url), "utf8"),
+  ]);
+  const desktopTranscript = transcript.match(/\.transcript\s*\{[\s\S]*?\n\}/)?.[0];
+
+  assert.ok(desktopTranscript);
+  assert.match(desktopTranscript, /width: 100%;/);
+  assert.match(desktopTranscript, /padding: 34px max\(21px, calc\(\(100% - 860px\) \/ 2\)\) 220px;/);
+  assert.match(desktopTranscript, /overflow-y: auto;/);
+  assert.doesNotMatch(transcript, /width: min\(860px, calc\(100% - 42px\)\)/);
+  assert.doesNotMatch(desktopTranscript, /margin: 0 auto;/);
+
+  assert.match(
+    responsive,
+    /@media \(max-width: 760px\) \{[\s\S]*?\.transcript \{[\s\S]*?width: calc\(100% - 28px - env\(safe-area-inset-left\) - env\(safe-area-inset-right\)\);[\s\S]*?padding-top: 70px;[\s\S]*?padding-bottom: calc\(210px \+ env\(safe-area-inset-bottom\)\);[\s\S]*?\}/,
+  );
+  assert.match(
+    transcript,
+    /@media \(max-width: 760px\) \{[\s\S]*?\.transcript \{[\s\S]*?padding-inline: 0;[\s\S]*?\}/,
+  );
 });
 
 test("shows call activity without a generic generation indicator", async () => {

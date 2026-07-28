@@ -1,9 +1,8 @@
 .transcript {
-  width: min(860px, calc(100% - 42px));
+  width: 100%;
   min-height: 0;
   flex: 1;
-  margin: 0 auto;
-  padding: 34px 0 220px;
+  padding: 34px max(21px, calc((100% - 860px) / 2)) 220px;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -321,6 +320,12 @@
   color: var(--muted);
   font-size: 11px;
   line-height: 1.4;
+}
+
+@media (max-width: 760px) {
+  .transcript {
+    padding-inline: 0;
+  }
 }
 
 @media (max-width: 600px) {
