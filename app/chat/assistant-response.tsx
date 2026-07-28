@@ -6,8 +6,6 @@ import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import type { ChatCitation, ChatSource } from "../../lib/chat-citations";
-import type { ChatArtifact } from "../../lib/chat-protocol";
-import { linkedPdfArtifact } from "./artifact-links";
 import { normalizeLatexDelimiters } from "./normalize-latex-delimiters";
 
 const TOKEN = "\uE000citation:";
@@ -94,47 +92,15 @@ function renderCitationChildren(children: React.ReactNode, annotations: ChatCita
   });
 }
 
-export function AssistantResponse({
-  content,
-  annotations = [],
-  sources = [],
-  artifacts = [],
-  onOpenArtifact,
-}: {
-  content: string;
-  annotations?: ChatCitation[];
-  sources?: ChatSource[];
-  artifacts?: ChatArtifact[];
-  onOpenArtifact?: (artifact: ChatArtifact) => void;
-}) {
+export function AssistantResponse({ content, annotations = [], sources = [] }: { content: string; annotations?: ChatCitation[]; sources?: ChatSource[] }) {
   const [selectedCitation, setSelectedCitation] = useState<ChatCitation | null>(null);
   const markedContent = useMemo(() => addCitationTokens(normalizeLatexDelimiters(content), annotations, sources), [annotations, content, sources]);
   const components = useMemo(() => {
     const wrap = (tag: keyof React.JSX.IntrinsicElements) => function CitationAwareElement({ children, ...props }: { children?: React.ReactNode; [key: string]: unknown }) {
       return React.createElement(tag, props, renderCitationChildren(children, annotations, sources, setSelectedCitation));
     };
-    const ArtifactAwareLink = ({ children, href, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => {
-      const renderedChildren = renderCitationChildren(children, annotations, sources, setSelectedCitation);
-      const label = React.Children.toArray(children).filter((child): child is string => typeof child === "string").join("");
-      const artifact = linkedPdfArtifact(href, label, artifacts);
-      if (artifact && onOpenArtifact) {
-        return (
-          <a
-            {...props}
-            href={href}
-            onClick={(event) => {
-              event.preventDefault();
-              onOpenArtifact(artifact);
-            }}
-          >
-            {renderedChildren}
-          </a>
-        );
-      }
-      return <a {...props} href={href}>{renderedChildren}</a>;
-    };
-    return { p: wrap("p"), h1: wrap("h1"), h2: wrap("h2"), h3: wrap("h3"), h4: wrap("h4"), li: wrap("li"), blockquote: wrap("blockquote"), strong: wrap("strong"), em: wrap("em"), a: ArtifactAwareLink, td: wrap("td"), th: wrap("th") } as unknown as Components;
-  }, [annotations, artifacts, onOpenArtifact, sources]);
+    return { p: wrap("p"), h1: wrap("h1"), h2: wrap("h2"), h3: wrap("h3"), h4: wrap("h4"), li: wrap("li"), blockquote: wrap("blockquote"), strong: wrap("strong"), em: wrap("em"), a: wrap("a"), td: wrap("td"), th: wrap("th") } as unknown as Components;
+  }, [annotations, sources]);
   return (
     <>
       <div className="assistant-markdown">
