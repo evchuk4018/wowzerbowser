@@ -14,6 +14,7 @@ export const USAGE_REQUEST_KINDS = [
   "image_visual_analysis",
   "image_followup",
   "chat_summary",
+  "chat_recall",
 ] as const;
 export type UsageRequestKind = (typeof USAGE_REQUEST_KINDS)[number];
 
