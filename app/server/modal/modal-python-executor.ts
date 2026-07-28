@@ -49,6 +49,8 @@ export type ModalExecResult = {
   artifacts?: ModalExecArtifact[];
 };
 
+export type IsolatedPythonResult = Omit<ModalExecResult, "artifacts">;
+
 export function isModalConfigured(): boolean {
   return Boolean(
     process.env.MODAL_TOKEN_ID?.trim() &&
@@ -375,6 +377,55 @@ export async function readConversationArtifact(
     );
   } finally {
     await sandbox.terminate().catch(() => undefined);
+    client.close();
+  }
+}
+
+/** Execute an account-created API tool in a fresh sandbox with no mounted volumes. */
+export async function runIsolatedPythonTool(
+  source: string,
+  input: unknown,
+  environment: Record<string, string>,
+  deadlineAt = Date.now() + PYTHON_TOOL_LIMITS.callTimeoutMs,
+): Promise<IsolatedPythonResult> {
+  if (!isModalConfigured()) throw new Error("Python execution is not configured.");
+  const client = new ModalClient();
+  let sandbox: Sandbox | null = null;
+  try {
+    assertDeadline(deadlineAt);
+    const app = await waitForPythonDeadline(
+      client.apps.fromName(MODAL_APP_NAME, { createIfMissing: true }),
+      deadlineAt,
+      PYTHON_DEADLINE_ERROR,
+    );
+    const image = client.images.fromRegistry("python:3.13-slim")
+      .dockerfileCommands([PYTHON_RUNTIME_PACKAGE_INSTALL_COMMAND]);
+    sandbox = await waitForPythonDeadline(client.sandboxes.create(app, image, {
+      name: `custom-tool-${randomUUID().replaceAll("-", "").slice(0, 24)}`,
+      cpu: PYTHON_TOOL_LIMITS.cpu,
+      cpuLimit: PYTHON_TOOL_LIMITS.cpu,
+      memoryMiB: PYTHON_TOOL_LIMITS.memoryMb,
+      memoryLimitMiB: PYTHON_TOOL_LIMITS.memoryMb,
+      timeoutMs: PYTHON_TOOL_LIMITS.callTimeoutMs,
+      idleTimeoutMs: 30_000,
+      workdir: "/tmp",
+      env: environment,
+      outboundDomainAllowlist: ["*"],
+      outboundCidrAllowlist: [],
+    }), deadlineAt, PYTHON_DEADLINE_ERROR);
+    const result = await runProcess(sandbox, ["python3", "-c", source], {
+      stdin: JSON.stringify(input),
+      deadlineAt,
+      timeoutMs: PYTHON_TOOL_LIMITS.callTimeoutMs,
+      outputLimit: PYTHON_TOOL_LIMITS.maxOutputLength,
+    });
+    return {
+      stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode,
+      stdoutTruncated: result.stdoutTruncated || undefined,
+      stderrTruncated: result.stderrTruncated || undefined,
+    };
+  } finally {
+    await sandbox?.terminate().catch(() => undefined);
     client.close();
   }
 }

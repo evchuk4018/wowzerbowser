@@ -27,6 +27,9 @@ import { IncrementalCitationFilter, parseCitationMarkup, validCitationSources, t
 import { PHASE_BREAK_INSTRUCTIONS } from "../server/agent/phase-break-instructions";
 import { executePhaseBreak, PHASE_BREAK_TOOL_DEFINITION, PHASE_BREAK_TOOL_NAME } from "../server/agent/phase-break-tool";
 import { ReasoningTitleCoordinator, type ReasoningTitleUsage } from "../server/chat/reasoning-title-service";
+import { listEnabledExecutableTools } from "../server/tools/custom-tool-repository";
+import { customToolDefinitions, customToolInstructions } from "../server/tools/custom-tool-manifest";
+import { executeCustomToolCall } from "../server/tools/custom-tool-executor";
 
 const MAX_RESPONSE_MS = 240_000;
 
@@ -59,6 +62,14 @@ export async function generateChatResponse(
   const conversationId = stableConversationId(chatRequest);
   const pythonTools = availableChatTools();
   const webTools = availableWebTools();
+  const customTools = isModalConfigured()
+    ? await listEnabledExecutableTools(ownerId).catch((error) => {
+        console.warn({ event: "custom-tools-unavailable", ownerId, failure: error instanceof Error ? error.name : "UnknownError" });
+        return [];
+      })
+    : [];
+  const customToolsByName = new Map(customTools.map((tool) => [tool.name, tool]));
+  const customDefinitions = customToolDefinitions(customTools);
   const allowedImageIds = await getAuthoritativeChatImageIdsForRequest(ownerId, chatRequest);
   const requestedPdfIds = [...new Set(chatRequest.messages.flatMap((message) => message.documents?.map((item) => item.id) ?? []))];
   const allowedPdfIds = new Set<string>();
@@ -78,7 +89,7 @@ export async function generateChatResponse(
   const pdfEditTools = availablePdfEditTools([...authoritativePdfs.values()].some((document) => document.contentType === "application/pdf"));
   const allowedProjectIds = new Set([...authoritativePdfs.values()].map((document) => document.projectId).filter((projectId): projectId is string => Boolean(projectId)));
   const phaseTools = chatRequest.thinking ? [PHASE_BREAK_TOOL_DEFINITION] : [];
-  const baseToolDefinitions = [...pythonTools, ...imageTools, ...webTools, ...pdfEditTools, ...phaseTools];
+  const baseToolDefinitions = [...pythonTools, ...imageTools, ...webTools, ...pdfEditTools, ...phaseTools, ...customDefinitions];
   const imageToolAdvertised = imageTools.some((tool) => tool.function.name === INSPECT_IMAGE_TOOL_NAME);
 
   const enqueue = async (event: ChatStreamEvent) => {
@@ -115,6 +126,7 @@ export async function generateChatResponse(
             ...webToolInstructionsFor(Boolean(webTools.length)),
             ...(pdfEditTools.length ? PDF_EDIT_TOOL_INSTRUCTIONS : []),
             ...(phaseTools.length ? [PHASE_BREAK_INSTRUCTIONS] : []),
+            ...customToolInstructions(customTools),
           ];
           const reasoningParts: string[] = [];
           const contentParts: string[] = [];
@@ -218,6 +230,8 @@ export async function generateChatResponse(
               });
             } else if (webTools.some((tool) => tool.function.name === call.name)) {
               result = await executeWebTool(call);
+            } else if (customToolsByName.has(call.name)) {
+              result = await executeCustomToolCall(call, customToolsByName.get(call.name)!);
             } else if (pdfEditTools.some((tool) => tool.function.name === call.name)) {
               if (!isModalConfigured() && call.name !== "inspect_pdf_editability" && call.name !== "compare_document_revisions") throw new Error("PDF editing is not configured.");
               if (!executor && call.name !== "inspect_pdf_editability" && call.name !== "compare_document_revisions") executor = new ModalPythonExecutor(ownerId, conversationId, responseDeadlineAt);

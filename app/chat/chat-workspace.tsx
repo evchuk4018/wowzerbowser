@@ -525,6 +525,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
         <SettingsModal
           settings={settings}
           loadUsage={loadUsage}
+          getAccessToken={getAccessToken}
           onClose={closeSettings}
           onSave={(next) => {
             setSettings(next);

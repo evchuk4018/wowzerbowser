@@ -7,18 +7,20 @@ import type {
   UsageReport,
 } from "../../lib/usage-protocol";
 import type { ChatSettings } from "../chat/conversation-types";
+import { ToolsSettings } from "./tools-settings";
 
 export type SettingsModalProps = {
   settings: ChatSettings;
   onClose: () => void;
   onSave: (settings: ChatSettings) => void;
   loadUsage?: (range: UsageRange) => Promise<UsageReport>;
+  getAccessToken: () => Promise<string | null>;
 };
 
 type SettingsSection =
   | "general"
   | "usage"
-  | "notifications"
+  | "tools"
   | "personalization"
   | "plugins"
   | "storage"
@@ -30,7 +32,7 @@ type SettingsSection =
 const sections: Array<{ id: SettingsSection; label: string; description: string; icon: string }> = [
   { id: "general", label: "General", description: "Conversation context and app preferences.", icon: "⚙" },
   { id: "usage", label: "Usage", description: "Review token volume and estimated costs.", icon: "◫" },
-  { id: "notifications", label: "Notifications", description: "Choose how and when you get updates.", icon: "♢" },
+  { id: "tools", label: "Tools", description: "Create Python tools and securely connect APIs.", icon: "♢" },
   { id: "personalization", label: "Personalization", description: "Shape how the experience works for you.", icon: "✦" },
   { id: "plugins", label: "Plugins", description: "Manage connected tools and extensions.", icon: "⌘" },
   { id: "storage", label: "Storage", description: "Review stored data and retention options.", icon: "▱" },
@@ -294,7 +296,7 @@ function PlaceholderSettings({ label }: { label: string }) {
   );
 }
 
-export function SettingsModal({ settings, onClose, onSave, loadUsage }: SettingsModalProps) {
+export function SettingsModal({ settings, onClose, onSave, loadUsage, getAccessToken }: SettingsModalProps) {
   const [draft, setDraft] = useState(settings);
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
   const [showIndex, setShowIndex] = useState(true);
@@ -307,7 +309,7 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage }: Settings
       if (event.key !== "Tab" || !dialogRef.current) return;
       const focusable = Array.from(
         dialogRef.current.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+          'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
         ),
       ).filter((element) => !element.hasAttribute("hidden"));
       if (!focusable.length) return;
@@ -397,6 +399,8 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage }: Settings
               />
             ) : activeSection === "usage" ? (
               <UsageSettings loadUsage={loadUsage} />
+            ) : activeSection === "tools" ? (
+              <ToolsSettings getAccessToken={getAccessToken} />
             ) : (
               <PlaceholderSettings label={activeLabel} />
             )}

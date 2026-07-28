@@ -352,7 +352,8 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(settings, /Week/);
   assert.match(settings, /Month/);
   assert.match(settings, /All time/);
-  assert.match(settings, /Notifications/);
+  assert.match(settings, /Tools/);
+  assert.doesNotMatch(settings, /Notifications/);
   assert.match(settings, /Personalization/);
   assert.match(settings, /Plugins/);
   assert.match(settings, /Storage/);

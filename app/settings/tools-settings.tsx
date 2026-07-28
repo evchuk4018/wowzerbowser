@@ -1,0 +1,175 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import type { CustomToolDefinition, CustomToolMutation, CustomToolSummary, CustomToolTestResult } from "../../lib/custom-tool-protocol";
+import {
+  createCustomTool, deleteCustomTool, fetchCustomTool, fetchCustomTools, testCustomTool, updateCustomTool,
+} from "./custom-tools-service";
+
+const DEFAULT_SCHEMA = '{\n  "type": "object",\n  "properties": {},\n  "additionalProperties": false\n}';
+const DEFAULT_SOURCE = 'import json, sys\n\narguments = json.load(sys.stdin)\nprint(json.dumps({"ok": True}))';
+type Draft = {
+  id?: string; name: string; description: string; instructions: string; schema: string;
+  source: string; enabled: boolean; configuredSecrets: string[]; secretNames: string[];
+  secretValues: Record<string, string>; removeSecrets: string[];
+};
+const blankDraft = (): Draft => ({
+  name: "", description: "", instructions: "", schema: DEFAULT_SCHEMA, source: DEFAULT_SOURCE,
+  enabled: false, configuredSecrets: [], secretNames: [], secretValues: {}, removeSecrets: [],
+});
+const draftFor = (tool: CustomToolDefinition): Draft => ({
+  id: tool.id, name: tool.name, description: tool.description, instructions: tool.instructions,
+  schema: JSON.stringify(tool.inputSchema, null, 2), source: tool.pythonSource, enabled: tool.enabled,
+  configuredSecrets: tool.secrets.map((item) => item.name), secretNames: tool.secrets.map((item) => item.name),
+  secretValues: {}, removeSecrets: [],
+});
+
+export function ToolsSettings({ getAccessToken }: { getAccessToken: () => Promise<string | null> }) {
+  const [tools, setTools] = useState<CustomToolSummary[]>([]);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [status, setStatus] = useState<"loading" | "idle" | "saving" | "testing">("loading");
+  const [error, setError] = useState("");
+  const [sample, setSample] = useState("{}");
+  const [testResult, setTestResult] = useState<CustomToolTestResult | null>(null);
+
+  const token = useCallback(async () => {
+    const value = await getAccessToken();
+    if (!value) throw new Error("Sign in to manage tools.");
+    return value;
+  }, [getAccessToken]);
+  const reload = useCallback(async () => setTools(await fetchCustomTools(await token())), [token]);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const values = await fetchCustomTools(await token());
+        if (active) setTools(values);
+      } catch (reason) {
+        if (active) setError(reason instanceof Error ? reason.message : "Tools could not be loaded.");
+      } finally {
+        if (active) setStatus("idle");
+      }
+    })();
+    return () => { active = false; };
+  }, [token]);
+
+  async function edit(id: string) {
+    setError(""); setTestResult(null); setStatus("loading");
+    try { setDraft(draftFor(await fetchCustomTool(id, await token()))); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "The tool could not be loaded."); }
+    finally { setStatus("idle"); }
+  }
+
+  function mutation(current: Draft): CustomToolMutation {
+    let inputSchema: Record<string, unknown>;
+    try { inputSchema = JSON.parse(current.schema) as Record<string, unknown>; }
+    catch { throw new Error("Input schema must be valid JSON."); }
+    return {
+      name: current.name, description: current.description, instructions: current.instructions,
+      inputSchema, pythonSource: current.source, enabled: current.enabled,
+      secrets: Object.fromEntries(Object.entries(current.secretValues).filter(([, value]) => value.length > 0)),
+      removeSecrets: current.removeSecrets,
+    };
+  }
+
+  async function save() {
+    if (!draft) return;
+    setStatus("saving"); setError("");
+    try {
+      const saved = draft.id
+        ? await updateCustomTool(draft.id, mutation(draft), await token())
+        : await createCustomTool(mutation({ ...draft, enabled: false }), await token());
+      setDraft(draftFor(saved)); await reload();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "The tool could not be saved."); }
+    finally { setStatus("idle"); }
+  }
+
+  async function runTest() {
+    if (!draft?.id) return;
+    setStatus("testing"); setError(""); setTestResult(null);
+    try { setTestResult(await testCustomTool(draft.id, JSON.parse(sample), await token())); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "The test could not be run."); }
+    finally { setStatus("idle"); }
+  }
+
+  async function remove() {
+    if (!draft?.id || !window.confirm(`Delete ${draft.name}? This also deletes its credentials.`)) return;
+    setStatus("saving"); setError("");
+    try { await deleteCustomTool(draft.id, await token()); setDraft(null); await reload(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "The tool could not be deleted."); }
+    finally { setStatus("idle"); }
+  }
+
+  if (!draft) return (
+    <div className="tools-settings">
+      <div className="settings-panel-heading tools-heading">
+        <div><h3>Tools</h3><p>Create account-wide Python tools the AI can call automatically.</p></div>
+        <button type="button" className="settings-save" onClick={() => { setDraft(blankDraft()); setError(""); }}>Create tool</button>
+      </div>
+      {error && <p className="settings-status settings-error" role="alert">{error}</p>}
+      {status === "loading" && <p className="settings-status" role="status">Loading tools...</p>}
+      <div className="tools-list">
+        {tools.map((tool) => (
+          <button type="button" className="tool-list-item" key={tool.id} onClick={() => void edit(tool.id)}>
+            <span><strong>{tool.name}</strong><small>{tool.description}</small></span>
+            <span className={tool.enabled ? "tool-state enabled" : "tool-state"}>{tool.enabled ? "Enabled" : "Disabled"}</span>
+          </button>
+        ))}
+        {status !== "loading" && !tools.length && <p className="settings-status">No custom tools yet.</p>}
+      </div>
+    </div>
+  );
+
+  const busy = status === "saving" || status === "testing";
+  return (
+    <div className="tools-settings tool-editor">
+      <div className="settings-panel-heading tools-heading">
+        <div><button type="button" className="tool-back" onClick={() => setDraft(null)}>← Tools</button><h3>{draft.id ? draft.name : "New tool"}</h3></div>
+        <label className="tool-enabled"><input type="checkbox" checked={draft.enabled} disabled={!draft.id}
+          onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} /> Enabled</label>
+      </div>
+      {error && <p className="settings-status settings-error" role="alert">{error}</p>}
+      <div className="tool-form-grid">
+        <label className="settings-field"><span>Name</span><input value={draft.name} maxLength={64} placeholder="google_calendar"
+          onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
+        <label className="settings-field"><span>Description</span><input value={draft.description} maxLength={1000} placeholder="Create and list calendar events"
+          onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
+      </div>
+      <label className="settings-field"><span>AI usage instructions</span><textarea rows={3} value={draft.instructions}
+        placeholder="Explain when and how the AI should call this tool." onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} /></label>
+      <label className="settings-field"><span>JSON input schema</span><textarea className="tool-code" rows={9} value={draft.schema}
+        spellCheck={false} onChange={(event) => setDraft({ ...draft, schema: event.target.value })} /></label>
+      <label className="settings-field"><span>Python source</span><small>Read one JSON value from stdin and print one JSON value to stdout.</small>
+        <textarea className="tool-code" rows={12} value={draft.source} spellCheck={false}
+          onChange={(event) => setDraft({ ...draft, source: event.target.value })} /></label>
+      <fieldset className="tool-secrets"><legend>Environment secrets</legend>
+        {draft.secretNames.map((name, index) => {
+          const configured = draft.configuredSecrets.includes(name) && !draft.removeSecrets.includes(name);
+          return <div className="tool-secret-row" key={`${name}:${index}`}>
+            <input aria-label="Secret name" value={name} placeholder="GOOGLE_API_KEY" disabled={configured}
+              onChange={(event) => { const names = [...draft.secretNames]; names[index] = event.target.value.toUpperCase(); setDraft({ ...draft, secretNames: names }); }} />
+            <input aria-label={`${name || "New"} secret value`} type="password" value={draft.secretValues[name] ?? ""} placeholder={configured ? "Stored securely" : "Secret value"}
+              onChange={(event) => setDraft({ ...draft, secretValues: { ...draft.secretValues, [name]: event.target.value } })} />
+            <button type="button" onClick={() => setDraft({
+              ...draft, secretNames: draft.secretNames.filter((_, item) => item !== index),
+              removeSecrets: configured ? [...draft.removeSecrets, name] : draft.removeSecrets,
+            })}>{configured ? "Remove" : "Discard"}</button>
+          </div>;
+        })}
+        <button type="button" className="tool-add-secret" onClick={() => setDraft({ ...draft, secretNames: [...draft.secretNames, ""] })}>Add secret</button>
+      </fieldset>
+      {draft.id && <div className="tool-test">
+        <label className="settings-field"><span>Test input</span><textarea className="tool-code" rows={5} value={sample} onChange={(event) => setSample(event.target.value)} /></label>
+        <button type="button" className="settings-cancel" disabled={busy} onClick={() => void runTest()}>Run test</button>
+        {testResult && <pre className={testResult.ok ? "tool-test-result" : "tool-test-result error"}>{JSON.stringify(testResult, null, 2)}</pre>}
+      </div>}
+      <div className="tool-editor-actions">
+        {draft.id && <button type="button" className="tool-delete" disabled={busy} onClick={() => void remove()}>Delete</button>}
+        <span />
+        <button type="button" className="settings-cancel" disabled={busy} onClick={() => setDraft(null)}>Cancel</button>
+        <button type="button" className="settings-save" disabled={busy} onClick={() => void save()}>{status === "saving" ? "Saving..." : "Save tool"}</button>
+      </div>
+    </div>
+  );
+}

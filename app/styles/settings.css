@@ -721,3 +721,40 @@
     transition: none;
   }
 }
+
+.tools-settings { display: grid; gap: 18px; }
+.tools-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.tools-list { display: grid; gap: 10px; }
+.tool-list-item {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 18px;
+  padding: 15px 16px; border: 1px solid var(--line); border-radius: 12px;
+  color: var(--text); background: var(--panel); text-align: left; cursor: pointer;
+}
+.tool-list-item:hover { background: var(--panel-hover); }
+.tool-list-item > span:first-child { display: grid; gap: 4px; }
+.tool-list-item small, .settings-field small { color: var(--quiet); }
+.tool-state { flex: none; padding: 4px 8px; border-radius: 999px; color: var(--quiet); background: var(--panel-hover); font-size: 12px; }
+.tool-state.enabled { color: #76c893; background: color-mix(in srgb, #2d6a4f 26%, transparent); }
+.tool-back, .tool-add-secret { border: 0; padding: 0; color: var(--muted); background: transparent; cursor: pointer; }
+.tool-form-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 14px; }
+.settings-field input, .tool-secret-row input {
+  width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px 12px; color: var(--text); background: var(--panel);
+}
+.settings-field input:focus, .tool-secret-row input:focus { border-color: var(--accent); outline: none; }
+.tool-code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; tab-size: 2; }
+.tool-enabled { display: flex; align-items: center; gap: 8px; }
+.tool-secrets { display: grid; gap: 10px; margin: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
+.tool-secret-row { display: grid; grid-template-columns: minmax(130px, 1fr) minmax(180px, 2fr) auto; gap: 8px; }
+.tool-secret-row button, .tool-delete { border: 0; color: #e18484; background: transparent; cursor: pointer; }
+.tool-test { display: grid; justify-items: start; gap: 10px; padding-top: 6px; border-top: 1px solid var(--line); }
+.tool-test .settings-field, .tool-test-result { width: 100%; box-sizing: border-box; }
+.tool-test-result {
+  max-height: 260px; overflow: auto; margin: 0; padding: 12px; border-radius: 10px;
+  color: #9be9b0; background: #111713; white-space: pre-wrap;
+}
+.tool-test-result.error { color: #f0a0a0; }
+.tool-editor-actions { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 10px; padding-top: 12px; }
+@media (max-width: 680px) {
+  .tool-form-grid, .tool-secret-row { grid-template-columns: 1fr; }
+}
