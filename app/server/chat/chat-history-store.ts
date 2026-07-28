@@ -14,6 +14,7 @@ import {
 } from "../../../lib/chat-history";
 import { getServerClient } from "../../auth/supabase-server-adapter";
 import { attachmentFromUploadRecord, listChatImageUploadRecords } from "./chat-image-store";
+import type { ChatSearchResult } from "../../../lib/chat-search";
 
 type MessageRow = {
   owner_id: string;
@@ -503,6 +504,25 @@ export async function listChatConversations(ownerId: string): Promise<ChatConver
       isStreaming: messages.some((message) => message.role === "assistant" && message.status === "streaming"),
     };
   });
+}
+
+export async function searchChatConversations(ownerId: string, query: string): Promise<ChatSearchResult[]> {
+  const { data, error } = await client().rpc("search_chat_conversations", {
+    p_owner_id: ownerId,
+    p_query: query,
+  });
+  if (error) throw error;
+  return ((data ?? []) as Array<{
+    conversation_id: string;
+    title: string;
+    updated_at: string;
+    preview: string | null;
+  }>).map((row) => ({
+    id: row.conversation_id,
+    title: row.title,
+    updatedAt: row.updated_at,
+    preview: row.preview ?? "",
+  }));
 }
 
 export async function getChatConversation(ownerId: string, conversationId: string): Promise<ChatConversation | null> {

@@ -28,6 +28,7 @@ const stylesheetPaths = [
   "../app/styles/artifacts.css",
   "../app/styles/pdf-preview.css",
   "../app/styles/composer.css",
+  "../app/styles/chat-search.css",
   "../app/styles/responsive.css",
   "../app/styles/reduced-motion.css",
 ];

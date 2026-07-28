@@ -17,6 +17,7 @@ import "./styles/assistant-activity.css";
 import "./styles/artifacts.css";
 import "./styles/pdf-preview.css";
 import "./styles/composer.css";
+import "./styles/chat-search.css";
 import "./styles/responsive.css";
 import "./styles/reduced-motion.css";
 import { ServiceWorkerRegistration } from "./pwa/service-worker-registration";

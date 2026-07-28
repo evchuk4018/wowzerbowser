@@ -14,6 +14,7 @@ import {
 import { useRouter } from "next/navigation";
 import type { AuthUser } from "../auth/types";
 import { SettingsModal } from "../settings/settings-modal";
+import { ChatSearchDialog } from "./chat-search-dialog";
 import { ChatComposer } from "./chat-composer";
 import type { PendingChatImage } from "./chat-image-attachments";
 import type { PendingChatDocument } from "./chat-document-attachments";
@@ -67,6 +68,7 @@ export function ChatWorkspace({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_CHAT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [openMenu, setOpenMenu] = useState<"model" | "thinking" | null>(null);
   const [openConversationActions, setOpenConversationActions] = useState<string | null>(null);
   const [deleteConversationId, setDeleteConversationId] = useState<string | null>(null);
@@ -532,6 +534,11 @@ export function ChatWorkspace({
         onToggleSidebar={() => setSidebarOpen((open) => !open)}
         onCloseSidebar={() => setSidebarOpen(false)}
         onStartNewChat={startNewChat}
+        onOpenSearch={() => {
+          setSidebarOpen(false);
+          setOpenConversationActions(null);
+          setSearchOpen(true);
+        }}
         onSelectConversation={selectConversation}
         onOpenConversationActions={setOpenConversationActions}
         onCloseConversationActions={() => setOpenConversationActions(null)}
@@ -545,6 +552,13 @@ export function ChatWorkspace({
         }}
         onSignOut={onSignOut}
       />
+      {searchOpen && (
+        <ChatSearchDialog
+          getAccessToken={getAccessToken}
+          onClose={() => setSearchOpen(false)}
+          onSelectConversation={selectConversation}
+        />
+      )}
       {deleteConversationId && (() => {
         const conversation = state.conversations.find(({ id }) => id === deleteConversationId);
         if (!conversation) return null;
