@@ -5,12 +5,12 @@
 .assistant-markdown ol,
 .assistant-markdown blockquote,
 .assistant-markdown pre,
-.assistant-markdown table { margin: 0 0 16px; }
+.assistant-markdown table { margin: 0 0 12px; }
 .assistant-markdown h1,
 .assistant-markdown h2,
 .assistant-markdown h3,
 .assistant-markdown h4 {
-  margin: 24px 0 10px;
+  margin: 18px 0 8px;
   color: var(--text);
   font-weight: 620;
   line-height: 1.25;
@@ -21,7 +21,9 @@
 .assistant-markdown h4 { font-size: 1.08em; }
 .assistant-markdown ul,
 .assistant-markdown ol { padding-left: 26px; }
-.assistant-markdown li + li { margin-top: 5px; }
+.assistant-markdown li + li { margin-top: 3px; }
+.assistant-markdown li > p { margin-bottom: 6px; }
+.assistant-markdown li > p:last-child { margin-bottom: 0; }
 .assistant-markdown blockquote {
   border-left: 3px solid #55574f;
   padding-left: 15px;

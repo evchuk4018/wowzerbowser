@@ -28,8 +28,8 @@
 .assistant-activity-timeline {
   display: grid;
   width: min(100%, 680px);
-  gap: 10px;
-  margin-bottom: 14px;
+  gap: 6px;
+  margin-bottom: 10px;
 }
 
 .assistant-activity-timeline .reasoning-block {

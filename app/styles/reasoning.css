@@ -1,6 +1,6 @@
 .reasoning-block {
   width: min(100%, 680px);
-  margin: 0 0 14px 2px;
+  margin: 0 0 10px 2px;
   border-left: 2px solid #50524b;
   color: var(--muted);
 }
