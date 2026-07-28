@@ -26,6 +26,7 @@ const stylesheetPaths = [
   "../app/styles/reasoning.css",
   "../app/styles/assistant-activity.css",
   "../app/styles/artifacts.css",
+  "../app/styles/pdf-preview.css",
   "../app/styles/composer.css",
   "../app/styles/responsive.css",
   "../app/styles/reduced-motion.css",

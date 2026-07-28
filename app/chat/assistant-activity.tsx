@@ -190,9 +190,11 @@ function ReasoningCard({ activity, pythonActivities, webActivities, imageActivit
 function ArtifactDownload({
   artifact,
   getAccessToken,
+  onOpenArtifact,
 }: {
   artifact: ChatArtifact;
   getAccessToken: () => Promise<string | null>;
+  onOpenArtifact: (artifact: ChatArtifact) => void;
 }) {
   const [state, setState] = useState<"idle" | "downloading" | "error">("idle");
 
@@ -216,10 +218,15 @@ function ArtifactDownload({
       setState("error");
     }
   };
+  const isPdf = artifact.contentType === "application/pdf";
 
   return (
     <div className="artifact-download">
-      <button type="button" disabled={state === "downloading"} onClick={() => void download()}>
+      <button
+        type="button"
+        disabled={!isPdf && state === "downloading"}
+        onClick={() => isPdf ? onOpenArtifact(artifact) : void download()}
+      >
         Created {artifact.name}
       </button>
       <span className="artifact-download-state" role="status" aria-live="polite">
@@ -236,6 +243,7 @@ export function AssistantActivityTimeline({
   annotations,
   sources,
   getAccessToken,
+  onOpenArtifact,
 }: {
   activities: AssistantActivity[];
   content: string;
@@ -243,6 +251,7 @@ export function AssistantActivityTimeline({
   annotations?: ChatCitation[];
   sources?: ChatSource[];
   getAccessToken: () => Promise<string | null>;
+  onOpenArtifact: (artifact: ChatArtifact) => void;
 }) {
   const rounds = activities.reduce<Map<number, { reasoning?: ReasoningActivity; python: PythonActivity[]; web: WebActivity[]; image: ImageActivity[]; document: DocumentActivity[] }>>((grouped, activity) => {
     const round = grouped.get(activity.round) ?? { python: [], web: [], image: [], document: [] };
@@ -274,7 +283,13 @@ export function AssistantActivityTimeline({
       {activities.filter((activity): activity is DocumentActivity => activity.kind === "document").map((activity) => <DocumentEditActivity key={activity.id} activity={activity} />)}
       {content && (
         <div className="message-bubble">
-          <AssistantResponse content={content} annotations={annotations} sources={sources} />
+          <AssistantResponse
+            content={content}
+            annotations={annotations}
+            sources={sources}
+            artifacts={artifacts}
+            onOpenArtifact={onOpenArtifact}
+          />
         </div>
       )}
       {artifacts.length > 0 && (
@@ -284,6 +299,7 @@ export function AssistantActivityTimeline({
               key={artifact.id}
               artifact={artifact}
               getAccessToken={getAccessToken}
+              onOpenArtifact={onOpenArtifact}
             />
           ))}
         </div>

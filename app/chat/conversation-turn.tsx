@@ -7,7 +7,7 @@ import type { ConversationTurn as ConversationTurnType, Message } from "./conver
 import { MessageActions } from "./message-actions";
 import { ReasoningBlock } from "./reasoning-block";
 import { CallActivityIndicator } from "./call-activity-indicator";
-import type { ChatImageAttachment } from "../../lib/chat-protocol";
+import type { ChatArtifact, ChatImageAttachment } from "../../lib/chat-protocol";
 import type { ChatDocumentAttachment } from "../../lib/chat-document";
 import { fetchChatImage } from "./chat-service";
 import { useEffect, useState } from "react";
@@ -110,6 +110,7 @@ export type ConversationTurnProps = {
   onRetry: (turn: ConversationTurnType) => void | Promise<void>;
   onEdit: (turn: ConversationTurnType) => void;
   onShare: (message: Message) => void | Promise<void>;
+  onOpenArtifact: (artifact: ChatArtifact) => void;
 };
 
 /** Render one user prompt and its assistant response without owning state. */
@@ -131,6 +132,7 @@ export function ConversationTurn({
   onRetry,
   onEdit,
   onShare,
+  onOpenArtifact,
 }: ConversationTurnProps) {
   const version = turn.versions[turn.activeVersion];
   if (!version) return null;
@@ -197,6 +199,7 @@ export function ConversationTurn({
             annotations={assistantMessage.annotations}
             sources={assistantMessage.sources}
             getAccessToken={getAccessToken}
+            onOpenArtifact={onOpenArtifact}
           />
         ) : (
           <>
@@ -216,7 +219,12 @@ export function ConversationTurn({
             )}
             <div className="message-bubble">
               {assistantMessage.content ? (
-                <AssistantResponse content={assistantMessage.content} annotations={assistantMessage.annotations} sources={assistantMessage.sources} />
+                <AssistantResponse content={assistantMessage.content}
+                  annotations={assistantMessage.annotations}
+                  sources={assistantMessage.sources}
+                  artifacts={assistantMessage.artifacts}
+                  onOpenArtifact={onOpenArtifact}
+                />
               ) : !assistantMessage.thinkingEnabled && waitingByMessage[assistantMessage.id] ? (
                 <CallActivityIndicator />
               ) : null}

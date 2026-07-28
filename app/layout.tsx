@@ -15,6 +15,7 @@ import "./styles/message-actions.css";
 import "./styles/reasoning.css";
 import "./styles/assistant-activity.css";
 import "./styles/artifacts.css";
+import "./styles/pdf-preview.css";
 import "./styles/composer.css";
 import "./styles/responsive.css";
 import "./styles/reduced-motion.css";

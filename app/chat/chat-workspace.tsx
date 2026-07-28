@@ -7,6 +7,7 @@ import {
   useReducer,
   useRef,
   useState,
+  type CSSProperties,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
@@ -36,8 +37,11 @@ import { useChatPreferences } from "./use-chat-preferences";
 import { useChatShortcuts } from "./use-chat-shortcuts";
 import { useMobileHistoryNavigation } from "./use-mobile-history-navigation";
 import { usePersistedJobRecovery } from "./use-persisted-job-recovery";
-import type { ChatImageAttachment } from "../../lib/chat-protocol";
+import type { ChatArtifact, ChatImageAttachment } from "../../lib/chat-protocol";
 import type { ChatDocumentAttachment } from "../../lib/chat-document";
+import { fetchChatArtifact } from "./chat-service";
+import { defaultPdfPreviewWidth, clampPdfPreviewWidth } from "./pdf-preview-layout";
+import { PdfPreviewPanel, type PdfPreviewLoadState } from "./pdf-preview-panel";
 
 export type ChatWorkspaceProps = {
   user: AuthUser;
@@ -64,6 +68,11 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
   const [openMessageActions, setOpenMessageActions] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [recoveredStreaming, setRecoveredStreaming] = useState<Record<string, string>>({});
+  const [pdfPreview, setPdfPreview] = useState<{
+    artifact: ChatArtifact;
+    loadState: PdfPreviewLoadState;
+  } | null>(null);
+  const [pdfPreviewWidth, setPdfPreviewWidth] = useState(360);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
@@ -71,6 +80,8 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
   const shouldAutoScrollRef = useRef(true);
   const longPressTimerRef = useRef<number | null>(null);
   const conversationLongPressTimerRef = useRef<number | null>(null);
+  const pdfPreviewUrlRef = useRef<string | null>(null);
+  const pdfPreviewRequestRef = useRef(0);
   const loadUsage = useCallback(async (range: Parameters<typeof fetchChatUsage>[0]) => {
     const accessToken = await getAccessToken();
     if (!accessToken) throw new Error("Sign in to view usage.");
@@ -155,6 +166,68 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
     [generation.streamingByConversation, recoveredStreaming],
   );
   const activeStreaming = Boolean(streamingByConversation[state.activeId]);
+
+  const releasePdfPreviewUrl = useCallback(() => {
+    if (!pdfPreviewUrlRef.current) return;
+    URL.revokeObjectURL(pdfPreviewUrlRef.current);
+    pdfPreviewUrlRef.current = null;
+  }, []);
+
+  const closePdfPreview = useCallback(() => {
+    pdfPreviewRequestRef.current += 1;
+    releasePdfPreviewUrl();
+    setPdfPreview(null);
+  }, [releasePdfPreviewUrl]);
+
+  const openPdfPreview = useCallback((artifact: ChatArtifact) => {
+    const requestId = pdfPreviewRequestRef.current + 1;
+    pdfPreviewRequestRef.current = requestId;
+    releasePdfPreviewUrl();
+    setPdfPreviewWidth(defaultPdfPreviewWidth(window.innerWidth));
+    setPdfPreview({ artifact, loadState: { status: "loading" } });
+
+    void (async () => {
+      try {
+        const accessToken = await getAccessToken();
+        if (!accessToken) throw new Error("Your session expired. Sign in and try again.");
+        const blob = await fetchChatArtifact(artifact, accessToken);
+        const url = URL.createObjectURL(blob);
+        if (pdfPreviewRequestRef.current !== requestId) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        pdfPreviewUrlRef.current = url;
+        setPdfPreview({ artifact, loadState: { status: "loaded", blob, url } });
+      } catch {
+        if (pdfPreviewRequestRef.current !== requestId) return;
+        setPdfPreview({
+          artifact,
+          loadState: {
+            status: "error",
+            message: "The PDF could not be loaded.",
+          },
+        });
+      }
+    })();
+  }, [getAccessToken, releasePdfPreviewUrl]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(closePdfPreview);
+    return () => window.cancelAnimationFrame(frame);
+  }, [closePdfPreview, state.activeId]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setPdfPreviewWidth((width) => clampPdfPreviewWidth(width, window.innerWidth));
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  useEffect(() => () => {
+    pdfPreviewRequestRef.current += 1;
+    releasePdfPreviewUrl();
+  }, [releasePdfPreviewUrl]);
 
   const startNewChat = useCallback(() => {
     shouldAutoScrollRef.current = true;
@@ -398,7 +471,13 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
 
   if (!ready || !active) return <main className="loading-shell" aria-label="Loading chat" />;
   return (
-    <main className="app-shell" {...navigation}>
+    <main
+      className={`app-shell ${pdfPreview ? "pdf-preview-open" : ""}`}
+      style={pdfPreview ? ({
+        "--pdf-preview-width": `${pdfPreviewWidth}px`,
+      } as CSSProperties) : undefined}
+      {...navigation}
+    >
       <ChatSidebar
         sidebarOpen={sidebarOpen}
         conversations={state.conversations}
@@ -482,6 +561,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
           onRetry={retryTurn}
           onEdit={editTurn}
           onShare={sharePrompt}
+          onOpenArtifact={openPdfPreview}
         />
         <ChatComposer
           key={`${active.id}:${attachmentResetKey}`}
@@ -530,6 +610,16 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
           onStop={() => void generation.stopStreaming()}
         />
       </section>
+      {pdfPreview && (
+        <PdfPreviewPanel
+          artifact={pdfPreview.artifact}
+          loadState={pdfPreview.loadState}
+          width={pdfPreviewWidth}
+          onWidthChange={setPdfPreviewWidth}
+          onRetry={() => openPdfPreview(pdfPreview.artifact)}
+          onClose={closePdfPreview}
+        />
+      )}
     </main>
   );
 }

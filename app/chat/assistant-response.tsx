@@ -6,7 +6,9 @@ import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import type { ChatCitation, ChatSource } from "../../lib/chat-citations";
+import type { ChatArtifact } from "../../lib/chat-protocol";
 import { normalizeLatexDelimiters } from "./normalize-latex-delimiters";
+import { resolvePdfArtifact } from "./pdf-preview-layout";
 
 const TOKEN = "\uE000citation:";
 const TOKEN_END = "\uE001";
@@ -92,15 +94,57 @@ function renderCitationChildren(children: React.ReactNode, annotations: ChatCita
   });
 }
 
-export function AssistantResponse({ content, annotations = [], sources = [] }: { content: string; annotations?: ChatCitation[]; sources?: ChatSource[] }) {
+function plainText(children: React.ReactNode): string {
+  return React.Children.toArray(children)
+    .map((child) => {
+      if (typeof child === "string" || typeof child === "number") return String(child);
+      if (React.isValidElement<{ children?: React.ReactNode }>(child)) return plainText(child.props.children);
+      return "";
+    })
+    .join("");
+}
+
+export function AssistantResponse({
+  content,
+  annotations = [],
+  sources = [],
+  artifacts = [],
+  onOpenArtifact,
+}: {
+  content: string;
+  annotations?: ChatCitation[];
+  sources?: ChatSource[];
+  artifacts?: ChatArtifact[];
+  onOpenArtifact?: (artifact: ChatArtifact) => void;
+}) {
   const [selectedCitation, setSelectedCitation] = useState<ChatCitation | null>(null);
   const markedContent = useMemo(() => addCitationTokens(normalizeLatexDelimiters(content), annotations, sources), [annotations, content, sources]);
   const components = useMemo(() => {
     const wrap = (tag: keyof React.JSX.IntrinsicElements) => function CitationAwareElement({ children, ...props }: { children?: React.ReactNode; [key: string]: unknown }) {
       return React.createElement(tag, props, renderCitationChildren(children, annotations, sources, setSelectedCitation));
     };
-    return { p: wrap("p"), h1: wrap("h1"), h2: wrap("h2"), h3: wrap("h3"), h4: wrap("h4"), li: wrap("li"), blockquote: wrap("blockquote"), strong: wrap("strong"), em: wrap("em"), a: wrap("a"), td: wrap("td"), th: wrap("th") } as unknown as Components;
-  }, [annotations, sources]);
+    const MarkdownLink = ({ children, href, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => {
+      const artifact = resolvePdfArtifact(href, plainText(children), artifacts);
+      if (artifact && onOpenArtifact) {
+        return (
+          <button
+            type="button"
+            className="artifact-inline-pdf"
+            aria-label={`Open ${artifact.name} preview`}
+            onClick={() => onOpenArtifact(artifact)}
+          >
+            {children}
+          </button>
+        );
+      }
+      return (
+        <a href={href} {...props}>
+          {renderCitationChildren(children, annotations, sources, setSelectedCitation)}
+        </a>
+      );
+    };
+    return { p: wrap("p"), h1: wrap("h1"), h2: wrap("h2"), h3: wrap("h3"), h4: wrap("h4"), li: wrap("li"), blockquote: wrap("blockquote"), strong: wrap("strong"), em: wrap("em"), a: MarkdownLink, td: wrap("td"), th: wrap("th") } as unknown as Components;
+  }, [annotations, artifacts, onOpenArtifact, sources]);
   return (
     <>
       <div className="assistant-markdown">

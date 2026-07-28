@@ -3,6 +3,7 @@
 import type { RefObject } from "react";
 import { ConversationTurn, type ThinkingTiming } from "./conversation-turn";
 import type { ConversationTurn as ConversationTurnType, Message } from "./conversation-types";
+import type { ChatArtifact } from "../../lib/chat-protocol";
 
 export type ChatTranscriptProps = {
   conversationId: string;
@@ -23,6 +24,7 @@ export type ChatTranscriptProps = {
   onRetry: (turn: ConversationTurnType) => void | Promise<void>;
   onEdit: (turn: ConversationTurnType) => void;
   onShare: (message: Message) => void | Promise<void>;
+  onOpenArtifact: (artifact: ChatArtifact) => void;
 };
 
 /** Transcript and empty state; state and network behavior stay in workspace. */
@@ -45,6 +47,7 @@ export function ChatTranscript({
   onRetry,
   onEdit,
   onShare,
+  onOpenArtifact,
 }: ChatTranscriptProps) {
   if (turns.length === 0) {
     return (
@@ -86,6 +89,7 @@ export function ChatTranscript({
           onRetry={onRetry}
           onEdit={onEdit}
           onShare={onShare}
+          onOpenArtifact={onOpenArtifact}
         />
       ))}
     </div>
