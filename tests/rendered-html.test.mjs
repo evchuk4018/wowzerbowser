@@ -38,6 +38,32 @@ async function readStyles() {
   return styles.join("\n");
 }
 
+function extractCssBlock(source, selector) {
+  const selectorIndex = source.indexOf(selector);
+  if (selectorIndex === -1) {
+    return null;
+  }
+
+  const openingBraceIndex = source.indexOf("{", selectorIndex);
+  if (openingBraceIndex === -1) {
+    return null;
+  }
+
+  let depth = 0;
+  for (let index = openingBraceIndex; index < source.length; index += 1) {
+    if (source[index] === "{") {
+      depth += 1;
+    } else if (source[index] === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(selectorIndex, index + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 test("loads feature stylesheets in deterministic cascade order", async () => {
@@ -367,6 +393,13 @@ test("keeps the transcript scroll viewport full-width without changing mobile la
     readFile(new URL("../app/styles/responsive.css", import.meta.url), "utf8"),
   ]);
   const desktopTranscript = transcript.match(/\.transcript\s*\{[\s\S]*?\n\}/)?.[0];
+  const mobileResponsiveBlock = extractCssBlock(responsive, "@media (max-width: 760px)");
+  const mobileResponsiveTranscript = mobileResponsiveBlock
+    && extractCssBlock(mobileResponsiveBlock, ".transcript");
+  const mobileTranscriptBlock = extractCssBlock(
+    extractCssBlock(transcript, "@media (max-width: 760px)") ?? "",
+    ".transcript",
+  );
 
   assert.ok(desktopTranscript);
   assert.match(desktopTranscript, /width: 100%;/);
@@ -375,14 +408,12 @@ test("keeps the transcript scroll viewport full-width without changing mobile la
   assert.doesNotMatch(transcript, /width: min\(860px, calc\(100% - 42px\)\)/);
   assert.doesNotMatch(desktopTranscript, /margin: 0 auto;/);
 
-  assert.match(
-    responsive,
-    /@media \(max-width: 760px\) \{[\s\S]*?\.transcript \{[\s\S]*?width: calc\(100% - 28px - env\(safe-area-inset-left\) - env\(safe-area-inset-right\)\);[\s\S]*?padding-top: 70px;[\s\S]*?padding-bottom: calc\(210px \+ env\(safe-area-inset-bottom\)\);[\s\S]*?\}/,
-  );
-  assert.match(
-    transcript,
-    /@media \(max-width: 760px\) \{[\s\S]*?\.transcript \{[\s\S]*?padding-inline: 0;[\s\S]*?\}/,
-  );
+  assert.ok(mobileResponsiveTranscript);
+  assert.match(mobileResponsiveTranscript, /width: calc\(100% - 28px - env\(safe-area-inset-left\) - env\(safe-area-inset-right\)\);/);
+  assert.match(mobileResponsiveTranscript, /padding-top: 70px;/);
+  assert.match(mobileResponsiveTranscript, /padding-bottom: calc\(210px \+ env\(safe-area-inset-bottom\)\);/);
+  assert.ok(mobileTranscriptBlock);
+  assert.match(mobileTranscriptBlock, /padding-inline: 0;/);
 });
 
 test("shows call activity without a generic generation indicator", async () => {
