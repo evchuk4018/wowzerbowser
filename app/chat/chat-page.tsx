@@ -11,6 +11,7 @@ export function ChatPage() {
     signInWithPassword,
     signUpWithPassword,
     signOut,
+    invalidateSession,
     getAccessToken,
   } = useAuthSession();
 
@@ -35,6 +36,7 @@ export function ChatPage() {
       user={state.user}
       getAccessToken={getAccessToken}
       onSignOut={signOut}
+      onSessionInvalid={invalidateSession}
     />
   );
 }

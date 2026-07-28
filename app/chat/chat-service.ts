@@ -6,6 +6,10 @@ import type {
   SequencedChatStreamEvent,
 } from "../../lib/chat-protocol";
 import type { ChatConversation, ChatConversationSummary } from "../../lib/chat-history";
+import {
+  parseChatBootstrapPayload,
+  type ChatBootstrapPayload,
+} from "../../lib/chat-bootstrap";
 import { readChatLiveStream } from "./read-chat-live-stream";
 import { chatTerminalEvents } from "./chat-terminal-events";
 
@@ -14,6 +18,27 @@ const LIVE_CHAT_POLL_INTERVAL_MS = 100;
 async function readError(response: Response): Promise<string> {
   const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
   return typeof body?.error === "string" ? body.error : `Request failed (${response.status}).`;
+}
+
+export class ChatRequestError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = "ChatRequestError";
+  }
+}
+
+export async function fetchChatBootstrap(
+  accessToken: string,
+  requestedConversationId?: string,
+): Promise<ChatBootstrapPayload> {
+  const query = requestedConversationId
+    ? `?conversationId=${encodeURIComponent(requestedConversationId)}`
+    : "";
+  const response = await fetch(`/api/chat/bootstrap${query}`, {
+    headers: { authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) throw new ChatRequestError(response.status, await readError(response));
+  return parseChatBootstrapPayload(await response.json());
 }
 
 export async function fetchChatConversations(accessToken: string): Promise<ChatConversationSummary[]> {

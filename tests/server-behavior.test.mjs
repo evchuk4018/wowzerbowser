@@ -611,6 +611,22 @@ test("server canonicalizes the system prompt so the client cannot override it", 
   assert.doesNotMatch(parsed.systemPrompt, /User supplied prompt/);
 });
 
+test("chat bootstrap authenticates once, is private, and excludes model providers", async () => {
+  const [route, service] = await Promise.all([
+    readFile(new URL("../app/api/chat/bootstrap/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/server/chat/chat-bootstrap-service.ts", import.meta.url), "utf8"),
+  ]);
+  assert.equal((route.match(/authorizeOwnerSession\(/g) ?? []).length, 1);
+  assert.match(route, /request\.url/);
+  assert.match(route, /private, no-store/);
+  assert.match(route, /status: 503/);
+  assert.match(route, /Server-Timing/);
+  assert.match(service, /Promise\.all/);
+  assert.match(service, /listChatConversations/);
+  assert.match(service, /getChatConversation/);
+  assert.doesNotMatch(`${route}\n${service}`, /DeepSeek|listDeepSeekModels|providers/i);
+});
+
 test("usage keeps the last snapshot within a round and sums finalized rounds once", () => {
   let roundOne = null;
   roundOne = latestNonNullUsage(roundOne, { promptTokens: 10, completionTokens: 2, totalTokens: 12 });

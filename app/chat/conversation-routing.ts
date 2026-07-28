@@ -1,8 +1,8 @@
 import { createConversation } from "./conversation-defaults";
 import type { ConversationState } from "./conversation-state";
 import type { Conversation } from "./conversation-types";
-
-export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+export { UUID_PATTERN, isValidConversationId } from "../../lib/chat-conversation-id";
+import { isValidConversationId } from "../../lib/chat-conversation-id";
 
 export type ConversationRouteResolution =
   | { type: "none" }
@@ -39,7 +39,7 @@ export function resolveConversationRoute(
       conversationId: requestedConversationId,
     };
   }
-  if (UUID_PATTERN.test(requestedConversationId)) {
+  if (isValidConversationId(requestedConversationId)) {
     return {
       type: "create",
       conversation: {

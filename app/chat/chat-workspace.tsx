@@ -24,7 +24,6 @@ import { isTranscriptNearBottom } from "./transcript-scroll";
 import { fetchChatUsage } from "./chat-usage-service";
 import { createConversation, DEFAULT_CHAT_SETTINGS } from "./conversation-defaults";
 import {
-  UUID_PATTERN,
   resolveConversationRoute,
 } from "./conversation-routing";
 import { DeleteConfirmationDialog } from "./delete-confirmation-dialog";
@@ -32,8 +31,6 @@ import { conversationReducer, createInitialConversationState } from "./conversat
 import {
   deleteConversation,
   loadConversation,
-  loadConversationIndex,
-  loadSettings,
   saveConversationSelection,
   saveSettings,
 } from "./conversation-storage";
@@ -46,7 +43,15 @@ import { usePersistedJobRecovery } from "./use-persisted-job-recovery";
 import type { ChatArtifact, ChatImageAttachment } from "../../lib/chat-protocol";
 import type { ChatDocumentAttachment } from "../../lib/chat-document";
 import type { ChatConversationSummary } from "../../lib/chat-history";
-import { fetchChatArtifact } from "./chat-service";
+import {
+  fetchChatArtifact,
+  fetchChatBootstrap,
+  ChatRequestError,
+} from "./chat-service";
+import {
+  modelPreferencesRecord,
+} from "../../lib/chat-bootstrap";
+import type { ChatModelPreference } from "../../lib/chat-model-preference";
 import { defaultPdfPreviewWidth, clampPdfPreviewWidth } from "./pdf-preview-layout";
 import { PdfPreviewPanel, type PdfPreviewLoadState } from "./pdf-preview-panel";
 
@@ -54,12 +59,14 @@ export type ChatWorkspaceProps = {
   user: AuthUser;
   getAccessToken: () => Promise<string | null>;
   onSignOut: () => Promise<void>;
+  onSessionInvalid: () => Promise<void>;
 };
 
 export function ChatWorkspace({
   user,
   getAccessToken,
   onSignOut,
+  onSessionInvalid,
 }: ChatWorkspaceProps) {
   const router = useRouter();
   const params = useParams<{ conversationId?: string }>();
@@ -83,6 +90,8 @@ export function ChatWorkspace({
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [recoveredStreaming, setRecoveredStreaming] = useState<Record<string, string>>({});
   const [conversationSummaries, setConversationSummaries] = useState<ChatConversationSummary[]>([]);
+  const [bootstrapModelPreferences, setBootstrapModelPreferences] = useState<Record<string, ChatModelPreference>>({});
+  const [bootstrapComplete, setBootstrapComplete] = useState(false);
   const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
   const [conversationLoadError, setConversationLoadError] = useState<string | null>(null);
   const [pdfPreview, setPdfPreview] = useState<{
@@ -119,43 +128,28 @@ export function ChatWorkspace({
     void (async () => {
       try {
         const token = await getAccessToken();
-        const index = token
-          ? await loadConversationIndex(token)
-          : {
-              summaries: [],
-              streamingByConversation: {},
-            };
+        if (!token) throw new ChatRequestError(401, "Your session expired.");
+        const bootstrap = await fetchChatBootstrap(token, initialConversationIdRef.current);
         if (!mounted || requestId !== conversationLoadRequestRef.current) {
           return;
         }
-        setConversationSummaries(index.summaries);
-        setRecoveredStreaming(index.streamingByConversation);
-        const requestedId = initialConversationIdRef.current;
-        const requestedSummary = index.summaries.find(
-          ({ id }) => id === requestedId,
-        );
-        if (requestedSummary) {
-          handledRouteRef.current = requestedId;
+        setConversationSummaries(bootstrap.summaries);
+        setRecoveredStreaming(bootstrap.streamingByConversation);
+        setSettings({
+          ...DEFAULT_CHAT_SETTINGS,
+          userPresence: bootstrap.userPreferences.userPresence,
+        });
+        setBootstrapModelPreferences(modelPreferencesRecord(bootstrap.modelPreferences));
+        setBootstrapComplete(true);
+        if (bootstrap.requestedConversationId === initialConversationIdRef.current) {
+          handledRouteRef.current = initialConversationIdRef.current;
         }
-        // Load a known requested conversation, or the newest conversation
-        // when opening /chat or an invalid route.
-        const remoteId =
-          requestedSummary?.id ??
-          (!requestedId || !UUID_PATTERN.test(requestedId)
-            ? index.summaries[0]?.id
-            : undefined);
-        let initialConversation = null;
-        if (remoteId && token) {
-          initialConversation = await loadConversation(remoteId, token);
-        }
+        let initialConversation = bootstrap.activeConversation;
         // A valid unknown UUID represents a new client-only conversation.
         if (!initialConversation) {
-          initialConversation =
-            requestedId &&
-            UUID_PATTERN.test(requestedId) &&
-            !requestedSummary
-              ? { ...createConversation(), id: requestedId }
-              : createConversation();
+          initialConversation = bootstrap.requestedConversationId
+            ? { ...createConversation(), id: bootstrap.requestedConversationId }
+            : createConversation();
         }
         if (!mounted || requestId !== conversationLoadRequestRef.current) {
           return;
@@ -168,6 +162,10 @@ export function ChatWorkspace({
         setReady(true);
       } catch (error) {
         if (!mounted || requestId !== conversationLoadRequestRef.current) return;
+        if (error instanceof ChatRequestError && error.status === 401) {
+          await onSessionInvalid();
+          return;
+        }
         setConversationLoadError(
           error instanceof Error
             ? error.message
@@ -179,13 +177,15 @@ export function ChatWorkspace({
           conversations: [fallback],
           activeId: fallback.id,
         });
+        setBootstrapModelPreferences({});
+        setBootstrapComplete(true);
         setReady(true);
       }
     })();
     return () => {
       mounted = false;
     };
-  }, [getAccessToken]);
+  }, [getAccessToken, onSessionInvalid]);
 
   const hydrateAndSelectConversation = useCallback(
     async (conversationId: string) => {
@@ -268,22 +268,11 @@ export function ChatWorkspace({
     state,
   ]);
 
-  useEffect(() => {
-    let mounted = true;
-    void getAccessToken()
-      .then((token) => token ? loadSettings(token) : DEFAULT_CHAT_SETTINGS)
-      .then((value) => {
-        if (mounted) setSettings(value);
-      })
-      .catch(() => undefined);
-    return () => {
-      mounted = false;
-    };
-  }, [getAccessToken]);
-
   const preferences = useChatPreferences({
     activeConversationId: state.activeId,
     getAccessToken,
+    initialModelPreferences: bootstrapModelPreferences,
+    bootstrapComplete,
   });
   const generation = useChatGeneration({
     state,

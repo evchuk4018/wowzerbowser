@@ -275,6 +275,25 @@ test("keeps Supabase calls behind adapters and owner authorization", async () =>
   assert.match(authForm, /isMagicLinkRateLimitError/);
 });
 
+test("collapses authenticated chat startup into one bootstrap request", async () => {
+  const [authService, page, workspace, preferences, client] = await Promise.all([
+    readFile(new URL("../app/auth/auth-service.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/chat-page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/chat-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/use-chat-preferences.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/chat-service.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.doesNotMatch(authService, /\/api\/auth\/session/);
+  assert.match(authService, /session\?\.user/);
+  assert.match(client, /fetchChatBootstrap/);
+  assert.match(workspace, /fetchChatBootstrap\(token/);
+  assert.doesNotMatch(workspace, /loadConversationIndex\(|loadSettings\(/);
+  assert.doesNotMatch(preferences, /fetchChatModelPreferences/);
+  assert.match(preferences, /bootstrapComplete/);
+  assert.match(page, /onSessionInvalid/);
+});
+
 test("keeps DeepSeek access server-side and uses the V4 thinking contract", async () => {
   const [page, client, protocol, adapter, adapterConfig, messages, route, modelsRoute, envExample] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),

@@ -1,5 +1,5 @@
 import { supabaseBrowserAuth } from "./supabase-browser-adapter";
-import type { AuthSession, AuthUser } from "./types";
+import type { AuthUser } from "./types";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -17,7 +17,7 @@ export function isMagicLinkRateLimitError(error: unknown): error is MagicLinkRat
 }
 
 export async function getCurrentUser(): Promise<AuthUser | null> {
-  return authorizeSession(await supabaseBrowserAuth.getSession());
+  return (await supabaseBrowserAuth.getSession())?.user ?? null;
 }
 
 export async function getCurrentAccessToken(): Promise<string | null> {
@@ -25,9 +25,7 @@ export async function getCurrentAccessToken(): Promise<string | null> {
 }
 
 export function subscribeToAuth(listener: (user: AuthUser | null) => void): () => void {
-  return supabaseBrowserAuth.onSessionChange((session) => {
-    void authorizeSession(session).then(listener).catch(() => listener(null));
-  });
+  return supabaseBrowserAuth.onSessionChange((session) => listener(session?.user ?? null));
 }
 
 export async function requestMagicLink(emailInput: string): Promise<void> {
@@ -67,22 +65,6 @@ export async function signUpWithPassword(emailInput: string, password: string): 
 
 export async function signOut(): Promise<void> {
   await supabaseBrowserAuth.signOut();
-}
-
-async function authorizeSession(session: AuthSession | null): Promise<AuthUser | null> {
-  if (!session) return null;
-
-  const response = await fetch("/api/auth/session", {
-    headers: { authorization: `Bearer ${session.accessToken}` },
-  });
-
-  if (!response.ok) {
-    await supabaseBrowserAuth.signOut();
-    return null;
-  }
-
-  const body = (await response.json()) as { user?: AuthUser };
-  return body.user ?? null;
 }
 
 function normalizeEmail(emailInput: string): string {

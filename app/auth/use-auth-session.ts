@@ -86,12 +86,26 @@ export function useAuthSession() {
     }
   }, []);
 
+  const invalidateSession = useCallback(async () => {
+    try {
+      await signOut();
+      setState({ status: "anonymous", user: null, error: null });
+    } catch (error: unknown) {
+      setState({
+        status: "error",
+        user: null,
+        error: error instanceof Error ? error.message : "Could not sign out.",
+      });
+    }
+  }, []);
+
   return {
     state,
     sendMagicLink,
     signInWithPassword: passwordSignIn,
     signUpWithPassword: passwordSignUp,
     signOut: endSession,
+    invalidateSession,
     getAccessToken: getCurrentAccessToken,
   };
 }

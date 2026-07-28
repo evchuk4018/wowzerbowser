@@ -23,7 +23,6 @@ import {
   fetchChatModels,
 } from "./chat-service";
 import {
-  fetchChatModelPreferences,
   saveChatModelPreference,
 } from "./chat-model-preference-service";
 
@@ -114,6 +113,8 @@ function normalizePreference(
 export type UseChatPreferencesOptions = {
   activeConversationId: string;
   getAccessToken: () => Promise<string | null>;
+  initialModelPreferences?: Record<string, ChatModelPreference>;
+  bootstrapComplete?: boolean;
 };
 
 /**
@@ -125,13 +126,17 @@ export type UseChatPreferencesOptions = {
 export function useChatPreferences({
   activeConversationId,
   getAccessToken,
+  initialModelPreferences = {},
+  bootstrapComplete = false,
 }: UseChatPreferencesOptions): ChatPreferences {
   const [models, setModels] = useState<ChatModelInfo[]>(() => normalizeChatModels(DEFAULT_CHAT_MODELS));
   const [model, setModel] = useState<ChatModelId>(DEFAULT_CHAT_MODEL_PREFERENCE.model);
   const [thinking, setThinking] = useState(DEFAULT_CHAT_MODEL_PREFERENCE.thinking);
   const [effort, setEffort] = useState<ChatReasoningEffort>(DEFAULT_CHAT_MODEL_PREFERENCE.reasoningEffort);
-  const [modelPreferences, setModelPreferences] = useState<Record<string, ChatModelPreference>>({});
-  const [modelPreferencesLoaded, setModelPreferencesLoaded] = useState(false);
+  const [modelPreferences, setModelPreferences] = useState<Record<string, ChatModelPreference>>(
+    () => initialModelPreferences,
+  );
+  const [modelPreferencesLoaded, setModelPreferencesLoaded] = useState(bootstrapComplete);
 
   useEffect(() => {
     let mounted = true;
@@ -147,21 +152,13 @@ export function useChatPreferences({
   }, [getAccessToken]);
 
   useEffect(() => {
-    let mounted = true;
-    void getAccessToken()
-      .then((token) => token ? fetchChatModelPreferences(token) : {})
-      .then((preferences) => {
-        if (!mounted) return;
-        setModelPreferences(preferences);
-        setModelPreferencesLoaded(true);
-      })
-      .catch(() => {
-        if (mounted) setModelPreferencesLoaded(true);
-      });
-    return () => {
-      mounted = false;
-    };
-  }, [getAccessToken]);
+    if (bootstrapComplete) {
+      // Bootstrap arrives asynchronously after the hook's initial render.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setModelPreferences(initialModelPreferences);
+      setModelPreferencesLoaded(true);
+    }
+  }, [bootstrapComplete, initialModelPreferences]);
 
   const selectedModel = useMemo(() => modelFor(model, models), [model, models]);
   const supportedEfforts = useMemo(
