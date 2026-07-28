@@ -107,3 +107,29 @@ test("provider rounds stay in one phase until an explicit phase break", () => {
   assert.equal(state.message.activities?.find(({ kind }) => kind === "phase_break")?.update, "I found a better route.");
   assert.equal(state.message.tracePhase, 2);
 });
+
+test("phase summaries persist across tool-separated reasoning until replaced", () => {
+  let state = createChatStreamState(baseMessage);
+  state = reduceChatStreamEvent(state, event(1, { type: "reasoning", delta: "First thought." }));
+  state = reduceChatStreamEvent(state, event(2, {
+    type: "phase_summary", phase: 1, summary: "Planning the first approach", revision: 1,
+  }));
+  state = reduceChatStreamEvent(state, event(3, {
+    type: "tool_call",
+    call: { id: "call-1", name: "web_search", arguments: "{}" },
+  }));
+  state = reduceChatStreamEvent(state, event(4, { type: "reasoning", delta: "Continuing after the tool." }));
+
+  let reasoning = state.message.activities?.filter(({ kind }) => kind === "reasoning");
+  assert.equal(reasoning?.[0]?.summary, "Planning the first approach");
+  assert.equal(reasoning?.[1]?.summary, undefined);
+
+  state = reduceChatStreamEvent(state, event(5, {
+    type: "phase_summary", phase: 1, summary: "Reviewing the new evidence", revision: 2,
+  }));
+  reasoning = state.message.activities?.filter(({ kind }) => kind === "reasoning");
+  assert.deepEqual(reasoning?.map(({ summary }) => summary), [
+    "Reviewing the new evidence",
+    "Reviewing the new evidence",
+  ]);
+});

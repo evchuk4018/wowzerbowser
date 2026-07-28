@@ -267,9 +267,18 @@ export function AssistantActivityTimeline({
         {[...phases.entries()].map(([phase, group]) => {
           const reasoningItems = group.activities.filter((item): item is ReasoningActivity => item.kind === "reasoning");
           const latestReasoning = reasoningItems.at(-1);
+          const latestSummary = reasoningItems.reduce<ReasoningActivity | undefined>((current, item) => {
+            if (!item.summary) return current;
+            return !current || (item.summaryRevision ?? -1) >= (current.summaryRevision ?? -1)
+              ? item
+              : current;
+          }, undefined);
           const completedDuration = reasoningItems.reduce((total, item) => total + (item.durationMs ?? 0), 0);
           const reasoning = latestReasoning ? {
             ...latestReasoning,
+            ...(latestSummary
+              ? { summary: latestSummary.summary, summaryRevision: latestSummary.summaryRevision }
+              : {}),
             content: reasoningItems.map((item) => item.content).join(""),
             startedAt: reasoningItems[0]?.startedAt,
             ...(latestReasoning.status === "running"

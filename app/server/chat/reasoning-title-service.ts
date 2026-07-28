@@ -9,7 +9,7 @@ import {
 import { summarizeReasoningWithDeepSeekFlash } from "../../providers/deepseek/deepseek-reasoning-summary-adapter";
 
 const FIRST_TITLE_DELAY_MS = 1_000;
-const REFRESH_DELAY_MS = 3_000;
+const REFRESH_DELAY_MS = 2_000;
 const FINAL_WAIT_MS = 5_000;
 const MAX_TITLE_LENGTH = 120;
 

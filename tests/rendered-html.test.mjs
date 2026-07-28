@@ -763,6 +763,8 @@ test("renders web activities inside thought-process disclosures", async () => {
   assert.match(activity, /WebDisclosure/);
   assert.match(activity, /phaseActivities\.map/);
   assert.match(activity, /activity\.summary \?\? "Thinking…"/);
+  assert.match(activity, /const latestSummary = reasoningItems\.reduce/);
+  assert.match(activity, /summary: latestSummary\.summary/);
   assert.match(activity, /web\.results/);
   assert.match(activity, /web\.markdown/);
   assert.match(`${stream}\n${history}`, /kind: call\.name === "run_python" \? "python" : "web"/);
