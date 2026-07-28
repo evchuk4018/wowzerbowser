@@ -11,6 +11,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
+import { useRouter } from "next/navigation";
 import type { AuthUser } from "../auth/types";
 import { SettingsModal } from "../settings/settings-modal";
 import { ChatComposer } from "./chat-composer";
@@ -47,9 +48,18 @@ export type ChatWorkspaceProps = {
   user: AuthUser;
   getAccessToken: () => Promise<string | null>;
   onSignOut: () => Promise<void>;
+  initialConversationId?: string;
 };
 
-export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspaceProps) {
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function ChatWorkspace({
+  user,
+  getAccessToken,
+  onSignOut,
+  initialConversationId,
+}: ChatWorkspaceProps) {
+  const router = useRouter();
   const [state, dispatch] = useReducer(conversationReducer, undefined, createInitialConversationState);
   const [ready, setReady] = useState(false);
   const [draft, setDraft] = useState("");
@@ -82,6 +92,14 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
   const conversationLongPressTimerRef = useRef<number | null>(null);
   const pdfPreviewUrlRef = useRef<string | null>(null);
   const pdfPreviewRequestRef = useRef(0);
+  const initialConversationIdRef = useRef(initialConversationId);
+  const synchronizedRouteRef = useRef<string | null>(null);
+  const requestedConversationId = initialConversationId?.trim() || undefined;
+
+  useEffect(() => {
+    initialConversationIdRef.current = initialConversationId;
+  }, [initialConversationId]);
+
   const loadUsage = useCallback(async (range: Parameters<typeof fetchChatUsage>[0]) => {
     const accessToken = await getAccessToken();
     if (!accessToken) throw new Error("Sign in to view usage.");
@@ -100,8 +118,14 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
         // Session/storage failures are nonfatal; start with a blank conversation.
       }
       if (!mounted) return;
-      const conversations = loaded.conversations.length ? loaded.conversations : [createConversation()];
-      dispatch({ type: "LOAD_CONVERSATIONS", conversations });
+      const requestedId = initialConversationIdRef.current?.trim() || undefined;
+      const requestedBlank = requestedId && UUID_PATTERN.test(requestedId)
+        ? { ...createConversation(), id: requestedId }
+        : null;
+      const conversations = loaded.conversations.length
+        ? loaded.conversations
+        : [requestedBlank ?? createConversation()];
+      dispatch({ type: "LOAD_CONVERSATIONS", conversations, activeId: requestedId });
       setRecoveredStreaming(loaded.streamingByConversation);
       setReady(true);
     })();
@@ -109,6 +133,20 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
       mounted = false;
     };
   }, [getAccessToken]);
+
+  useEffect(() => {
+    if (!ready || !state.activeId) return;
+    if (requestedConversationId && state.conversations.some(({ id }) => id === requestedConversationId)) {
+      if (state.activeId !== requestedConversationId) {
+        dispatch({ type: "SELECT_CONVERSATION", conversationId: requestedConversationId });
+      }
+      return;
+    }
+    const routeSyncKey = `${requestedConversationId ?? "root"}:${state.activeId}`;
+    if (synchronizedRouteRef.current === routeSyncKey) return;
+    synchronizedRouteRef.current = routeSyncKey;
+    router.replace(`/chat/${state.activeId}`);
+  }, [ready, requestedConversationId, router, state.activeId, state.conversations]);
 
   useEffect(() => {
     let mounted = true;
@@ -232,8 +270,10 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
   const startNewChat = useCallback(() => {
     shouldAutoScrollRef.current = true;
     const blank = state.conversations.find(({ turns }) => turns.length === 0);
+    const conversation = blank ?? createConversation();
     if (blank) dispatch({ type: "SELECT_CONVERSATION", conversationId: blank.id });
-    else dispatch({ type: "CREATE_CONVERSATION", conversation: createConversation() });
+    else dispatch({ type: "CREATE_CONVERSATION", conversation });
+    router.push(`/chat/${conversation.id}`);
     setDraft("");
     setEditingTurnId(null);
     setEditingAttachments([]);
@@ -242,7 +282,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
     setOpenConversationActions(null);
     setSidebarOpen(false);
     requestAnimationFrame(() => textareaRef.current?.focus());
-  }, [state.conversations]);
+  }, [router, state.conversations]);
 
   useChatShortcuts(startNewChat);
   const navigation = useMobileHistoryNavigation({
@@ -320,6 +360,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
   const selectConversation = (conversationId: string) => {
     shouldAutoScrollRef.current = true;
     dispatch({ type: "SELECT_CONVERSATION", conversationId });
+    router.push(`/chat/${conversationId}`);
     setOpenConversationActions(null);
     setSidebarOpen(false);
     requestAnimationFrame(() => textareaRef.current?.focus());
@@ -427,6 +468,7 @@ export function ChatWorkspace({ user, getAccessToken, onSignOut }: ChatWorkspace
         setEditingAttachments([]);
         setEditingDocuments([]);
         setDraft("");
+        if (replacement) router.replace(`/chat/${replacement.id}`);
       }
       setDeleteConversationId(null);
     } catch (error) {

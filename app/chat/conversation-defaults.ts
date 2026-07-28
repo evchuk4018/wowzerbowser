@@ -9,9 +9,7 @@ export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
 };
 
 export function makeId(): string {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random()}`;
+  return crypto.randomUUID();
 }
 
 export function createConversation(): Conversation {
