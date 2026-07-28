@@ -244,7 +244,7 @@ export async function generateChatResponse(
                 onRecallUsage: async ({ model, usage }) => {
                   await recordUsage({
                     ownerId,
-                    provider: "openrouter",
+                    provider: "deepseek",
                     model,
                     requestKind: "chat_recall",
                     requestId: responseId ?? `chat-${conversationId}`,

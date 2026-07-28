@@ -7,10 +7,9 @@ import {
   normalizeChatSummary,
 } from "../app/server/chat/chat-summary-prompt.ts";
 import {
-  OPENROUTER_CHAT_SUMMARY_MODEL,
-  OpenRouterChatSummaryError,
-  summarizeChatWithOpenRouter,
-} from "../app/providers/openrouter/openrouter-chat-summary-adapter.ts";
+  DEEPSEEK_CHAT_SUMMARY_MODEL,
+  summarizeChatWithDeepSeek,
+} from "../app/providers/deepseek/deepseek-chat-summary-adapter.ts";
 
 const source = async (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -42,12 +41,12 @@ test("summary output normalization accepts fact lines and handles NONE", () => {
   assert.equal(normalizeChatSummary(""), null);
 });
 
-test("OpenRouter chat summary adapter sends the free model and parses usage", async () => {
-  const originalKey = process.env.OPENROUTER_API_KEY;
-  process.env.OPENROUTER_API_KEY = "test-summary-key";
+test("DeepSeek chat summary adapter sends Flash with thinking disabled and parses usage", async () => {
+  const originalKey = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = "test-summary-key";
   const calls = [];
   try {
-    const answer = await summarizeChatWithOpenRouter("summary prompt", {
+    const answer = await summarizeChatWithDeepSeek("summary prompt", {
       fetchImpl: async (url, init) => {
         calls.push({ url, init });
         return new Response(JSON.stringify({
@@ -63,32 +62,31 @@ test("OpenRouter chat summary adapter sends the free model and parses usage", as
     assert.equal(answer.usage?.completionTokens, 5);
     assert.equal(answer.usage?.totalTokens, 25);
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, "https://openrouter.ai/api/v1/chat/completions");
+    assert.equal(calls[0].url, "https://api.deepseek.com/chat/completions");
     const body = JSON.parse(calls[0].init.body);
-    assert.equal(body.model, OPENROUTER_CHAT_SUMMARY_MODEL);
+    assert.equal(body.model, DEEPSEEK_CHAT_SUMMARY_MODEL);
     assert.equal(body.messages[0].content, "summary prompt");
+    assert.deepEqual(body.thinking, { type: "disabled" });
     assert.equal(body.max_tokens, 512);
   } finally {
-    if (originalKey === undefined) delete process.env.OPENROUTER_API_KEY;
-    else process.env.OPENROUTER_API_KEY = originalKey;
+    if (originalKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = originalKey;
   }
 });
 
-test("OpenRouter summary adapter classifies rate limits as retryable", async () => {
-  const originalKey = process.env.OPENROUTER_API_KEY;
-  process.env.OPENROUTER_API_KEY = "test-summary-key";
+test("DeepSeek summary adapter preserves retryable upstream status", async () => {
+  const originalKey = process.env.DEEPSEEK_API_KEY;
+  process.env.DEEPSEEK_API_KEY = "test-summary-key";
   try {
     await assert.rejects(
-      summarizeChatWithOpenRouter("summary prompt", {
+      summarizeChatWithDeepSeek("summary prompt", {
         fetchImpl: async () => new Response("rate limited", { status: 429 }),
       }),
-      (error) => error instanceof OpenRouterChatSummaryError
-        && error.code === "rate_limit"
-        && error.retryable === true,
+      (error) => error.name === "Error" && error.status === 429,
     );
   } finally {
-    if (originalKey === undefined) delete process.env.OPENROUTER_API_KEY;
-    else process.env.OPENROUTER_API_KEY = originalKey;
+    if (originalKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = originalKey;
   }
 });
 

@@ -1,17 +1,11 @@
 import "server-only";
 
 import type { ChatUsage } from "../../../lib/chat-protocol";
+import { DEEPSEEK_BASE_URL, deepSeekHeaders } from "./deepseek-client-config";
+import { DeepSeekError } from "./deepseek-error";
 
-export const OPENROUTER_CHAT_RECALL_MODEL = "openrouter/free";
-const BASE_URL = "https://openrouter.ai/api/v1";
+export const DEEPSEEK_CHAT_RECALL_MODEL = "deepseek-v4-flash";
 export const CHAT_RECALL_TIMEOUT_MS = 45_000;
-
-export class OpenRouterChatRecallError extends Error {
-  constructor(readonly code: "missing_api_key" | "cancelled" | "timeout" | "transport" | "upstream" | "malformed_response" | "empty_answer", message: string) {
-    super(message);
-    this.name = "OpenRouterChatRecallError";
-  }
-}
 
 type ResponseBody = {
   model?: unknown;
@@ -41,15 +35,13 @@ function textOf(value: unknown): string {
   return value.map((part) => part && typeof part === "object" && "text" in part && typeof part.text === "string" ? part.text : "").join("").trim();
 }
 
-export type ChatRecallAnswer = { answer: string; model: string; usage: ChatUsage | null };
+export type DeepSeekChatRecallAnswer = { answer: string; model: string; usage: ChatUsage | null };
 
-export async function recallChatWithOpenRouter(
+export async function recallChatWithDeepSeek(
   context: string,
   prompt: string,
   options: { signal?: AbortSignal; fetchImpl?: typeof fetch; timeoutMs?: number } = {},
-): Promise<ChatRecallAnswer> {
-  const key = process.env.OPENROUTER_API_KEY?.trim();
-  if (!key) throw new OpenRouterChatRecallError("missing_api_key", "Chat recall is not configured.");
+): Promise<DeepSeekChatRecallAnswer> {
   const timeout = AbortSignal.timeout(options.timeoutMs ?? CHAT_RECALL_TIMEOUT_MS);
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
   const responsePrompt = [
@@ -61,24 +53,28 @@ export async function recallChatWithOpenRouter(
   ].join("\n\n");
   let response: Response;
   try {
-    response = await (options.fetchImpl ?? fetch)(`${BASE_URL}/chat/completions`, {
+    response = await (options.fetchImpl ?? fetch)(`${DEEPSEEK_BASE_URL}/chat/completions`, {
       method: "POST",
-      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-      body: JSON.stringify({ model: OPENROUTER_CHAT_RECALL_MODEL, messages: [{ role: "user", content: responsePrompt }] }),
+      headers: deepSeekHeaders(),
+      body: JSON.stringify({
+        model: DEEPSEEK_CHAT_RECALL_MODEL,
+        messages: [{ role: "user", content: responsePrompt }],
+        thinking: { type: "disabled" },
+      }),
       signal,
     });
   } catch {
-    if (options.signal?.aborted) throw new OpenRouterChatRecallError("cancelled", "Chat recall was cancelled.");
-    if (timeout.aborted) throw new OpenRouterChatRecallError("timeout", "Chat recall timed out.");
-    throw new OpenRouterChatRecallError("transport", "OpenRouter chat recall is unavailable.");
+    if (options.signal?.aborted) throw new DeepSeekError("Chat recall was cancelled.", 499);
+    if (timeout.aborted) throw new DeepSeekError("Chat recall timed out.", 504);
+    throw new DeepSeekError("DeepSeek chat recall is unavailable.", 502);
   }
   if (!response.ok) {
     await response.text().catch(() => "");
-    throw new OpenRouterChatRecallError(response.status >= 500 || response.status === 429 ? "upstream" : "malformed_response", "OpenRouter rejected the chat recall request.");
+    throw new DeepSeekError("DeepSeek rejected the chat recall request.", response.status >= 400 && response.status < 500 ? response.status : 502);
   }
   let payload: ResponseBody;
-  try { payload = await response.json() as ResponseBody; } catch { throw new OpenRouterChatRecallError("malformed_response", "OpenRouter returned an invalid chat recall response."); }
+  try { payload = await response.json() as ResponseBody; } catch { throw new DeepSeekError("DeepSeek returned an invalid chat recall response.", 502); }
   const answer = textOf(payload.choices?.[0]?.message?.content);
-  if (!answer) throw new OpenRouterChatRecallError("empty_answer", "OpenRouter returned an empty chat recall answer.");
-  return { answer, model: typeof payload.model === "string" && payload.model ? payload.model : OPENROUTER_CHAT_RECALL_MODEL, usage: usageFromResponse(payload.usage) };
+  if (!answer) throw new DeepSeekError("DeepSeek returned an empty chat recall answer.", 502);
+  return { answer, model: typeof payload.model === "string" && payload.model ? payload.model : DEEPSEEK_CHAT_RECALL_MODEL, usage: usageFromResponse(payload.usage) };
 }

@@ -7,10 +7,8 @@ import {
   type ChatSummaryTask,
 } from "../../../lib/chat-summary";
 import { recordUsage } from "../usage/usage-store";
-import {
-  OpenRouterChatSummaryError,
-  summarizeChatWithOpenRouter,
-} from "../../providers/openrouter/openrouter-chat-summary-adapter";
+import { summarizeChatWithDeepSeek } from "../../providers/deepseek/deepseek-chat-summary-adapter";
+import { DeepSeekError } from "../../providers/deepseek/deepseek-error";
 import {
   buildIncrementalChatSummaryPrompt,
   buildRebuildChatSummaryPrompt,
@@ -33,14 +31,13 @@ function enabled(): boolean {
 }
 
 function safeErrorCode(error: unknown): string {
-  if (error instanceof OpenRouterChatSummaryError) return error.code;
+  if (error instanceof DeepSeekError) return error.name || "DeepSeekError";
   if (error instanceof Error) return error.name || "Error";
   return "UnknownError";
 }
 
 function retryableError(error: unknown): boolean {
-  if (error instanceof OpenRouterChatSummaryError) return error.retryable;
-  return false;
+  return error instanceof DeepSeekError && (error.status === 408 || error.status === 429 || error.status >= 500);
 }
 
 class ChatSummaryOutputError extends Error {
@@ -76,9 +73,9 @@ async function persistSummaryUsage(input: {
   ownerId: string;
   conversationId: string;
   jobId: string;
-  provider: "openrouter";
+  provider: "deepseek";
   model: string;
-  usage: NonNullable<Awaited<ReturnType<typeof summarizeChatWithOpenRouter>>["usage"]>;
+  usage: NonNullable<Awaited<ReturnType<typeof summarizeChatWithDeepSeek>>["usage"]>;
 }): Promise<void> {
   await recordUsage({
     ownerId: input.ownerId,
@@ -127,7 +124,7 @@ async function executeChatSummaryTask(task: ChatSummaryTask): Promise<void> {
         userContent: source.userContent,
         assistantContent: source.assistantContent,
       });
-  const answer = await summarizeChatWithOpenRouter(prompt);
+  const answer = await summarizeChatWithDeepSeek(prompt);
   const summary = summaryFromAnswer(answer.summary, previousSummary, needsRebuild);
   const expectedRevision = summaryState?.revision ?? 0;
   const latestActive = activeInteractions.at(-1);

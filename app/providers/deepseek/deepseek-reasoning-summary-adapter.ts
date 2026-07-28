@@ -3,7 +3,12 @@ import "server-only";
 import type { ChatUsage } from "../../../lib/chat-protocol";
 import { DEEPSEEK_BASE_URL, deepSeekHeaders } from "./deepseek-client-config";
 import { DeepSeekError } from "./deepseek-error";
-import type { ReasoningSummaryAnswer } from "../openrouter/openrouter-reasoning-summary-adapter";
+export type ReasoningSummaryAnswer = {
+  summary: string;
+  provider: "deepseek";
+  model: string;
+  usage: ChatUsage | null;
+};
 
 function usageOf(value: Record<string, unknown> | null | undefined): ChatUsage | null {
   if (!value) return null;

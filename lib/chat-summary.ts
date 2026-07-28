@@ -23,7 +23,7 @@ export type ChatSummaryTaskStatus = (typeof CHAT_SUMMARY_TASK_STATUSES)[number];
 
 export type ChatSummaryAnswer = {
   summary: string;
-  provider: "openrouter";
+  provider: "deepseek";
   model: string;
   usage: ChatUsage | null;
 };
@@ -47,4 +47,3 @@ export type ChatSummaryInteraction = {
   userContent: string;
   assistantContent: string;
 };
-

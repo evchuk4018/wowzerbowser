@@ -21,7 +21,7 @@ export const CHAT_MEMORY_TOOL_DEFINITIONS: DeepSeekToolDefinition[] = [
     type: "function",
     function: {
       name: RECALL_CHATS_TOOL_NAME,
-      description: "Ask the free OpenRouter model a question about the active branch of a private chat. Search chats first to find its conversationId.",
+      description: "Ask the DeepSeek Flash model a question about the active branch of a private chat. Search chats first to find its conversationId.",
       parameters: {
         type: "object",
         additionalProperties: false,

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ReasoningTitleCoordinator } from "../app/server/chat/reasoning-title-service.ts";
-import { OpenRouterReasoningSummaryError } from "../app/providers/openrouter/openrouter-reasoning-summary-adapter.ts";
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -16,13 +15,13 @@ test("reasoning titles appear after the initial delay and refresh single-flight"
     firstDelayMs: 10,
     refreshDelayMs: 30,
     finalWaitMs: 100,
-    summarizeOpenRouter: async (prompt) => {
+    summarizeDeepSeek: async (prompt) => {
       prompts.push(prompt);
       active += 1;
       maxActive = Math.max(maxActive, active);
       await wait(8);
       active -= 1;
-      return { summary: prompts.length === 1 ? "Planning the PDF edit" : "Refining the PDF edit approach", provider: "openrouter", model: "free/test", usage: null };
+      return { summary: prompts.length === 1 ? "Planning the PDF edit" : "Refining the PDF edit approach", provider: "deepseek", model: "deepseek-v4-flash", usage: null };
     },
   });
   coordinator.append("First thought.");
@@ -38,7 +37,7 @@ test("reasoning titles appear after the initial delay and refresh single-flight"
   coordinator.cancel();
 });
 
-test("OpenRouter 429 falls back to DeepSeek Flash", async () => {
+test("reasoning titles use DeepSeek Flash directly", async () => {
   const events = [];
   let fallbackCalls = 0;
   const coordinator = new ReasoningTitleCoordinator({
@@ -46,7 +45,6 @@ test("OpenRouter 429 falls back to DeepSeek Flash", async () => {
     emit: async (event) => { events.push(event); },
     firstDelayMs: 1,
     finalWaitMs: 100,
-    summarizeOpenRouter: async () => { throw new OpenRouterReasoningSummaryError("limited", 429); },
     summarizeDeepSeek: async () => {
       fallbackCalls += 1;
       return { summary: "Checking an alternate approach", provider: "deepseek", model: "deepseek-v4-flash", usage: null };
@@ -66,9 +64,9 @@ test("phase breaks reset title input to the new phase", async () => {
     emit: async () => {},
     firstDelayMs: 100,
     finalWaitMs: 100,
-    summarizeOpenRouter: async (prompt) => {
+    summarizeDeepSeek: async (prompt) => {
       prompts.push(prompt);
-      return { summary: "Reviewing the current phase", provider: "openrouter", model: "free/test", usage: null };
+      return { summary: "Reviewing the current phase", provider: "deepseek", model: "deepseek-v4-flash", usage: null };
     },
   });
   coordinator.append("Old phase reasoning.");

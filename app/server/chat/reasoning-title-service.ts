@@ -1,12 +1,7 @@
 import "server-only";
 
 import type { ChatStreamEvent } from "../../../lib/chat-protocol";
-import {
-  OpenRouterReasoningSummaryError,
-  summarizeReasoningWithOpenRouter,
-  type ReasoningSummaryAnswer,
-} from "../../providers/openrouter/openrouter-reasoning-summary-adapter";
-import { summarizeReasoningWithDeepSeekFlash } from "../../providers/deepseek/deepseek-reasoning-summary-adapter";
+import { summarizeReasoningWithDeepSeekFlash, type ReasoningSummaryAnswer } from "../../providers/deepseek/deepseek-reasoning-summary-adapter";
 
 const FIRST_TITLE_DELAY_MS = 1_000;
 const REFRESH_DELAY_MS = 2_000;
@@ -26,7 +21,6 @@ type Options = {
   signal: AbortSignal;
   emit: (event: ChatStreamEvent) => Promise<void>;
   onUsage?: (usage: ReasoningTitleUsage) => Promise<void>;
-  summarizeOpenRouter?: typeof summarizeReasoningWithOpenRouter;
   summarizeDeepSeek?: typeof summarizeReasoningWithDeepSeekFlash;
   firstDelayMs?: number;
   refreshDelayMs?: number;
@@ -49,11 +43,9 @@ export class ReasoningTitleCoordinator {
   private inFlight: Promise<void> | null = null;
   private phaseStartedAt = 0;
   private lastStartedAt = 0;
-  private readonly summarizeOpenRouter;
   private readonly summarizeDeepSeek;
 
   constructor(private readonly options: Options) {
-    this.summarizeOpenRouter = options.summarizeOpenRouter ?? summarizeReasoningWithOpenRouter;
     this.summarizeDeepSeek = options.summarizeDeepSeek ?? summarizeReasoningWithDeepSeekFlash;
   }
 
@@ -105,13 +97,7 @@ export class ReasoningTitleCoordinator {
     this.lastStartedAt = Date.now();
     this.inFlight = (async () => {
       try {
-        let answer: ReasoningSummaryAnswer;
-        try {
-          answer = await this.summarizeOpenRouter(`${PROMPT_PREFIX}${monologue}`, this.options.signal);
-        } catch (error) {
-          if (!(error instanceof OpenRouterReasoningSummaryError) || error.status !== 429) return;
-          answer = await this.summarizeDeepSeek(`${PROMPT_PREFIX}${monologue}`, this.options.signal);
-        }
+        const answer: ReasoningSummaryAnswer = await this.summarizeDeepSeek(`${PROMPT_PREFIX}${monologue}`, this.options.signal);
         const summary = cleanTitle(answer.summary);
         if (!summary) return;
         await this.options.onUsage?.({ ...answer, phase, revision });
