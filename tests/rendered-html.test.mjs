@@ -426,7 +426,7 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(styles, /\.chat-active \.composer-wrap[\s\S]*?position: absolute;/);
 });
 
-test("keeps the transcript scroll viewport full-width without changing mobile layout", async () => {
+test("keeps the transcript scroll viewport full-width with compact mobile composer clearance", async () => {
   const [transcript, responsive] = await Promise.all([
     readFile(new URL("../app/styles/transcript.css", import.meta.url), "utf8"),
     readFile(new URL("../app/styles/responsive.css", import.meta.url), "utf8"),
@@ -450,7 +450,7 @@ test("keeps the transcript scroll viewport full-width without changing mobile la
   assert.ok(mobileResponsiveTranscript);
   assert.match(mobileResponsiveTranscript, /width: calc\(100% - 28px - env\(safe-area-inset-left\) - env\(safe-area-inset-right\)\);/);
   assert.match(mobileResponsiveTranscript, /padding-top: 70px;/);
-  assert.match(mobileResponsiveTranscript, /padding-bottom: calc\(210px \+ env\(safe-area-inset-bottom\)\);/);
+  assert.match(mobileResponsiveTranscript, /padding-bottom: calc\(34px \+ env\(safe-area-inset-bottom\)\);/);
   assert.ok(mobileTranscriptBlock);
   assert.match(mobileTranscriptBlock, /padding-inline: 0;/);
 });
