@@ -41,6 +41,8 @@ export type ChatPreferences = {
   effectiveEffort: ChatReasoningEffort;
   /** True after the remote per-conversation preferences request settles. */
   modelPreferencesLoaded: boolean;
+  /** Current local preference map, including a snapshot seed before bootstrap. */
+  modelPreferences: Record<string, ChatModelPreference>;
   /** Persist a preference for the currently selected conversation. */
   persistModelPreference: (preference: ChatModelPreference) => void;
   /** Alias suitable for passing directly to ChatComposer. */
@@ -152,12 +154,12 @@ export function useChatPreferences({
   }, [getAccessToken]);
 
   useEffect(() => {
-    if (bootstrapComplete) {
-      // Bootstrap arrives asynchronously after the hook's initial render.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setModelPreferences(initialModelPreferences);
-      setModelPreferencesLoaded(true);
-    }
+    if (!bootstrapComplete && !Object.keys(initialModelPreferences).length) return;
+    // Snapshot preferences can seed the local record before remote bootstrap;
+    // bootstrap remains authoritative and replaces this map when it arrives.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setModelPreferences(initialModelPreferences);
+    setModelPreferencesLoaded(true);
   }, [bootstrapComplete, initialModelPreferences]);
 
   const selectedModel = useMemo(() => modelFor(model, models), [model, models]);
@@ -232,6 +234,7 @@ export function useChatPreferences({
     effectiveThinking,
     effectiveEffort,
     modelPreferencesLoaded,
+    modelPreferences,
     persistModelPreference,
     onPreferenceChange: persistModelPreference,
   };

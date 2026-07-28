@@ -275,6 +275,23 @@ test("keeps Supabase calls behind adapters and owner authorization", async () =>
   assert.match(authForm, /isMagicLinkRateLimitError/);
 });
 
+test("renders a non-blocking startup shell before remote chat bootstrap", async () => {
+  const [page, shell, workspace, composer] = await Promise.all([
+    readFile(new URL("../app/chat/chat-page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/chat-startup-shell.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/chat-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/chat-composer.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.match(page, /<ChatStartupShell/);
+  assert.doesNotMatch(page, /className="loading-shell"/);
+  assert.match(shell, /startup-shell/);
+  assert.doesNotMatch(shell, /ChatTranscript|react-markdown|KaTeX|SettingsModal|ChatSearchDialog|PdfPreview|attachment/i);
+  assert.doesNotMatch(workspace, /if \(!ready \|\| !active\) return <main className="loading-shell"/);
+  assert.match(workspace, /startupPending=\{startupPending\}/);
+  assert.match(composer, /startupPending\?: boolean/);
+  assert.match(composer, /Restoring chat/);
+});
+
 test("collapses authenticated chat startup into one bootstrap request", async () => {
   const [authService, page, workspace, preferences, client] = await Promise.all([
     readFile(new URL("../app/auth/auth-service.ts", import.meta.url), "utf8"),

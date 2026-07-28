@@ -325,3 +325,7 @@
   font-size: 11px;
   text-align: center;
 }
+
+.composer-startup-status {
+  color: var(--muted);
+}

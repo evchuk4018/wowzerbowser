@@ -27,6 +27,24 @@
     touch-action: pan-y;
   }
 
+  .startup-shell {
+    display: block;
+  }
+
+  .startup-sidebar {
+    display: none;
+  }
+
+  .startup-chat-area {
+    min-height: 100dvh;
+  }
+
+  .startup-error {
+    top: 58px;
+    right: 14px;
+    left: 14px;
+  }
+
   .chat-area {
     touch-action: pan-y;
     overscroll-behavior-x: none;

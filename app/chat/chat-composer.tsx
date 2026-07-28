@@ -47,6 +47,7 @@ export type ChatComposerProps = {
   setDraft: Dispatch<SetStateAction<string>>;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   isStreaming: boolean;
+  startupPending?: boolean;
   models: ChatModelInfo[];
   model: ChatModelId;
   setModel: Dispatch<SetStateAction<ChatModelId>>;
@@ -84,6 +85,7 @@ export function ChatComposer({
   setDraft,
   textareaRef,
   isStreaming,
+  startupPending = false,
   models,
   model,
   setModel,
@@ -121,7 +123,7 @@ export function ChatComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentsRef = useRef(attachments);
   const documentsRef = useRef(documents);
-  const disabled = isStreaming || isSubmittingAttachments;
+  const disabled = isStreaming || isSubmittingAttachments || startupPending;
 
   useEffect(() => {
     attachmentsRef.current = attachments;
@@ -139,6 +141,7 @@ export function ChatComposer({
   }, [onCancelDocumentPreparation]);
 
   const addFiles = (files: readonly File[]) => {
+    if (startupPending) return;
     if (!files.length) return;
     const pdfs=files.filter((file) => {
       const name = file.name.toLowerCase();
@@ -204,7 +207,16 @@ export function ChatComposer({
   };
 
   return (
-    <form className="composer-wrap" onSubmit={(event) => void onSubmit(event, attachments, documents)}>
+    <form
+      className="composer-wrap"
+      onSubmit={(event) => {
+        if (startupPending) {
+          event.preventDefault();
+          return;
+        }
+        void onSubmit(event, attachments, documents);
+      }}
+    >
       <div className="composer">
         {editing && (
           <div className="composer-editing">
@@ -333,12 +345,12 @@ export function ChatComposer({
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && (attachments.length > 0 || documents.length > 0 || preservedAttachments.length > 0 || preservedDocuments.length > 0)) {
               event.preventDefault();
-              void onSubmit(undefined, attachments, documents);
+              if (!startupPending) void onSubmit(undefined, attachments, documents);
               return;
             }
             onKeyDown(event);
           }}
-          onPaste={handlePaste}
+            onPaste={startupPending ? undefined : handlePaste}
         />
         <div className="composer-actions">
           <input
@@ -390,7 +402,7 @@ export function ChatComposer({
                     type="button"
                     aria-pressed={availableModel.id === model}
                     className={`composer-menu-option ${availableModel.id === model ? "selected" : ""}`}
-                    disabled={isStreaming}
+                    disabled={disabled}
                     onClick={() => {
                       setModel(availableModel.id);
                       const nextThinking = thinking && availableModel.thinkingSupported && Boolean(availableModel.supportedEfforts.length);
@@ -434,7 +446,7 @@ export function ChatComposer({
                   type="button"
                   aria-pressed={!thinking}
                   className={`composer-menu-option ${!thinking ? "selected" : ""}`}
-                  disabled={isStreaming}
+                  disabled={disabled}
                   onClick={() => {
                     setThinking(false);
                     onPreferenceChange({ model, thinking: false, reasoningEffort: effort });
@@ -490,6 +502,9 @@ export function ChatComposer({
       </div>
       {(attachmentError || submissionError) && (
         <p className="composer-error" role="alert">{attachmentError || submissionError}</p>
+      )}
+      {startupPending && !attachmentError && !submissionError && (
+        <p className="helper-text composer-startup-status" role="status">Restoring chat…</p>
       )}
       {isPreparingAttachments && documents.length === 0 && !attachmentError && !submissionError && (
         <p className="helper-text" role="status">Preparing image details…</p>

@@ -27,7 +27,7 @@ import {
   resolveConversationRoute,
 } from "./conversation-routing";
 import { DeleteConfirmationDialog } from "./delete-confirmation-dialog";
-import { conversationReducer, createInitialConversationState } from "./conversation-reducer";
+import { conversationReducer } from "./conversation-reducer";
 import {
   deleteConversation,
   loadConversation,
@@ -52,27 +52,48 @@ import {
   modelPreferencesRecord,
 } from "../../lib/chat-bootstrap";
 import type { ChatModelPreference } from "../../lib/chat-model-preference";
+import {
+  resolveSnapshotStartup,
+  type ChatStartupStage,
+} from "../../lib/chat-startup-snapshot";
+import { isValidConversationId } from "../../lib/chat-conversation-id";
+import { useChatStartupSnapshot } from "./use-chat-startup-snapshot";
 import { defaultPdfPreviewWidth, clampPdfPreviewWidth } from "./pdf-preview-layout";
 import { PdfPreviewPanel, type PdfPreviewLoadState } from "./pdf-preview-panel";
 
 export type ChatWorkspaceProps = {
   user: AuthUser;
   getAccessToken: () => Promise<string | null>;
+  initialDraft?: string;
   onSignOut: () => Promise<void>;
   onSessionInvalid: () => Promise<void>;
 };
 
+function createStartupConversationState(requestedConversationId?: string) {
+  const conversation = isValidConversationId(requestedConversationId)
+    ? { ...createConversation(), id: requestedConversationId }
+    : createConversation();
+  return { conversations: [conversation], activeId: conversation.id };
+}
+
 export function ChatWorkspace({
   user,
   getAccessToken,
+  initialDraft = "",
   onSignOut,
   onSessionInvalid,
 }: ChatWorkspaceProps) {
   const router = useRouter();
   const params = useParams<{ conversationId?: string }>();
-  const [state, dispatch] = useReducer(conversationReducer, undefined, createInitialConversationState);
-  const [ready, setReady] = useState(false);
-  const [draft, setDraft] = useState("");
+  const requestedConversationId = typeof params.conversationId === "string"
+    ? params.conversationId.trim() || undefined
+    : undefined;
+  const [state, dispatch] = useReducer(conversationReducer, requestedConversationId, createStartupConversationState);
+  const [startupStage, setStartupStage] = useState<ChatStartupStage>("shell");
+  const [remoteAuthorized, setRemoteAuthorized] = useState(false);
+  const [startupError, setStartupError] = useState<string | null>(null);
+  const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
+  const [draft, setDraft] = useState(initialDraft);
   const [attachmentResetKey, setAttachmentResetKey] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_CHAT_SETTINGS);
@@ -88,7 +109,7 @@ export function ChatWorkspace({
   const [editingDocuments, setEditingDocuments] = useState<ChatDocumentAttachment[]>([]);
   const [openMessageActions, setOpenMessageActions] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
-  const [recoveredStreaming, setRecoveredStreaming] = useState<Record<string, string>>({});
+  const [recoveredStreaming, setRecoveredStreaming] = useState<Record<string, "persisted">>({});
   const [conversationSummaries, setConversationSummaries] = useState<ChatConversationSummary[]>([]);
   const [bootstrapModelPreferences, setBootstrapModelPreferences] = useState<Record<string, ChatModelPreference>>({});
   const [bootstrapComplete, setBootstrapComplete] = useState(false);
@@ -109,11 +130,15 @@ export function ChatWorkspace({
   const pdfPreviewUrlRef = useRef<string | null>(null);
   const pdfPreviewRequestRef = useRef(0);
   const conversationLoadRequestRef = useRef(0);
-  const requestedConversationId = typeof params.conversationId === "string"
-    ? params.conversationId.trim() || undefined
-    : undefined;
+  const bootstrapRequestRef = useRef(0);
   const initialConversationIdRef = useRef(requestedConversationId);
   const handledRouteRef = useRef<string | undefined | null>(null);
+  const {
+    snapshot,
+    snapshotLoaded,
+    persistSnapshot,
+    flushSnapshot,
+  } = useChatStartupSnapshot(user.id);
 
   const loadUsage = useCallback(async (range: Parameters<typeof fetchChatUsage>[0]) => {
     const accessToken = await getAccessToken();
@@ -124,15 +149,18 @@ export function ChatWorkspace({
 
   useEffect(() => {
     let mounted = true;
-    const requestId = ++conversationLoadRequestRef.current;
+    const requestId = ++bootstrapRequestRef.current;
     void (async () => {
       try {
         const token = await getAccessToken();
         if (!token) throw new ChatRequestError(401, "Your session expired.");
         const bootstrap = await fetchChatBootstrap(token, initialConversationIdRef.current);
-        if (!mounted || requestId !== conversationLoadRequestRef.current) {
+        if (!mounted || requestId !== bootstrapRequestRef.current) {
           return;
         }
+        setRemoteAuthorized(true);
+        setStartupStage("remote");
+        setStartupError(null);
         setConversationSummaries(bootstrap.summaries);
         setRecoveredStreaming(bootstrap.streamingByConversation);
         setSettings({
@@ -151,7 +179,7 @@ export function ChatWorkspace({
             ? { ...createConversation(), id: bootstrap.requestedConversationId }
             : createConversation();
         }
-        if (!mounted || requestId !== conversationLoadRequestRef.current) {
+        if (!mounted || requestId !== bootstrapRequestRef.current) {
           return;
         }
         dispatch({
@@ -159,33 +187,77 @@ export function ChatWorkspace({
           conversations: [initialConversation],
           activeId: initialConversation.id,
         });
-        setReady(true);
+        try {
+          performance.mark("chat-bootstrap-complete");
+        } catch {}
+        persistSnapshot({
+          userId: user.id,
+          summaries: bootstrap.summaries,
+          streamingByConversation: bootstrap.streamingByConversation,
+          activeConversation: initialConversation,
+          activeConversationId: initialConversation.id,
+          userPresence: bootstrap.userPreferences.userPresence,
+          modelPreferences: bootstrap.modelPreferences,
+        });
       } catch (error) {
-        if (!mounted || requestId !== conversationLoadRequestRef.current) return;
+        if (!mounted || requestId !== bootstrapRequestRef.current) return;
         if (error instanceof ChatRequestError && error.status === 401) {
           await onSessionInvalid();
           return;
         }
-        setConversationLoadError(
+        setStartupError(
           error instanceof Error
             ? error.message
             : "The conversation could not be loaded.",
         );
-        const fallback = createConversation();
-        dispatch({
-          type: "LOAD_CONVERSATIONS",
-          conversations: [fallback],
-          activeId: fallback.id,
-        });
-        setBootstrapModelPreferences({});
-        setBootstrapComplete(true);
-        setReady(true);
+        setConversationLoadError(null);
+        setStartupStage("error");
+        setRemoteAuthorized(false);
+        setBootstrapComplete(false);
       }
     })();
     return () => {
       mounted = false;
     };
-  }, [getAccessToken, onSessionInvalid]);
+  }, [bootstrapAttempt, getAccessToken, onSessionInvalid, persistSnapshot, user.id]);
+
+  useEffect(() => {
+    if (!snapshotLoaded || remoteAuthorized) return;
+    if (snapshot) {
+      // Snapshot data arrives from IndexedDB and seeds the workspace state.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setConversationSummaries(snapshot.summaries);
+      setRecoveredStreaming(snapshot.streamingByConversation);
+      setSettings({
+        ...DEFAULT_CHAT_SETTINGS,
+        userPresence: snapshot.userPresence,
+      });
+      setBootstrapModelPreferences(modelPreferencesRecord(snapshot.modelPreferences));
+    }
+
+    const resolution = resolveSnapshotStartup(snapshot, initialConversationIdRef.current);
+    if (resolution.type === "cached") {
+      dispatch({
+        type: "LOAD_CONVERSATIONS",
+        conversations: [resolution.conversation],
+        activeId: resolution.conversation.id,
+      });
+      setLoadingConversationId(null);
+      setStartupStage("snapshot");
+      try {
+        performance.mark("chat-snapshot-hydrated");
+      } catch {}
+    } else if (resolution.type === "create") {
+      dispatch({ type: "CREATE_CONVERSATION", conversation: resolution.conversation });
+      setLoadingConversationId(null);
+      setStartupStage(snapshot ? "snapshot" : "shell");
+    } else {
+      const requestedId = initialConversationIdRef.current;
+      const known = requestedId && snapshot?.summaries.some(({ id }) => id === requestedId);
+      setLoadingConversationId(known ? requestedId : null);
+      setStartupStage(snapshot ? "snapshot" : "shell");
+    }
+  }, [remoteAuthorized, snapshot, snapshotLoaded]);
 
   const hydrateAndSelectConversation = useCallback(
     async (conversationId: string) => {
@@ -237,7 +309,7 @@ export function ChatWorkspace({
   );
 
   useEffect(() => {
-    if (!ready || !state.activeId) return;
+    if (!remoteAuthorized || !state.activeId) return;
     if (handledRouteRef.current === requestedConversationId) return;
     handledRouteRef.current = requestedConversationId;
     const knownIds = new Set(
@@ -262,7 +334,7 @@ export function ChatWorkspace({
   }, [
     conversationSummaries,
     hydrateAndSelectConversation,
-    ready,
+    remoteAuthorized,
     requestedConversationId,
     router,
     state,
@@ -292,7 +364,7 @@ export function ChatWorkspace({
   });
 
   usePersistedJobRecovery({
-    enabled: ready,
+    enabled: remoteAuthorized,
     conversations: state.conversations,
     getAccessToken,
     dispatch,
@@ -307,12 +379,13 @@ export function ChatWorkspace({
     },
   });
 
-  const active = state.conversations.find(({ id }) => id === state.activeId);
+  const active = state.conversations.find(({ id }) => id === state.activeId)!;
   const streamingByConversation = useMemo(
     () => ({ ...recoveredStreaming, ...generation.streamingByConversation }),
     [generation.streamingByConversation, recoveredStreaming],
   );
   const activeStreaming = Boolean(streamingByConversation[state.activeId]);
+  const startupPending = startupStage !== "remote" || !remoteAuthorized;
   const sidebarConversations = useMemo(() => {
     const summariesById = new Map(
       conversationSummaries.map((summary) => [summary.id, summary]),
@@ -465,6 +538,53 @@ export function ChatWorkspace({
   const latestTurn = active?.turns.at(-1);
   const latestMessage = latestTurn?.versions[latestTurn.activeVersion]?.assistant;
   const latestActivity = latestMessage?.activities?.at(-1);
+  const snapshotSourceRef = useRef<{
+    state: typeof state;
+    remoteAuthorized: boolean;
+    conversationSummaries: ChatConversationSummary[];
+    recoveredStreaming: Record<string, "persisted">;
+    settings: typeof settings;
+    modelPreferences: Record<string, ChatModelPreference>;
+  } | null>(null);
+  useEffect(() => {
+    snapshotSourceRef.current = {
+      state,
+      remoteAuthorized,
+      conversationSummaries,
+      recoveredStreaming,
+      settings,
+      modelPreferences: preferences.modelPreferences,
+    };
+  }, [conversationSummaries, preferences.modelPreferences, recoveredStreaming, remoteAuthorized, settings, state]);
+
+  const persistCurrentSnapshot = useCallback(() => {
+    const source = snapshotSourceRef.current;
+    if (!source || !source.remoteAuthorized) return;
+    const current = source.state.conversations.find(({ id }) => id === source.state.activeId);
+    if (!current) return;
+    persistSnapshot({
+      userId: user.id,
+      summaries: source.conversationSummaries,
+      streamingByConversation: source.recoveredStreaming,
+      activeConversation: current,
+      activeConversationId: current.id,
+      userPresence: source.settings.userPresence,
+      modelPreferences: Object.entries(source.modelPreferences).map(([conversationId, preference]) => ({
+        conversationId,
+        ...preference,
+      })),
+    });
+  }, [persistSnapshot, user.id]);
+
+  useEffect(() => {
+    if (!remoteAuthorized) return;
+    persistCurrentSnapshot();
+  }, [active?.id, active?.title, active?.turns.length, conversationSummaries, latestMessage?.status, persistCurrentSnapshot, remoteAuthorized, recoveredStreaming, settings.userPresence, state.activeId]);
+
+  useEffect(() => () => {
+    void flushSnapshot();
+  }, [flushSnapshot]);
+
   useEffect(() => {
     const transcript = transcriptRef.current;
     if (!transcript || !shouldAutoScrollRef.current) return;
@@ -530,7 +650,7 @@ export function ChatWorkspace({
   };
   const retryTurn = (turn: ConversationTurn) => {
     const version = turn.versions[turn.activeVersion];
-    if (!version || activeStreaming) return Promise.resolve();
+    if (!version || activeStreaming || startupPending) return Promise.resolve();
     return generation.sendMessage(
       version.user.content,
       turn.id,
@@ -631,11 +751,13 @@ export function ChatWorkspace({
     documents: readonly PendingChatDocument[] = [],
   ) => {
     event?.preventDefault();
+    if (startupPending) return;
     return generation.sendMessage(draft, editingTurnId, attachments, editingAttachments, documents, editingDocuments);
   };
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
+      if (startupPending) return;
       void sendMessage();
     }
   };
@@ -649,7 +771,6 @@ export function ChatWorkspace({
     });
   };
 
-  if (!ready || !active) return <main className="loading-shell" aria-label="Loading chat" />;
   return (
     <main
       className={`app-shell ${pdfPreview ? "pdf-preview-open" : ""}`}
@@ -728,6 +849,23 @@ export function ChatWorkspace({
           }}
         />
       )}
+      {startupError && (
+        <div className="startup-error" role="alert">
+          <span>{startupError}</span>
+          <button
+            type="button"
+            onClick={() => {
+              setStartupError(null);
+              setRemoteAuthorized(false);
+              setBootstrapComplete(false);
+              setStartupStage(snapshot ? "snapshot" : "shell");
+              setBootstrapAttempt((attempt) => attempt + 1);
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
       <section className={`chat-area ${active.turns.length ? "chat-active" : ""} ${openMessageActions ? "message-actions-active" : ""}`}>
         {openMessageActions && (
           <button
@@ -777,6 +915,7 @@ export function ChatWorkspace({
           setDraft={setDraft}
           textareaRef={textareaRef}
           isStreaming={activeStreaming || Boolean(loadingConversationId)}
+          startupPending={startupPending}
           models={preferences.models}
           model={preferences.model}
           setModel={preferences.setModel}
