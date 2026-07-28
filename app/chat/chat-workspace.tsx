@@ -11,7 +11,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import type { AuthUser } from "../auth/types";
 import { SettingsModal } from "../settings/settings-modal";
 import { ChatSearchDialog } from "./chat-search-dialog";
@@ -23,6 +23,10 @@ import { ChatTranscript } from "./chat-transcript";
 import { isTranscriptNearBottom } from "./transcript-scroll";
 import { fetchChatUsage } from "./chat-usage-service";
 import { createConversation, DEFAULT_CHAT_SETTINGS } from "./conversation-defaults";
+import {
+  mergeRequestedConversation,
+  resolveConversationRoute,
+} from "./conversation-routing";
 import { DeleteConfirmationDialog } from "./delete-confirmation-dialog";
 import { conversationReducer, createInitialConversationState } from "./conversation-reducer";
 import {
@@ -49,18 +53,15 @@ export type ChatWorkspaceProps = {
   user: AuthUser;
   getAccessToken: () => Promise<string | null>;
   onSignOut: () => Promise<void>;
-  initialConversationId?: string;
 };
-
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function ChatWorkspace({
   user,
   getAccessToken,
   onSignOut,
-  initialConversationId,
 }: ChatWorkspaceProps) {
   const router = useRouter();
+  const params = useParams<{ conversationId?: string }>();
   const [state, dispatch] = useReducer(conversationReducer, undefined, createInitialConversationState);
   const [ready, setReady] = useState(false);
   const [draft, setDraft] = useState("");
@@ -94,13 +95,11 @@ export function ChatWorkspace({
   const conversationLongPressTimerRef = useRef<number | null>(null);
   const pdfPreviewUrlRef = useRef<string | null>(null);
   const pdfPreviewRequestRef = useRef(0);
-  const initialConversationIdRef = useRef(initialConversationId);
-  const synchronizedRouteRef = useRef<string | null>(null);
-  const requestedConversationId = initialConversationId?.trim() || undefined;
-
-  useEffect(() => {
-    initialConversationIdRef.current = initialConversationId;
-  }, [initialConversationId]);
+  const requestedConversationId = typeof params.conversationId === "string"
+    ? params.conversationId.trim() || undefined
+    : undefined;
+  const initialConversationIdRef = useRef(requestedConversationId);
+  const handledRouteRef = useRef<string | undefined | null>(null);
 
   const loadUsage = useCallback(async (range: Parameters<typeof fetchChatUsage>[0]) => {
     const accessToken = await getAccessToken();
@@ -120,13 +119,8 @@ export function ChatWorkspace({
         // Session/storage failures are nonfatal; start with a blank conversation.
       }
       if (!mounted) return;
-      const requestedId = initialConversationIdRef.current?.trim() || undefined;
-      const requestedBlank = requestedId && UUID_PATTERN.test(requestedId)
-        ? { ...createConversation(), id: requestedId }
-        : null;
-      const conversations = loaded.conversations.length
-        ? loaded.conversations
-        : [requestedBlank ?? createConversation()];
+      const requestedId = initialConversationIdRef.current;
+      const conversations = mergeRequestedConversation(loaded, requestedId);
       dispatch({ type: "LOAD_CONVERSATIONS", conversations, activeId: requestedId });
       setRecoveredStreaming(loaded.streamingByConversation);
       setReady(true);
@@ -138,17 +132,18 @@ export function ChatWorkspace({
 
   useEffect(() => {
     if (!ready || !state.activeId) return;
-    if (requestedConversationId && state.conversations.some(({ id }) => id === requestedConversationId)) {
-      if (state.activeId !== requestedConversationId) {
-        dispatch({ type: "SELECT_CONVERSATION", conversationId: requestedConversationId });
-      }
-      return;
+    if (handledRouteRef.current === requestedConversationId) return;
+    handledRouteRef.current = requestedConversationId;
+
+    const resolution = resolveConversationRoute(state, requestedConversationId);
+    if (resolution.type === "select") {
+      dispatch({ type: "SELECT_CONVERSATION", conversationId: resolution.conversationId });
+    } else if (resolution.type === "create") {
+      dispatch({ type: "CREATE_CONVERSATION", conversation: resolution.conversation });
+    } else if (resolution.type === "redirect") {
+      router.replace(`/chat/${resolution.conversationId}`);
     }
-    const routeSyncKey = `${requestedConversationId ?? "root"}:${state.activeId}`;
-    if (synchronizedRouteRef.current === routeSyncKey) return;
-    synchronizedRouteRef.current = routeSyncKey;
-    router.replace(`/chat/${state.activeId}`);
-  }, [ready, requestedConversationId, router, state.activeId, state.conversations]);
+  }, [ready, requestedConversationId, router, state]);
 
   useEffect(() => {
     let mounted = true;

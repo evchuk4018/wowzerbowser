@@ -4,11 +4,7 @@ import { MagicLinkForm } from "../auth/magic-link-form";
 import { useAuthSession } from "../auth/use-auth-session";
 import { ChatWorkspace } from "./chat-workspace";
 
-export type ChatPageProps = {
-  initialConversationId?: string;
-};
-
-export function ChatPage({ initialConversationId }: ChatPageProps) {
+export function ChatPage() {
   const {
     state,
     sendMagicLink,
@@ -39,7 +35,6 @@ export function ChatPage({ initialConversationId }: ChatPageProps) {
       user={state.user}
       getAccessToken={getAccessToken}
       onSignOut={signOut}
-      initialConversationId={initialConversationId}
     />
   );
 }
