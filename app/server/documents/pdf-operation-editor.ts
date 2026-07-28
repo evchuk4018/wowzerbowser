@@ -10,6 +10,7 @@ import { getAuthorizedDocument, downloadAuthorizedDocumentBytes } from "../chat/
 import { findChatImageAttachment, downloadChatImageObject } from "../chat/chat-image-store";
 import { inspectPdfEditability } from "./pdf-edit-inspector";
 import { finalizeDocumentRevision } from "./document-revision-service";
+import { PDF_OPERATION_SCRIPT } from "./pdf-operation-script.mjs";
 
 export type PdfOperation =
   | { type: "delete_pages"; pages: number[] }
@@ -23,8 +24,6 @@ export type PdfOperation =
   | { type: "add_image"; page: number; imageId: string; x: number; y: number; width: number; height: number }
   | { type: "watermark"; text: string; opacity: number; pages?: number[] }
   | { type: "set_form_field"; fieldName: string; value: string };
-
-const PYTHON_EDIT_SCRIPT = "import json,sys,fitz\\nfrom pypdf import PdfReader\\ni,o=sys.argv[1:3]\\np=json.loads(sys.stdin.read())\\nd=fitz.open(i); changed=set(); warnings=[]\\npi=lambda x:[int(v)-1 for v in x] if x else list(range(len(d)))\\nfor a in p['operations']:\\n k=a['type']\\n if k=='delete_pages':\\n  [d.delete_page(v) for v in sorted(pi(a['pages']),reverse=True)]; changed.update(range(1,len(d)+1))\\n elif k=='reorder_pages': d.select(pi(a['order'])); changed.update(range(1,len(d)+1))\\n elif k=='rotate_pages':\\n  [d[v].set_rotation((d[v].rotation+a['degrees'])%360) for v in pi(a['pages'])]; changed.update(a['pages'])\\n elif k=='insert_blank_page': d.new_page(pno=a['afterPage'],width=a.get('width') or 595,height=a.get('height') or 842); changed.update(range(max(1,a['afterPage']),len(d)+1))\\n elif k=='merge_document':\\n  s=fitz.open(p['documents'][a['sourceDocumentId']]); d.insert_pdf(s,start_at=a['afterPage']); s.close(); changed.update(range(max(1,a['afterPage']),len(d)+1))\\n elif k in ('redact_text','replace_text'):\\n  m=[(v,r) for v in pi(a.get('pages')) for r in d[v].search_for(a['query'])]\\n  if a.get('expectedOccurrences') is not None and len(m)!=a['expectedOccurrences']: raise ValueError('Expected '+str(a['expectedOccurrences'])+' occurrences but found '+str(len(m))+'.')\\n  [d[v].add_redact_annot(r,fill=(1,1,1)) for v,r in m]; [d[v].apply_redactions() for v in sorted(set(v for v,r in m))]\\n  if k=='replace_text': [d[v].insert_textbox(r,a['replacement'],fontsize=a.get('fontSize') or 11,overlay=True) for v,r in m]; warnings.append('Replacement typography may differ from the original font.')\\n elif k=='add_text': d[a['page']-1].insert_textbox(fitz.Rect(a['x'],a['y'],a['x']+a['width'],a['y']+a['height']),a['text'],fontsize=a['fontSize'],align={'left':0,'center':1,'right':2}.get(a.get('align','left'),0),overlay=True); changed.add(a['page'])\\n elif k=='add_image': d[a['page']-1].insert_image(fitz.Rect(a['x'],a['y'],a['x']+a['width'],a['y']+a['height']),filename=p['images'][a['imageId']],overlay=True); changed.add(a['page'])\\n elif k=='watermark':\\n  [d[v].insert_text((d[v].rect.width/2,d[v].rect.height/2),a['text'],fontsize=32,color=(.5,.5,.5),fill_opacity=a['opacity'],overlay=True) for v in pi(a.get('pages'))]; changed.update(v+1 for v in pi(a.get('pages')))\\nd.save(o,garbage=3,deflate=True); d.close()\\nif len(PdfReader(o).pages)<1: raise ValueError('The edited PDF has no pages.')\\nprint(json.dumps({'changedPages':sorted(changed),'warnings':warnings}))";
 
 function finite(value: unknown, field: string): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw new Error(field + " must be finite and non-negative.");
@@ -59,6 +58,7 @@ export function validateOperations(operations: PdfOperation[], inspection: Await
     if ((operation.type === "replace_text" || operation.type === "redact_text") && inspection.pages.some((page) => (!operation.pages || operation.pages.includes(page.pageNumber)) && page.likelyScanned)) throw new Error("Text replacement and text redaction require selectable text coordinates; use an explicit geometric overlay for scanned pages.");
     if ("expectedOccurrences" in operation && (typeof operation.expectedOccurrences !== "number" || !Number.isSafeInteger(operation.expectedOccurrences) || operation.expectedOccurrences < 0)) throw new Error("expectedOccurrences must be a non-negative integer.");
     if (operation.type === "watermark" && (!Number.isFinite(operation.opacity) || operation.opacity < 0 || operation.opacity > 1)) throw new Error("Watermark opacity must be between 0 and 1.");
+    if (operation.type === "set_form_field" && (typeof operation.fieldName !== "string" || !operation.fieldName.trim() || operation.fieldName.length > 512 || typeof operation.value !== "string" || operation.value.length > 16_384)) throw new Error("Form field name or value is invalid.");
   }
 }
 
@@ -103,7 +103,7 @@ export async function editPdfOperations(input: { ownerId: string; conversationId
     }
   }
   try {
-    const execution = await input.executor.run({ code: PYTHON_EDIT_SCRIPT, stdin: JSON.stringify({ operations: input.operations, documents, images }), args: ["/workspace/" + inputPath, "/workspace/" + outputPath], artifacts: [outputPath] });
+    const execution = await input.executor.run({ code: PDF_OPERATION_SCRIPT, stdin: JSON.stringify({ operations: input.operations, documents, images }), args: ["/workspace/" + inputPath, "/workspace/" + outputPath], artifacts: [outputPath] });
     if (execution.exitCode !== 0) throw new Error(execution.stderr || "The PDF edit failed.");
     const outputBytes = await input.executor.readWorkspaceFile(outputPath);
     const parsed = JSON.parse(execution.stdout.trim().split("\n").at(-1) || "{}") as { changedPages?: number[]; warnings?: string[] };

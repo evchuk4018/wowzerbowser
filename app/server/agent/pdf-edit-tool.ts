@@ -52,7 +52,10 @@ function parseOperations(value: unknown): PdfOperation[] {
     if (type === "add_text") return { type, page: Number(operation.page), x: Number(operation.x), y: Number(operation.y), width: Number(operation.width), height: Number(operation.height), text: String(operation.text), fontSize: Number(operation.fontSize), ...(operation.align === undefined ? {} : { align: operation.align as "left" | "center" | "right" }) };
     if (type === "add_image") return { type, page: Number(operation.page), imageId: String(operation.imageId), x: Number(operation.x), y: Number(operation.y), width: Number(operation.width), height: Number(operation.height) };
     if (type === "watermark") return { type, text: String(operation.text), opacity: Number(operation.opacity), ...(operation.pages === undefined ? {} : { pages: pages(operation.pages, "pages") }) };
-    if (type === "set_form_field") return { type, fieldName: String(operation.fieldName), value: String(operation.value) };
+    if (type === "set_form_field") {
+      if (typeof operation.fieldName !== "string" || !operation.fieldName.trim() || operation.fieldName.length > 512 || typeof operation.value !== "string" || operation.value.length > 16_384) throw new Error(`operations[${index}] form field is invalid.`);
+      return { type, fieldName: operation.fieldName, value: operation.value };
+    }
     throw new Error(`operations[${index}].type is unsupported.`);
   }) as PdfOperation[];
 }
