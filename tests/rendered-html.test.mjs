@@ -559,7 +559,7 @@ test("keeps Python execution isolated, persistent, bounded, and server-only", as
   assert.match(executor, /outboundCidrAllowlist: \[\]/);
   assert.match(executor, /memoryMiB: PYTHON_TOOL_LIMITS\.memoryMb/);
   assert.match(executor, /callTimeoutMs: 60_000/);
-  assert.match(executor, /maxCalls: 6/);
+  assert.doesNotMatch(executor, /maxCalls/);
   assert.match(executor, /responseTimeoutMs: 240_000/);
   assert.match(executor, /drainBounded/);
   assert.match(executor, /stream\.getReader\(\)/);

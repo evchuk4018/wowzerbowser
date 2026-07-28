@@ -26,7 +26,6 @@ import { DOCX_CONTENT_TYPE, documentContext } from "../../lib/chat-document";
 import { IncrementalCitationFilter, parseCitationMarkup, validCitationSources, type ChatSource } from "../../lib/chat-citations";
 
 const MAX_RESPONSE_MS = 240_000;
-const MAX_TOOL_CALLS = 6;
 
 export type ChatRoundUsage = {
   round: number;
@@ -91,19 +90,17 @@ export async function generateChatResponse(
       const roundSignal = AbortSignal.any([signal, deadline]);
       const replayRounds: ChatAssistantRound[] = [];
       const roundUsages: Array<ReturnType<typeof latestNonNullUsage>> = [];
-      let totalToolCalls = 0;
       let executor: ModalPythonExecutor | null = null;
       const sourceCatalog = new Map<string, ChatSource>();
 
       try {
-        for (let round = 1; round <= MAX_TOOL_CALLS + 1; round += 1) {
+        for (let round = 1; ; round += 1) {
           const toolDefinitions = [...baseToolDefinitions, ...availablePdfTools(allowedPdfIds.size > 0)];
           await enqueue({ type: "round", round });
-          const canCallTools = totalToolCalls < MAX_TOOL_CALLS && round <= MAX_TOOL_CALLS;
           const systemInstructions = [
-            ...runPythonInstructionsFor(Boolean(pythonTools.length && canCallTools)),
-            ...webToolInstructionsFor(Boolean(webTools.length && canCallTools)),
-            ...(pdfEditTools.length && canCallTools ? PDF_EDIT_TOOL_INSTRUCTIONS : []),
+            ...runPythonInstructionsFor(Boolean(pythonTools.length)),
+            ...webToolInstructionsFor(Boolean(webTools.length)),
+            ...(pdfEditTools.length ? PDF_EDIT_TOOL_INSTRUCTIONS : []),
           ];
           const reasoningParts: string[] = [];
           const contentParts: string[] = [];
@@ -117,7 +114,7 @@ export async function generateChatResponse(
               {
                 replayRounds,
                 systemInstructions,
-                ...(toolDefinitions.length && canCallTools ? { tools: toolDefinitions } : {}),
+                ...(toolDefinitions.length ? { tools: toolDefinitions } : {}),
                 onResponse: (accepted) => {
                   providerAccepted = accepted;
                 },
@@ -170,12 +167,7 @@ export async function generateChatResponse(
             await enqueue({ type: "error", message: "Tool execution is not configured." });
             break;
           }
-          if (totalToolCalls + calls.length > MAX_TOOL_CALLS) {
-            await enqueue({ type: "error", message: "The response reached the 6-call tool limit." });
-            break;
-          }
           for (const call of calls) {
-            totalToolCalls += 1;
             await enqueue({ type: "tool_call", call });
             let result: ChatToolResult;
             if (call.name === "run_python") {

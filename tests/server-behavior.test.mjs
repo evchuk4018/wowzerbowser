@@ -30,6 +30,7 @@ import {
   availableImageTools,
   executeInspectImageTool,
 } from "../app/server/agent/image-tool.ts";
+import { generateChatResponse } from "../app/chat/chat-server-service.ts";
 import { parseChatRequest } from "../lib/chat-protocol.ts";
 import { applyChatStreamEvent } from "../lib/chat-history.ts";
 
@@ -107,7 +108,7 @@ test("run_python instructions are absent unless the tool is advertised", () => {
   assert.match(RUN_PYTHON_INSTRUCTIONS, /packages.*20/i);
   assert.match(RUN_PYTHON_INSTRUCTIONS, /args.*32/i);
   assert.match(RUN_PYTHON_INSTRUCTIONS, /artifacts.*20/i);
-  assert.match(RUN_PYTHON_INSTRUCTIONS, /six \(6\) run_python calls/i);
+  assert.doesNotMatch(RUN_PYTHON_INSTRUCTIONS, /six \(6\) run_python calls/i);
   assert.match(RUN_PYTHON_INSTRUCTIONS, /ok.*stdout.*stderr.*exitCode.*artifacts/i);
 });
 
@@ -279,6 +280,83 @@ test("chat orchestration reserves one usage slot per round", async () => {
   assert.match(source, /roundUsages\[roundUsageIndex\] = latestNonNullUsage/);
   assert.doesNotMatch(source, /roundUsages\.push\(roundUsage\)/);
   assert.match(source, /new ModalPythonExecutor\(ownerId, conversationId, responseDeadlineAt\)/);
+});
+
+test("chat orchestration completes after more than six sequential tool calls", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDeepSeekKey = process.env.DEEPSEEK_API_KEY;
+  const events = [];
+  let providerRounds = 0;
+  const sse = (payload) => `data: ${JSON.stringify(payload)}\n\n`;
+
+  process.env.DEEPSEEK_API_KEY = "test-key";
+  globalThis.fetch = async (_url, init) => {
+    providerRounds += 1;
+    const body = JSON.parse(init.body);
+    assert.ok(body.tools?.some((tool) => tool.function.name === CHECK_TIME_TOOL_NAME));
+    if (providerRounds <= 7) {
+      return new Response([
+        sse({ choices: [{ delta: { tool_calls: [{ index: 0, id: `time-${providerRounds}`, function: { name: CHECK_TIME_TOOL_NAME, arguments: "{}" } }] } }] }),
+        sse({ choices: [{ delta: {} }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }),
+        "data: [DONE]\n\n",
+      ].join(""), { headers: { "content-type": "text/event-stream" } });
+    }
+    return new Response([
+      sse({ choices: [{ delta: { content: "All seven tool calls completed." } }] }),
+      "data: [DONE]\n\n",
+    ].join(""), { headers: { "content-type": "text/event-stream" } });
+  };
+
+  try {
+    await generateChatResponse(
+      {
+        systemPrompt: "system context",
+        userPresence: "user presence",
+        model: "deepseek-v4-flash",
+        thinking: false,
+        messages: [{ role: "user", content: "Use the time tool repeatedly." }],
+        conversationId: "conversation-1",
+        jobId: "job-1",
+      },
+      "owner-1",
+      new AbortController().signal,
+      async (event) => events.push(event),
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalDeepSeekKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = originalDeepSeekKey;
+  }
+
+  assert.equal(providerRounds, 8);
+  assert.equal(events.filter(({ type }) => type === "tool_call").length, 7);
+  assert.equal(events.filter(({ type }) => type === "tool_result").length, 7);
+  assert.equal(events.filter(({ type }) => type === "round").at(-1)?.round, 8);
+  assert.deepEqual(events.filter(({ type }) => type === "error"), []);
+  assert.equal(events.find(({ type }) => type === "content")?.delta, "All seven tool calls completed.");
+  assert.equal(events.at(-1)?.type, "done");
+});
+
+test("chat protocol accepts extended tool traces", () => {
+  const rounds = Array.from({ length: 8 }, (_, roundIndex) => ({
+    content: "",
+    toolCalls: Array.from({ length: roundIndex === 0 ? 7 : 1 }, (_, callIndex) => ({
+      id: `call-${roundIndex}-${callIndex}`,
+      name: CHECK_TIME_TOOL_NAME,
+      arguments: "{}",
+      result: { id: `call-${roundIndex}-${callIndex}`, name: CHECK_TIME_TOOL_NAME, ok: true, stdout: "", stderr: "" },
+    })),
+  }));
+  const parsed = parseChatRequest(request({
+    messages: [
+      { role: "user", content: "Use the time tool." },
+      { role: "assistant", content: "Working.", rounds },
+      { role: "user", content: "Continue." },
+    ],
+  }));
+
+  assert.equal(parsed.messages[1].rounds?.length, 8);
+  assert.equal(parsed.messages[1].rounds?.[0].toolCalls?.length, 7);
 });
 
 test("inspect_image is allowlisted by validated request images before storage access", async () => {

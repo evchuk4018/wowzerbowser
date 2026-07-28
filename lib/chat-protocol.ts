@@ -547,9 +547,7 @@ function readLocationSource(value: unknown, field: string): "deployment_metadata
 
 function readToolCalls(value: unknown, field: string): ChatToolCall[] | undefined {
   if (value === undefined) return undefined;
-  if (!Array.isArray(value) || value.length > 6) {
-    throw new ChatRequestValidationError(`${field} must be an array with at most 6 calls.`);
-  }
+  if (!Array.isArray(value)) throw new ChatRequestValidationError(`${field} must be an array.`);
   return value.map((call, index) => {
     if (!isRecord(call)) throw new ChatRequestValidationError(`${field}[${index}] is invalid.`);
     let result: ChatToolResult | undefined;
@@ -636,9 +634,7 @@ function readToolCalls(value: unknown, field: string): ChatToolCall[] | undefine
 
 function readRounds(value: unknown, field: string): ChatAssistantRound[] | undefined {
   if (value === undefined) return undefined;
-  if (!Array.isArray(value) || value.length > 7) {
-    throw new ChatRequestValidationError(`${field} must be an array with at most 7 rounds.`);
-  }
+  if (!Array.isArray(value)) throw new ChatRequestValidationError(`${field} must be an array.`);
   return value.map((round, index) => {
     if (!isRecord(round)) throw new ChatRequestValidationError(`${field}[${index}] is invalid.`);
     const reasoning =

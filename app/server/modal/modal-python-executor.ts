@@ -15,7 +15,6 @@ export const PYTHON_TOOL_LIMITS = {
   cpu: 1,
   memoryMb: 1024,
   callTimeoutMs: 60_000,
-  maxCalls: 6,
   responseTimeoutMs: 240_000,
   maxCodeLength: 64 * 1024,
   maxOutputLength: 64 * 1024,
@@ -383,7 +382,6 @@ export async function readConversationArtifact(
 export class ModalPythonExecutor {
   private sandbox: Sandbox | null = null;
   private client: ModalClient | null = null;
-  private calls = 0;
 
   constructor(
     private readonly ownerId: string,
@@ -431,9 +429,6 @@ export class ModalPythonExecutor {
   }
 
   async run(inputValue: unknown): Promise<ModalExecResult> {
-    if (this.calls >= PYTHON_TOOL_LIMITS.maxCalls) {
-      throw new Error("The response reached the 6-call Python limit.");
-    }
     const callStartedAt = Date.now();
     if (callStartedAt >= this.responseDeadlineAt) {
       throw new Error("The response reached its 240-second execution limit.");
@@ -444,7 +439,6 @@ export class ModalPythonExecutor {
       callStartedAt + PYTHON_TOOL_LIMITS.callTimeoutMs,
     );
     assertDeadline(callDeadlineAt);
-    this.calls += 1;
     const sandbox = await this.ensureSandbox(callDeadlineAt);
     const before = await snapshotFiles(sandbox, callDeadlineAt);
 

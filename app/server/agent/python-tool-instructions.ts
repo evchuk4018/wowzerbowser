@@ -8,7 +8,6 @@ import { PYTHON_RUNTIME_PACKAGE_INSTRUCTIONS } from "./python-runtime-packages";
 export const RUN_PYTHON_INSTRUCTIONS = [
   "<run_python_policy>",
   "Use run_python for useful computation, data transformation, file generation, or checking a result that benefits from execution; answer directly when Python would not add value.",
-  "You may make at most six (6) run_python calls in one response.",
   "Call run_python with a JSON object. Each call must provide exactly one of code (non-empty inline Python) or file (an existing relative Python file path), never both. For example: {\"code\":\"print(sum([2, 3, 5]))\"}.",
   "The code/file runs in a persistent conversation workspace. File paths must stay relative to that workspace; do not use absolute paths, parent traversal, .venv, or .runs.",
   `The runtime image preinstalls these trusted packages. Use the exact pip package/import pairs shown here: ${PYTHON_RUNTIME_PACKAGE_INSTRUCTIONS}.`,
