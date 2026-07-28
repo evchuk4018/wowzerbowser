@@ -11,7 +11,7 @@ import type {
   PythonActivity,
   ReasoningActivity,
   WebActivity,
-  DocumentActivity,
+  PhaseBreakActivity,
 } from "./assistant-activity-types";
 import { DocumentEditActivity } from "./document-edit-activity";
 import { fetchChatArtifact } from "./chat-service";
@@ -24,6 +24,7 @@ export type {
   ReasoningActivity,
   WebActivity,
   DocumentActivity,
+  PhaseBreakActivity,
 } from "./assistant-activity-types";
 
 function useLiveDuration(startedAt?: number, running = false) {
@@ -151,7 +152,7 @@ function ImageDisclosure({ activity }: { activity: ImageActivity }) {
     </div>
   );
 }
-function ReasoningCard({ activity, pythonActivities, webActivities, imageActivities }: { activity: ReasoningActivity; pythonActivities: PythonActivity[]; webActivities: WebActivity[]; imageActivities: ImageActivity[] }) {
+function ReasoningCard({ activity, phaseActivities }: { activity: ReasoningActivity; phaseActivities: AssistantActivity[] }) {
   const [open, setOpen] = useState(false);
   const liveDuration = useLiveDuration(activity.startedAt, activity.status === "running");
   const duration = activity.durationMs ?? liveDuration;
@@ -165,22 +166,21 @@ function ReasoningCard({ activity, pythonActivities, webActivities, imageActivit
         onClick={() => setOpen((current) => !current)}
       >
         <span className="reasoning-chevron" aria-hidden="true">›</span>
-        <span>{activity.status === "running" ? "Thinking" : "Thought process"}</span>
-        <span className="activity-round">Round {activity.round}</span>
+        <span>{activity.summary ?? "Thinking…"}</span>
         {duration !== undefined && (
           <span className="reasoning-duration">{formatDuration(duration)}</span>
         )}
       </button>
       {open && (
         <div className="reasoning-content">
-          <div>{activity.content}</div>
-          {pythonActivities.length > 0 && (
-            <div className="reasoning-python-list">
-              {pythonActivities.map((python) => <PythonDisclosure key={python.id} activity={python} />)}
-            </div>
-          )}
-          {webActivities.map((web) => <WebDisclosure key={web.id} activity={web} />)}
-          {imageActivities.map((image) => <ImageDisclosure key={image.id} activity={image} />)}
+          {phaseActivities.map((item) => {
+            if (item.kind === "reasoning") return <div key={item.id}>{item.content}</div>;
+            if (item.kind === "python") return <div className="reasoning-python-list" key={item.id}><PythonDisclosure activity={item} /></div>;
+            if (item.kind === "web") return <WebDisclosure key={item.id} activity={item} />;
+            if (item.kind === "image") return <ImageDisclosure key={item.id} activity={item} />;
+            if (item.kind === "document") return <DocumentEditActivity key={item.id} activity={item} />;
+            return null;
+          })}
         </div>
       )}
     </section>
@@ -253,34 +253,44 @@ export function AssistantActivityTimeline({
   getAccessToken: () => Promise<string | null>;
   onOpenArtifact: (artifact: ChatArtifact) => void;
 }) {
-  const rounds = activities.reduce<Map<number, { reasoning?: ReasoningActivity; python: PythonActivity[]; web: WebActivity[]; image: ImageActivity[]; document: DocumentActivity[] }>>((grouped, activity) => {
-    const round = grouped.get(activity.round) ?? { python: [], web: [], image: [], document: [] };
-    if (activity.kind === "reasoning") round.reasoning = round.reasoning
-      ? { ...round.reasoning, content: `${round.reasoning.content}${activity.content}`, status: activity.status }
-      : activity;
-    else if (activity.kind === "python") round.python.push(activity);
-    else if (activity.kind === "web") round.web.push(activity);
-    else if (activity.kind === "image") round.image.push(activity);
-    else round.document.push(activity);
-    grouped.set(activity.round, round);
+  const phases = activities.reduce<Map<number, { activities: AssistantActivity[]; phaseBreak?: PhaseBreakActivity }>>((grouped, activity) => {
+    const phase = grouped.get(activity.phase) ?? { activities: [] };
+    phase.activities.push(activity);
+    if (activity.kind === "phase_break") phase.phaseBreak = activity;
+    grouped.set(activity.phase, phase);
     return grouped;
   }, new Map());
 
   return (
     <>
       <div className="assistant-activity-timeline">
-        {[...rounds.entries()].map(([round, group]) => {
-          const reasoning = group.reasoning ?? {
-            id: `reasoning-${round}`,
+        {[...phases.entries()].map(([phase, group]) => {
+          const reasoningItems = group.activities.filter((item): item is ReasoningActivity => item.kind === "reasoning");
+          const latestReasoning = reasoningItems.at(-1);
+          const completedDuration = reasoningItems.reduce((total, item) => total + (item.durationMs ?? 0), 0);
+          const reasoning = latestReasoning ? {
+            ...latestReasoning,
+            content: reasoningItems.map((item) => item.content).join(""),
+            startedAt: reasoningItems[0]?.startedAt,
+            ...(latestReasoning.status === "running"
+              ? { durationMs: undefined }
+              : completedDuration > 0 ? { durationMs: completedDuration } : { durationMs: undefined }),
+          } : {
+            id: `reasoning-phase-${phase}`,
             kind: "reasoning" as const,
-            round,
+            round: 1,
+            phase,
             content: "",
             status: "complete" as const,
           };
-          return <ReasoningCard key={reasoning.id} activity={reasoning} pythonActivities={group.python} webActivities={group.web} imageActivities={group.image} />;
+          return (
+            <div key={`phase-${phase}`}>
+              <ReasoningCard activity={reasoning} phaseActivities={group.activities} />
+              {group.phaseBreak?.update && <div className="message-bubble phase-progress-update">{group.phaseBreak.update}</div>}
+            </div>
+          );
         })}
       </div>
-      {activities.filter((activity): activity is DocumentActivity => activity.kind === "document").map((activity) => <DocumentEditActivity key={activity.id} activity={activity} />)}
       {content && (
         <div className="message-bubble">
           <AssistantResponse

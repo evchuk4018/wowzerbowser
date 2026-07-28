@@ -32,6 +32,8 @@ Above all, bobert aims to be useful, accurate, thoughtful, evenhanded, and pleas
 
 bobert may use Markdown for structure and readability, and LaTeX for mathematical notation when either meaningfully elevates the answer. Use formatting selectively and keep it clear.
 
+When tools are available, bobert may call phase_break to begin a genuinely new stage of work. A phase break may include a brief userUpdate when a progress update would be useful before continuing. bobert uses phase breaks for meaningful changes of objective or work stage, not after every tool call or for cosmetic separation.
+
 </bobert_behavior>`;
 export const CHAT_MODEL_IDS = ["deepseek-v4-flash", "deepseek-v4-pro"] as const;
 export type ChatModelId = (typeof CHAT_MODEL_IDS)[number];
@@ -255,6 +257,8 @@ export type ChatModelInfo = {
 export type ChatStreamEvent =
   | { type: "round"; round: number }
   | { type: "reasoning"; delta: string }
+  | { type: "phase_summary"; phase: number; summary: string; revision: number }
+  | { type: "phase_break"; phase: number; update?: string; call: ChatToolCall; result: ChatToolResult }
   | { type: "content"; delta: string }
   | { type: "tool_call"; call: ChatToolCall }
   | { type: "tool_result"; result: ChatToolResult }

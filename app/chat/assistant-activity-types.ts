@@ -5,4 +5,5 @@ export type {
   ChatWebActivity as WebActivity,
   ChatImageActivity as ImageActivity,
   ChatDocumentActivity as DocumentActivity,
+  ChatPhaseBreakActivity as PhaseBreakActivity,
 } from "../../lib/chat-history";

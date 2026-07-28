@@ -56,6 +56,8 @@ export function reduceChatStreamEvent(
       currentRound = event.round;
       break;
     case "reasoning":
+    case "phase_summary":
+    case "phase_break":
     case "tool_call":
     case "content":
       waiting = false;

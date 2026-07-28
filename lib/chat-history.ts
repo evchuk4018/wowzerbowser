@@ -14,7 +14,10 @@ export type ChatReasoningActivity = {
   id: string;
   kind: "reasoning";
   round: number;
+  phase: number;
   content: string;
+  summary?: string;
+  summaryRevision?: number;
   status: "running" | "complete";
   startedAt?: number;
   durationMs?: number;
@@ -24,6 +27,7 @@ export type ChatToolActivity = {
   id: string;
   kind: "python" | "web" | "image" | "document";
   round: number;
+  phase: number;
   call: ChatToolCall;
   result?: ChatToolResult;
   status: "running" | "completed" | "failed";
@@ -31,11 +35,23 @@ export type ChatToolActivity = {
   durationMs?: number;
 };
 
+export type ChatPhaseBreakActivity = {
+  id: string;
+  kind: "phase_break";
+  round: number;
+  phase: number;
+  nextPhase: number;
+  update?: string;
+  call: ChatToolCall;
+  result: ChatToolResult;
+  status: "completed";
+};
+
 export type ChatPythonActivity = Omit<ChatToolActivity, "kind"> & { kind: "python" };
 export type ChatWebActivity = Omit<ChatToolActivity, "kind"> & { kind: "web" };
 export type ChatImageActivity = Omit<ChatToolActivity, "kind"> & { kind: "image" };
 export type ChatDocumentActivity = Omit<ChatToolActivity, "kind"> & { kind: "document" };
-export type ChatAssistantActivity = ChatReasoningActivity | ChatPythonActivity | ChatWebActivity | ChatImageActivity | ChatDocumentActivity;
+export type ChatAssistantActivity = ChatReasoningActivity | ChatPythonActivity | ChatWebActivity | ChatImageActivity | ChatDocumentActivity | ChatPhaseBreakActivity;
 
 export type ChatHistoryMessage = {
   id: string;
@@ -54,6 +70,7 @@ export type ChatHistoryMessage = {
   jobId?: string;
   lastSequence?: number;
   traceRound?: number;
+  tracePhase?: number;
   annotations?: ChatCitation[];
   sources?: ChatSource[];
 };
@@ -86,7 +103,7 @@ export type ChatConversationSummary = {
 
 export type ChatTraceState = Pick<
   ChatHistoryMessage,
-  "content" | "reasoning" | "activities" | "artifacts" | "lastSequence" | "traceRound"
+  "content" | "reasoning" | "activities" | "artifacts" | "lastSequence" | "traceRound" | "tracePhase"
 >;
 
 const finishRunningActivities = (
@@ -106,6 +123,7 @@ function activityForTool(call: ChatToolCall, round: number, startedAt: number): 
   const base = {
     id: call.id,
     round,
+    phase: 1,
     call,
     status: "running",
     startedAt,
@@ -137,13 +155,15 @@ export function applyChatStreamEvent(
     const activities = [...(next.activities ?? [])];
     const latest = activities.at(-1);
     const round = next.traceRound ?? latest?.round ?? 1;
-    if (latest?.kind === "reasoning" && latest.round === round && latest.status === "running") {
+    const phase = next.tracePhase ?? 1;
+    if (latest?.kind === "reasoning" && latest.phase === phase && latest.status === "running") {
       activities[activities.length - 1] = { ...latest, content: `${latest.content}${event.delta}` };
     } else {
       activities.push({
         id: `reasoning-${sequence}`,
         kind: "reasoning",
         round,
+        phase,
         content: event.delta,
         status: "running",
         startedAt: now,
@@ -151,14 +171,37 @@ export function applyChatStreamEvent(
     }
     next.reasoning = `${next.reasoning ?? ""}${event.delta}`;
     next.activities = activities;
-  } else if (event.type === "tool_call") {
+  } else if (event.type === "phase_summary") {
+    next.activities = next.activities?.map((activity) =>
+      activity.kind === "reasoning" && activity.phase === event.phase && (activity.summaryRevision ?? -1) <= event.revision
+        ? { ...activity, summary: event.summary, summaryRevision: event.revision }
+        : activity,
+    );
+  } else if (event.type === "phase_break") {
     next.activities = [
       ...(finishRunningActivities(next.activities, false, now) ?? []),
-      activityForTool(event.call, next.traceRound ?? 1, now),
+      {
+        id: event.call.id,
+        kind: "phase_break",
+        round: next.traceRound ?? 1,
+        phase: Math.max(1, event.phase - 1),
+        nextPhase: event.phase,
+        ...(event.update ? { update: event.update } : {}),
+        call: event.call,
+        result: event.result,
+        status: "completed",
+      },
+    ];
+    next.tracePhase = event.phase;
+  } else if (event.type === "tool_call") {
+    const activity = activityForTool(event.call, next.traceRound ?? 1, now);
+    next.activities = [
+      ...(finishRunningActivities(next.activities, false, now) ?? []),
+      { ...activity, phase: next.tracePhase ?? 1 },
     ];
   } else if (event.type === "tool_result") {
     next.activities = next.activities?.map((activity) =>
-      activity.kind !== "reasoning" && activity.call.id === event.result.id
+      activity.kind !== "reasoning" && activity.kind !== "phase_break" && activity.call.id === event.result.id
         ? {
             ...activity,
             result: event.result,

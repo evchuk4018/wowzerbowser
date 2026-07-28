@@ -663,6 +663,24 @@ test("transcript mapper attaches reasoning to a final non-tool round", () => {
   assert.deepEqual(mapped?.rounds, [{ content: "No execution was needed.", reasoning: "I can answer directly." }]);
 });
 
+test("transcript mapper preserves hidden phase-break tool replay", () => {
+  const call = { id: "phase-1", name: "phase_break", arguments: '{"userUpdate":"Starting validation."}' };
+  const result = { id: "phase-1", name: "phase_break", ok: true, stdout: '{"phase":2}', stderr: "" };
+  const mapped = toChatMessageInput({
+    role: "assistant",
+    content: "Validation passed.",
+    activities: [
+      { id: "reasoning-1", kind: "reasoning", round: 1, phase: 1, content: "Planning.", status: "complete" },
+      { id: "phase-1", kind: "phase_break", round: 1, phase: 1, nextPhase: 2, update: "Starting validation.", call, result, status: "completed" },
+      { id: "reasoning-2", kind: "reasoning", round: 2, phase: 2, content: "Validating.", status: "complete" },
+    ],
+  });
+  assert.equal(mapped?.rounds?.[0]?.toolCalls?.[0]?.name, "phase_break");
+  assert.deepEqual(mapped?.rounds?.[0]?.toolCalls?.[0]?.result, result);
+  assert.equal(mapped?.rounds?.[1]?.reasoning, "Validating.");
+  assert.equal(mapped?.rounds?.[1]?.content, "Validation passed.");
+});
+
 test("transcript mapper preserves multiple calls and synthesizes interrupted results", () => {
   const mapped = toChatMessageInput({
     role: "assistant",

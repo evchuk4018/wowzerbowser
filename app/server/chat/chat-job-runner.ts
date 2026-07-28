@@ -102,6 +102,21 @@ export async function runChatJob(
           source: providerUsage ? "exact" : "estimated",
         });
       },
+      async ({ provider, model, usage: summaryUsage, phase, revision }) => {
+        if (!summaryUsage) return;
+        await recordUsage({
+          ownerId,
+          provider,
+          model,
+          requestKind: "reasoning_summary",
+          requestId: jobId,
+          round: phase * 100_000 + revision,
+          usage: summaryUsage,
+          source: "exact",
+          conversationId,
+          jobId,
+        });
+      },
     );
     await eventWriter.drain();
     if (!controller.signal.aborted) {

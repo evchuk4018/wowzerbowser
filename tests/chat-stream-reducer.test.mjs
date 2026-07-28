@@ -83,3 +83,27 @@ test("cancelled events finish the message without an error", () => {
   assert.equal(state.message.status, "cancelled");
   assert.equal(state.waiting, false);
 });
+
+test("provider rounds stay in one phase until an explicit phase break", () => {
+  let state = createChatStreamState(baseMessage);
+  state = reduceChatStreamEvent(state, event(1, { type: "round", round: 1 }));
+  state = reduceChatStreamEvent(state, event(2, { type: "reasoning", delta: "First phase. " }));
+  state = reduceChatStreamEvent(state, event(3, { type: "round", round: 2 }));
+  state = reduceChatStreamEvent(state, event(4, { type: "reasoning", delta: "Still first phase." }));
+  state = reduceChatStreamEvent(state, event(5, {
+    type: "phase_summary", phase: 1, summary: "Planning the first approach", revision: 2,
+  }));
+  const call = { id: "phase-1", name: "phase_break", arguments: '{"userUpdate":"I found a better route."}' };
+  const result = { id: "phase-1", name: "phase_break", ok: true, stdout: '{"phase":2}', stderr: "" };
+  state = reduceChatStreamEvent(state, event(6, {
+    type: "phase_break", phase: 2, update: "I found a better route.", call, result,
+  }));
+  state = reduceChatStreamEvent(state, event(7, { type: "round", round: 3 }));
+  state = reduceChatStreamEvent(state, event(8, { type: "reasoning", delta: "Second phase." }));
+
+  const reasoning = state.message.activities?.filter(({ kind }) => kind === "reasoning");
+  assert.deepEqual(reasoning?.map(({ phase }) => phase), [1, 1, 2]);
+  assert.equal(reasoning?.[0]?.summary, "Planning the first approach");
+  assert.equal(state.message.activities?.find(({ kind }) => kind === "phase_break")?.update, "I found a better route.");
+  assert.equal(state.message.tracePhase, 2);
+});

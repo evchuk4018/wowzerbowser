@@ -589,7 +589,7 @@ test("keeps Python execution isolated, persistent, bounded, and server-only", as
   assert.match(activity, /filename: "script\.py"/);
   assert.match(activity, /className="python-source"/);
   assert.match(activity, /className="python-output"/);
-  assert.match(activity, /rounds = activities\.reduce/);
+  assert.match(activity, /phases = activities\.reduce/);
   assert.doesNotMatch(activity, /JSON\.stringify\(activity\.call, null, 2\)/);
   assert.match(envExample, /^MODAL_TOKEN_ID=$/m);
   assert.match(envExample, /^MODAL_TOKEN_SECRET=$/m);
@@ -761,8 +761,8 @@ test("renders web activities inside thought-process disclosures", async () => {
     readFile(new URL("../lib/chat-history.ts", import.meta.url), "utf8"),
   ]);
   assert.match(activity, /WebDisclosure/);
-  assert.match(activity, /webActivities\.map/);
-  assert.match(activity, /Thought process/);
+  assert.match(activity, /phaseActivities\.map/);
+  assert.match(activity, /activity\.summary \?\? "Thinking…"/);
   assert.match(activity, /web\.results/);
   assert.match(activity, /web\.markdown/);
   assert.match(`${stream}\n${history}`, /kind: call\.name === "run_python" \? "python" : "web"/);

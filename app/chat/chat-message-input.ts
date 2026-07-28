@@ -53,6 +53,14 @@ export function toChatMessageInput(
       continue;
     }
 
+    if (activity.kind === "phase_break") {
+      round.toolCalls = [
+        ...(round.toolCalls ?? []),
+        { ...activity.call, result: activity.result },
+      ];
+      continue;
+    }
+
     const result =
       activity.result ?? {
         id: activity.call.id,

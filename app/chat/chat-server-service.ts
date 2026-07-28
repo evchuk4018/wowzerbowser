@@ -24,6 +24,9 @@ import { PDF_EDIT_TOOL_INSTRUCTIONS } from "../server/agent/pdf-edit-tool-instru
 import { ingestDocx, ingestPdf } from "../server/chat/chat-document-service";
 import { DOCX_CONTENT_TYPE, documentContext } from "../../lib/chat-document";
 import { IncrementalCitationFilter, parseCitationMarkup, validCitationSources, type ChatSource } from "../../lib/chat-citations";
+import { PHASE_BREAK_INSTRUCTIONS } from "../server/agent/phase-break-instructions";
+import { executePhaseBreak, PHASE_BREAK_TOOL_DEFINITION, PHASE_BREAK_TOOL_NAME } from "../server/agent/phase-break-tool";
+import { ReasoningTitleCoordinator, type ReasoningTitleUsage } from "../server/chat/reasoning-title-service";
 
 const MAX_RESPONSE_MS = 240_000;
 
@@ -32,6 +35,8 @@ export type ChatRoundUsage = {
   usage: ChatUsage | null;
   estimatedUsage: ChatUsage;
 };
+
+export type ChatSummaryUsage = ReasoningTitleUsage;
 
 function stableConversationId(request: ChatRequest): string {
   if (request.conversationId) return request.conversationId;
@@ -47,6 +52,7 @@ export async function generateChatResponse(
   signal: AbortSignal,
   persistEvent: (event: ChatStreamEvent) => Promise<void>,
   persistUsage?: (usage: ChatRoundUsage) => Promise<void>,
+  persistSummaryUsage?: (usage: ChatSummaryUsage) => Promise<void>,
 ): Promise<void> {
   const responseDeadlineAt = Date.now() + MAX_RESPONSE_MS;
   const responseId = chatRequest.jobId;
@@ -71,7 +77,8 @@ export async function generateChatResponse(
   const imageTools = availableImageTools(allowedImageIds.length > 0);
   const pdfEditTools = availablePdfEditTools([...authoritativePdfs.values()].some((document) => document.contentType === "application/pdf"));
   const allowedProjectIds = new Set([...authoritativePdfs.values()].map((document) => document.projectId).filter((projectId): projectId is string => Boolean(projectId)));
-  const baseToolDefinitions = [...pythonTools, ...imageTools, ...webTools, ...pdfEditTools];
+  const phaseTools = chatRequest.thinking ? [PHASE_BREAK_TOOL_DEFINITION] : [];
+  const baseToolDefinitions = [...pythonTools, ...imageTools, ...webTools, ...pdfEditTools, ...phaseTools];
   const imageToolAdvertised = imageTools.some((tool) => tool.function.name === INSPECT_IMAGE_TOOL_NAME);
 
   const enqueue = async (event: ChatStreamEvent) => {
@@ -88,9 +95,15 @@ export async function generateChatResponse(
 
       const deadline = AbortSignal.timeout(Math.max(0, responseDeadlineAt - Date.now()));
       const roundSignal = AbortSignal.any([signal, deadline]);
+      const titleCoordinator = new ReasoningTitleCoordinator({
+        signal: roundSignal,
+        emit: enqueue,
+        onUsage: persistSummaryUsage,
+      });
       const replayRounds: ChatAssistantRound[] = [];
       const roundUsages: Array<ReturnType<typeof latestNonNullUsage>> = [];
       let executor: ModalPythonExecutor | null = null;
+      let currentPhase = 1;
       const sourceCatalog = new Map<string, ChatSource>();
 
       try {
@@ -101,6 +114,7 @@ export async function generateChatResponse(
             ...runPythonInstructionsFor(Boolean(pythonTools.length)),
             ...webToolInstructionsFor(Boolean(webTools.length)),
             ...(pdfEditTools.length ? PDF_EDIT_TOOL_INSTRUCTIONS : []),
+            ...(phaseTools.length ? [PHASE_BREAK_INSTRUCTIONS] : []),
           ];
           const reasoningParts: string[] = [];
           const contentParts: string[] = [];
@@ -123,6 +137,7 @@ export async function generateChatResponse(
             )) {
               if (event.type === "reasoning") {
                 reasoningParts.push(event.delta);
+                titleCoordinator.append(event.delta);
                 await enqueue(event);
               } else if (event.type === "content") {
                 contentParts.push(event.delta);
@@ -168,6 +183,20 @@ export async function generateChatResponse(
             break;
           }
           for (const call of calls) {
+            if (call.name === PHASE_BREAK_TOOL_NAME) {
+              currentPhase += 1;
+              await titleCoordinator.breakPhase(currentPhase);
+              const phaseBreak = executePhaseBreak(call, currentPhase);
+              call.result = phaseBreak.result;
+              await enqueue({
+                type: "phase_break",
+                phase: currentPhase,
+                ...(phaseBreak.update ? { update: phaseBreak.update } : {}),
+                call,
+                result: phaseBreak.result,
+              });
+              continue;
+            }
             await enqueue({ type: "tool_call", call });
             let result: ChatToolResult;
             if (call.name === "run_python") {
@@ -224,6 +253,8 @@ export async function generateChatResponse(
           await enqueue({ type: "error", message });
         }
       } finally {
+        if (signal.aborted) titleCoordinator.cancel();
+        else await titleCoordinator.finish();
         await executor?.close().catch(() => undefined);
         if (!signal.aborted) {
           await enqueue({ type: "done", usage: sumRoundUsage(roundUsages) });

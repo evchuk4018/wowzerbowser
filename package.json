@@ -7,6 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
+    "test:reasoning-titles": "tsx --conditions=react-server --test tests/reasoning-title-service.test.mjs",
     "build": "next build",
     "prebuild": "npm run verify:pdf-runtime",
     "postbuild": "node scripts/verify-pdf-runtime.mjs --trace",

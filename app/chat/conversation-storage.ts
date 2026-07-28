@@ -174,6 +174,7 @@ function normalizeActivity(value: unknown, loadedAt: number, freezeRunning: bool
   if (!candidate) return null;
   const id = nonEmptyString(candidate.id);
   const round = finiteNumber(candidate.round);
+  const phase = finiteNumber(candidate.phase) ?? 1;
   const status = typeof candidate.status === "string" && ACTIVITY_STATUSES.has(candidate.status)
     ? candidate.status
     : null;
@@ -187,9 +188,13 @@ function normalizeActivity(value: unknown, loadedAt: number, freezeRunning: bool
       id,
       kind: "reasoning",
       round,
+      phase,
       content: candidate.content,
       status,
     };
+    if (typeof candidate.summary === "string" && candidate.summary.trim()) activity.summary = candidate.summary.trim();
+    const summaryRevision = finiteNumber(candidate.summaryRevision);
+    if (summaryRevision !== undefined) activity.summaryRevision = summaryRevision;
     if (startedAt !== undefined) activity.startedAt = startedAt;
     if (durationMs !== undefined) activity.durationMs = durationMs;
     if (freezeRunning && activity.status === "running") {
@@ -199,13 +204,32 @@ function normalizeActivity(value: unknown, loadedAt: number, freezeRunning: bool
     return activity;
   }
 
-  if (candidate.kind !== "python" && candidate.kind !== "web" && candidate.kind !== "image") return null;
+  if (candidate.kind === "phase_break") {
+    const call = normalizeToolCall(candidate.call);
+    const result = normalizeToolResult(candidate.result);
+    const nextPhase = finiteNumber(candidate.nextPhase);
+    if (!call || !result || nextPhase === undefined) return null;
+    return {
+      id,
+      kind: "phase_break",
+      round,
+      phase,
+      nextPhase,
+      ...(typeof candidate.update === "string" && candidate.update.trim() ? { update: candidate.update.trim() } : {}),
+      call,
+      result,
+      status: "completed",
+    };
+  }
+
+  if (candidate.kind !== "python" && candidate.kind !== "web" && candidate.kind !== "image" && candidate.kind !== "document") return null;
   const call = normalizeToolCall(candidate.call);
   if (!call || (status !== "running" && status !== "completed" && status !== "failed")) return null;
-  const activity: Extract<ChatAssistantActivity, { kind: "python" | "web" | "image" }> = {
+  const activity: Extract<ChatAssistantActivity, { kind: "python" | "web" | "image" | "document" }> = {
     id,
     kind: candidate.kind,
     round,
+    phase,
     call,
     status,
   };
@@ -254,6 +278,8 @@ export function normalizeStoredMessage(
   if (lastSequence !== undefined && lastSequence >= 0) message.lastSequence = lastSequence;
   const traceRound = finiteNumber(candidate.traceRound);
   if (traceRound !== undefined && traceRound >= 0) message.traceRound = traceRound;
+  const tracePhase = finiteNumber(candidate.tracePhase);
+  if (tracePhase !== undefined && tracePhase >= 1) message.tracePhase = tracePhase;
   if (Array.isArray(candidate.annotations)) message.annotations = candidate.annotations as Message["annotations"];
   if (Array.isArray(candidate.sources)) message.sources = candidate.sources as Message["sources"];
   if (Array.isArray(candidate.attachments)) {

@@ -8,6 +8,7 @@ import {
   finalizeChatHistoryMessage,
   type ChatConversation,
   type ChatConversationSummary,
+  type ChatAssistantActivity,
   type ChatHistoryMessage,
   type ChatMessageStatus,
 } from "../../../lib/chat-history";
@@ -59,6 +60,11 @@ function arrayValue<T>(value: unknown): T[] {
 
 function messageFromRow(row: MessageRow): ChatHistoryMessage {
   const attachments = normalizeChatImageAttachments(row.attachments);
+  const activities = arrayValue<ChatAssistantActivity>(row.activities);
+  const tracePhase = activities.reduce((latest, activity) => Math.max(
+    latest,
+    activity.kind === "phase_break" ? activity.nextPhase : activity.phase ?? 1,
+  ), 1);
   return {
     id: row.message_id,
     role: row.role,
@@ -66,7 +72,7 @@ function messageFromRow(row: MessageRow): ChatHistoryMessage {
     ...(row.reasoning === null ? {} : { reasoning: row.reasoning }),
     ...(attachments.length ? { attachments } : {}),
     ...(Array.isArray(row.documents) && row.documents.length ? { documents: row.documents as ChatDocumentAttachment[] } : {}),
-    activities: arrayValue(row.activities),
+    activities,
     artifacts: arrayValue(row.artifacts),
     ...(row.thinking_enabled === null ? {} : { thinkingEnabled: row.thinking_enabled }),
     ...(row.thinking_duration_ms === null ? {} : { thinkingDurationMs: row.thinking_duration_ms }),
@@ -75,6 +81,7 @@ function messageFromRow(row: MessageRow): ChatHistoryMessage {
     ...(row.job_id === null ? {} : { jobId: row.job_id }),
     lastSequence: Number(row.last_sequence ?? 0),
     ...(row.trace_round === null ? {} : { traceRound: row.trace_round }),
+    tracePhase,
     ...(Array.isArray(row.annotations) && row.annotations.length ? { annotations: row.annotations } : {}),
     ...(Array.isArray(row.sources) && row.sources.length ? { sources: row.sources } : {}),
   };

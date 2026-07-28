@@ -9,6 +9,7 @@ export type UsageSource = (typeof USAGE_SOURCES)[number];
 export const USAGE_REQUEST_KINDS = [
   "chat",
   "title",
+  "reasoning_summary",
   "image_text_analysis",
   "image_visual_analysis",
   "image_followup",
