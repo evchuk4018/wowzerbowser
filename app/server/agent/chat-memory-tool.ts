@@ -2,6 +2,7 @@ import "server-only";
 
 import type { ChatToolCall, ChatToolResult, ChatUsage } from "../../../lib/chat-protocol";
 import type { ChatConversation, ChatHistoryMessage } from "../../../lib/chat-history";
+import { getActiveConversationTurns } from "../../../lib/chat-history";
 import { searchChatConversations, getChatConversation } from "../chat/chat-history-store";
 import { recallChatWithDeepSeek } from "../../providers/deepseek/deepseek-chat-recall-adapter";
 import { CHAT_MEMORY_TOOL_DEFINITIONS, RECALL_CHATS_TOOL_NAME, SEARCH_CHATS_TOOL_NAME } from "./chat-memory-tool-manifest";
@@ -16,8 +17,8 @@ const failure = (call: ChatToolCall, message: string): ChatToolResult => ({ id: 
 function args(call: ChatToolCall): Record<string, unknown> { try { const value = JSON.parse(call.arguments); if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>; } catch {} throw new Error("Invalid chat tool arguments."); }
 
 function activeMessages(conversation: ChatConversation): ChatHistoryMessage[] {
-  return conversation.turns.flatMap((turn) => {
-    const version = turn.versions[turn.activeVersion] ?? turn.versions.at(-1);
+  return getActiveConversationTurns(conversation).flatMap((turn) => {
+    const version = turn.versions[turn.activeVersion];
     return version ? [version.user, version.assistant] : [];
   });
 }

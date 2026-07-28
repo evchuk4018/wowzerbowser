@@ -24,6 +24,7 @@ import {
   type ConversationAction,
   type ConversationState,
 } from "./conversation-reducer";
+import { getActiveConversationTurns } from "../../lib/chat-history";
 import { makeId } from "./conversation-defaults";
 import type { ChatSettings, Conversation, Message } from "./conversation-types";
 import {
@@ -144,9 +145,11 @@ export function buildChatGenerationRequest(input: {
   attachments?: UploadedChatImage[];
   documents?: ChatDocumentAttachment[];
 }): ChatRequest {
-  const contextTurns = input.editingTurnIndex >= 0
-    ? input.conversation.turns.slice(0, input.editingTurnIndex)
-    : input.conversation.turns;
+  const activeTurns = getActiveConversationTurns(input.conversation);
+  const targetTurnIndex = input.editingTurnIndex >= 0
+    ? input.editingTurnIndex
+    : activeTurns.length;
+  const contextTurns = activeTurns.slice(0, targetTurnIndex);
   const userMessage = {
     id: input.userMessageId,
     role: "user",
@@ -162,9 +165,7 @@ export function buildChatGenerationRequest(input: {
     .concat(userMessage)
     .map(toChatMessageInput)
     .filter((message): message is ChatMessageInput => message !== null);
-  const versionIndex = input.editingTurnIndex >= 0
-    ? input.conversation.turns[input.editingTurnIndex]?.versions.length ?? 0
-    : 0;
+  const versionIndex = input.conversation.turns[targetTurnIndex]?.versions.length ?? 0;
   return {
     messages: requestMessages,
     systemPrompt: input.settings.systemPrompt,
@@ -180,7 +181,7 @@ export function buildChatGenerationRequest(input: {
       versionId: input.versionId,
       userMessageId: input.userMessageId,
       assistantMessageId: input.assistantMessageId,
-      turnIndex: input.editingTurnIndex >= 0 ? input.editingTurnIndex : input.conversation.turns.length,
+      turnIndex: targetTurnIndex,
       versionIndex,
     },
   };
@@ -266,8 +267,13 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     const editingTurnIndex = editingTurnId
       ? conversation.turns.findIndex((turn) => turn.id === editingTurnId)
       : -1;
-    const turnId = editingTurnIndex >= 0 ? conversation.turns[editingTurnIndex].id : makeId();
+    const activeTurns = getActiveConversationTurns(conversation);
+    const targetTurnIndex = editingTurnIndex >= 0 ? editingTurnIndex : activeTurns.length;
+    const existingTargetTurn = conversation.turns[targetTurnIndex];
+    const turnId = existingTargetTurn?.id ?? makeId();
     const versionId = makeId();
+    const parentVersionId = activeTurns[targetTurnIndex - 1]
+      ?.versions[activeTurns[targetTurnIndex - 1].activeVersion]?.id ?? null;
     const imageContext = pendingImages[0]?.uploadContext?.conversationId === conversation.id
       ? pendingImages[0].uploadContext
       : undefined;
@@ -355,12 +361,17 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
       lastSequence: 0,
     };
 
-    if (editingTurnIndex >= 0) {
+    if (existingTargetTurn) {
       input.dispatch({
         type: "APPEND_TURN_VERSION",
         conversationId: conversation.id,
         turnId,
-        version: { id: versionId, user: userMessage, assistant: assistantMessage },
+        version: {
+          id: versionId,
+          user: userMessage,
+          assistant: assistantMessage,
+          parentVersionId,
+        },
       });
     } else {
       input.dispatch({
@@ -368,7 +379,12 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         conversationId: conversation.id,
         turn: {
           id: turnId,
-          versions: [{ id: versionId, user: userMessage, assistant: assistantMessage }],
+          versions: [{
+            id: versionId,
+            user: userMessage,
+            assistant: assistantMessage,
+            parentVersionId,
+          }],
           activeVersion: 0,
         },
       });
@@ -428,7 +444,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     try {
       const accessToken = await input.getAccessToken();
       if (!accessToken) throw new Error("Your session expired. Please sign in again.");
-      const shouldGenerateTitle = conversation.turns.length === 0;
+      const shouldGenerateTitle = activeTurns.length === 0;
       if (
         controller.signal.aborted ||
         activeRequestsRef.current[conversation.id]?.messageId !== assistantMessage.id

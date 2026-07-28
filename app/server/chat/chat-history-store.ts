@@ -126,6 +126,71 @@ async function insertIfAbsent(tableName: "chat_conversations" | "chat_turns" | "
   if (error && error.code !== "23505") throw error;
 }
 
+/**
+ * Backfill lineage for old rows while the active linear path is still known.
+ * This keeps pre-lineage conversations compatible when the first branch is
+ * selected or a new response is generated from them.
+ */
+async function materializePersistedLineage(
+  ownerId: string,
+  conversationId: string,
+  targetPosition: number,
+): Promise<string | null> {
+  const db = client();
+  const [turnsResult, versionsResult] = await Promise.all([
+    db.from("chat_turns")
+      .select("turn_id,position,active_version")
+      .eq("owner_id", ownerId)
+      .eq("conversation_id", conversationId)
+      .order("position"),
+    db.from("chat_message_versions")
+      .select("turn_id,version_id,version_index,parent_version_id")
+      .eq("owner_id", ownerId)
+      .eq("conversation_id", conversationId),
+  ]);
+  if (turnsResult.error) throw turnsResult.error;
+  if (versionsResult.error) throw versionsResult.error;
+
+  const versionsByTurn = new Map<string, Array<{ id: string; index: number; parentVersionId?: string }>>();
+  for (const row of versionsResult.data ?? []) {
+    const versions = versionsByTurn.get(row.turn_id) ?? [];
+    versions.push({
+      id: row.version_id,
+      index: Number(row.version_index),
+      ...(typeof row.parent_version_id === "string" ? { parentVersionId: row.parent_version_id } : {}),
+    });
+    versionsByTurn.set(row.turn_id, versions);
+  }
+
+  let parentVersionId: string | null = null;
+  let targetParentVersionId: string | null = null;
+  let targetSeen = false;
+  for (const turn of turnsResult.data ?? []) {
+    const position = Number(turn.position);
+    const active = versionsByTurn.get(turn.turn_id)?.find(
+      (version) => version.index === Number(turn.active_version),
+    );
+    if (position < targetPosition) {
+      parentVersionId = active?.id ?? parentVersionId;
+      continue;
+    }
+    if (!targetSeen) {
+      targetParentVersionId = parentVersionId;
+      targetSeen = true;
+    }
+    const { error } = await db
+      .from("chat_message_versions")
+      .update({ parent_version_id: parentVersionId })
+      .eq("owner_id", ownerId)
+      .eq("conversation_id", conversationId)
+      .eq("turn_id", turn.turn_id)
+      .is("parent_version_id", null);
+    if (error) throw error;
+    parentVersionId = active?.id ?? parentVersionId;
+  }
+  return targetSeen ? targetParentVersionId : parentVersionId;
+}
+
 function requestImageIds(request: ChatRequest): string[] {
   const lastMessage = request.messages.at(-1);
   return [...new Set(lastMessage?.attachments?.map((attachment) => attachment.id) ?? [])];
@@ -211,7 +276,7 @@ async function activeImageMessages(ownerId: string, conversationId: string): Pro
       .eq("conversation_id", conversationId)
       .order("position"),
     db.from("chat_message_versions")
-      .select("turn_id,version_id,version_index")
+      .select("turn_id,version_id,version_index,parent_version_id")
       .eq("owner_id", ownerId)
       .eq("conversation_id", conversationId),
     db.from("chat_messages")
@@ -222,10 +287,14 @@ async function activeImageMessages(ownerId: string, conversationId: string): Pro
   if (turnsResult.error || versionsResult.error || messagesResult.error) {
     throw new ChatImageError("storage", "Chat image metadata is unavailable.", 503);
   }
-  const versionsByTurn = new Map<string, Array<{ id: string; index: number }>>();
+  const versionsByTurn = new Map<string, Array<{ id: string; index: number; parentVersionId?: string }>>();
   for (const row of versionsResult.data ?? []) {
     const versions = versionsByTurn.get(row.turn_id) ?? [];
-    versions.push({ id: row.version_id, index: Number(row.version_index) });
+    versions.push({
+      id: row.version_id,
+      index: Number(row.version_index),
+      ...(typeof row.parent_version_id === "string" ? { parentVersionId: row.parent_version_id } : {}),
+    });
     versionsByTurn.set(row.turn_id, versions);
   }
   const messages = (messagesResult.data ?? []) as Array<{
@@ -237,22 +306,33 @@ async function activeImageMessages(ownerId: string, conversationId: string): Pro
     job_id: string | null;
     attachments: unknown;
   }>;
-  return (turnsResult.data ?? []).flatMap((turn) => {
-    const version = versionsByTurn.get(turn.turn_id)?.find(({ index }) => index === Number(turn.active_version));
-    if (!version) return [];
+  const hasLineage = [...versionsByTurn.values()].some((versions) =>
+    versions.some((version) => typeof version.parentVersionId === "string"),
+  );
+  let parentVersionId: string | null = null;
+  const activeMessages: ActiveImageMessage[] = [];
+  for (const turn of turnsResult.data ?? []) {
+    const candidates = versionsByTurn.get(turn.turn_id)?.filter((version) =>
+      !hasLineage || (version.parentVersionId ?? null) === parentVersionId,
+    ) ?? [];
+    if (!candidates.length) break;
+    const version = candidates.find(({ index }) => index === Number(turn.active_version)) ?? candidates.at(-1);
+    if (!version) break;
     const pair = messages.filter((message) => message.turn_id === turn.turn_id && message.version_id === version.id);
     const user = pair.find((message) => message.role === "user");
     const assistant = pair.find((message) => message.role === "assistant");
-    if (!user || !assistant) return [];
-    return [{
+    if (!user || !assistant) break;
+    activeMessages.push({
       turnId: turn.turn_id,
       versionId: version.id,
       position: Number(turn.position),
       userMessageId: user.message_id,
       jobId: assistant.job_id,
       attachments: normalizeChatImageAttachments(user.attachments),
-    }];
-  });
+    });
+    parentVersionId = version.id;
+  }
+  return activeMessages;
 }
 
 export async function getAuthoritativeChatImageIdsForRequest(ownerId: string, request: ChatRequest): Promise<string[]> {
@@ -383,6 +463,11 @@ export async function ensureChatSubmission(ownerId: string, request: ChatRequest
   /* Client attachment descriptors are only IDs at this boundary; all metadata comes from uploads. */
 
   const now = new Date().toISOString();
+  const parentVersionId = await materializePersistedLineage(
+    ownerId,
+    conversationId,
+    persistence.turnIndex,
+  );
   await insertIfAbsent("chat_conversations", {
     owner_id: ownerId,
     conversation_id: conversationId,
@@ -403,6 +488,7 @@ export async function ensureChatSubmission(ownerId: string, request: ChatRequest
     turn_id: persistence.turnId,
     version_id: persistence.versionId,
     version_index: persistence.versionIndex,
+    parent_version_id: parentVersionId,
   });
 
   const userMessage: ChatHistoryMessage = {
@@ -530,7 +616,7 @@ export async function getChatConversation(ownerId: string, conversationId: strin
   const [conversationResult, turnsResult, versionsResult, messagesResult] = await Promise.all([
     db.from("chat_conversations").select("conversation_id,title").eq("owner_id", ownerId).eq("conversation_id", conversationId).maybeSingle(),
     db.from("chat_turns").select("turn_id,position,active_version").eq("owner_id", ownerId).eq("conversation_id", conversationId).order("position"),
-    db.from("chat_message_versions").select("turn_id,version_id,version_index").eq("owner_id", ownerId).eq("conversation_id", conversationId).order("version_index"),
+    db.from("chat_message_versions").select("turn_id,version_id,version_index,parent_version_id").eq("owner_id", ownerId).eq("conversation_id", conversationId).order("version_index"),
     db.from("chat_messages").select("*").eq("owner_id", ownerId).eq("conversation_id", conversationId),
   ]);
   if (conversationResult.error) throw conversationResult.error;
@@ -581,10 +667,14 @@ export async function getChatConversation(ownerId: string, conversationId: strin
     pair[row.role] = messageFromRow(row);
     messagesByVersion.set(row.version_id, pair);
   }
-  const versionsByTurn = new Map<string, Array<{ id: string; index: number }>>();
+  const versionsByTurn = new Map<string, Array<{ id: string; index: number; parentVersionId?: string }>>();
   for (const row of versionsResult.data ?? []) {
     const versions = versionsByTurn.get(row.turn_id) ?? [];
-    versions.push({ id: row.version_id, index: row.version_index });
+    versions.push({
+      id: row.version_id,
+      index: row.version_index,
+      ...(typeof row.parent_version_id === "string" ? { parentVersionId: row.parent_version_id } : {}),
+    });
     versionsByTurn.set(row.turn_id, versions);
   }
   return {
@@ -595,7 +685,14 @@ export async function getChatConversation(ownerId: string, conversationId: strin
       activeVersion: turn.active_version,
       versions: (versionsByTurn.get(turn.turn_id) ?? []).sort((left, right) => left.index - right.index).flatMap((version) => {
         const pair = messagesByVersion.get(version.id);
-        return pair?.user && pair.assistant ? [{ id: version.id, user: pair.user, assistant: pair.assistant }] : [];
+        return pair?.user && pair.assistant ? [{
+          id: version.id,
+          user: pair.user,
+          assistant: pair.assistant,
+          ...(version.parentVersionId
+            ? { parentVersionId: version.parentVersionId }
+            : {}),
+        }] : [];
       }),
     })),
   };
@@ -630,6 +727,16 @@ export async function updateChatActiveVersion(ownerId: string, conversationId: s
     .maybeSingle();
   if (versionError) throw versionError;
   if (!version) throw new Error("Conversation version not found.");
+  const { data: turn, error: turnReadError } = await client()
+    .from("chat_turns")
+    .select("position")
+    .eq("owner_id", ownerId)
+    .eq("conversation_id", conversationId)
+    .eq("turn_id", turnId)
+    .maybeSingle();
+  if (turnReadError) throw turnReadError;
+  if (!turn) throw new Error("Conversation turn not found.");
+  await materializePersistedLineage(ownerId, conversationId, Number(turn.position));
   const { error } = await client()
     .from("chat_turns")
     .update({ active_version: version.version_index, updated_at: new Date().toISOString() })

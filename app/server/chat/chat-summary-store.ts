@@ -343,7 +343,7 @@ export async function listActiveCompletedChatInteractions(
       .eq("conversation_id", conversationId)
       .order("position", { ascending: true }),
     db.from("chat_message_versions")
-      .select("turn_id,version_id,version_index")
+      .select("turn_id,version_id,version_index,parent_version_id")
       .eq("owner_id", ownerId)
       .eq("conversation_id", conversationId),
     db.from("chat_messages")
@@ -355,10 +355,14 @@ export async function listActiveCompletedChatInteractions(
   if (versionsResult.error) throw versionsResult.error;
   if (messagesResult.error) throw messagesResult.error;
 
-  const versionsByTurn = new Map<string, Array<{ id: string; index: number }>>();
+  const versionsByTurn = new Map<string, Array<{ id: string; index: number; parentVersionId?: string }>>();
   for (const row of versionsResult.data ?? []) {
     const versions = versionsByTurn.get(row.turn_id) ?? [];
-    versions.push({ id: row.version_id, index: Number(row.version_index) });
+    versions.push({
+      id: row.version_id,
+      index: Number(row.version_index),
+      ...(typeof row.parent_version_id === "string" ? { parentVersionId: row.parent_version_id } : {}),
+    });
     versionsByTurn.set(row.turn_id, versions);
   }
   const messages = (messagesResult.data ?? []) as Array<{
@@ -369,19 +373,30 @@ export async function listActiveCompletedChatInteractions(
     status: string | null;
   }>;
 
-  return (turnsResult.data ?? []).flatMap((turn) => {
-    const version = versionsByTurn.get(turn.turn_id)?.find(({ index }) => index === Number(turn.active_version));
-    if (!version) return [];
+  const hasLineage = [...versionsByTurn.values()].some((versions) =>
+    versions.some((version) => typeof version.parentVersionId === "string"),
+  );
+  const interactions: Array<ChatSummaryInteraction & { turnId: string; versionId: string; position: number }> = [];
+  let parentVersionId: string | null = null;
+  for (const turn of turnsResult.data ?? []) {
+    const candidates = versionsByTurn.get(turn.turn_id)?.filter((version) =>
+      !hasLineage || (version.parentVersionId ?? null) === parentVersionId,
+    ) ?? [];
+    if (!candidates.length) break;
+    const version = candidates.find(({ index }) => index === Number(turn.active_version)) ?? candidates.at(-1);
+    if (!version) break;
     const pair = messages.filter((message) => message.turn_id === turn.turn_id && message.version_id === version.id);
     const user = pair.find((message) => message.role === "user");
     const assistant = pair.find((message) => message.role === "assistant");
-    if (!user || !assistant || assistant.status !== "complete") return [];
-    return [{
+    if (!user || !assistant || assistant.status !== "complete") break;
+    interactions.push({
       turnId: turn.turn_id,
       versionId: version.id,
       position: Number(turn.position),
       userContent: user.content,
       assistantContent: assistant.content,
-    }];
-  });
+    });
+    parentVersionId = version.id;
+  }
+  return interactions;
 }

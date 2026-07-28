@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { conversationReducer, initialConversationState } from "../app/chat/conversation-reducer.ts";
+import { getActiveConversationTurns } from "../lib/chat-history.ts";
 
 const message = (id, role, content, status = role === "assistant" ? "complete" : undefined) => ({
   id,
@@ -134,6 +135,79 @@ test("appends a new turn without changing the selected conversation", () => {
   });
   assert.equal(next.activeId, state.activeId);
   assert.deepEqual(next.conversations[0].turns.map(({ id }) => id), ["turn-1", "turn-2"]);
+});
+
+test("editing a non-latest turn hides obsolete descendants and restores each branch", () => {
+  const original = {
+    id: "conversation-1",
+    title: "Chat",
+    turns: [
+      {
+        id: "turn-1",
+        activeVersion: 0,
+        versions: [{ ...version("version-1", "first", "one"), parentVersionId: null }],
+      },
+      {
+        id: "turn-2",
+        activeVersion: 0,
+        versions: [{ ...version("version-2", "second", "two"), parentVersionId: "version-1" }],
+      },
+      {
+        id: "turn-3",
+        activeVersion: 0,
+        versions: [{ ...version("version-3", "third", "three"), parentVersionId: "version-2" }],
+      },
+    ],
+  };
+  const state = conversationReducer(initialConversationState, {
+    type: "LOAD_CONVERSATIONS",
+    conversations: [original],
+  });
+
+  const edited = conversationReducer(state, {
+    type: "APPEND_TURN_VERSION",
+    conversationId: "conversation-1",
+    turnId: "turn-1",
+    version: { ...version("version-1-edited", "revised first", "one revised"), parentVersionId: null },
+  });
+  const branched = edited.conversations[0];
+  assert.deepEqual(getActiveConversationTurns(branched).map((turn) => turn.id), ["turn-1"]);
+  assert.equal(branched.turns[1].versions[0].user.content, "second");
+
+  const newDescendant = conversationReducer(edited, {
+    type: "APPEND_TURN_VERSION",
+    conversationId: "conversation-1",
+    turnId: "turn-2",
+    version: { ...version("version-2-edited", "new second", "two new"), parentVersionId: "version-1-edited" },
+  });
+  assert.deepEqual(
+    getActiveConversationTurns(newDescendant.conversations[0]).map((turn) => turn.versions[turn.activeVersion].id),
+    ["version-1-edited", "version-2-edited"],
+  );
+
+  const originalBranch = conversationReducer(newDescendant, {
+    type: "SELECT_TURN_VERSION",
+    conversationId: "conversation-1",
+    turnId: "turn-1",
+    versionIndex: 0,
+    versionId: "version-1",
+  });
+  assert.deepEqual(
+    getActiveConversationTurns(originalBranch.conversations[0]).map((turn) => turn.versions[turn.activeVersion].id),
+    ["version-1", "version-2", "version-3"],
+  );
+
+  const editedBranch = conversationReducer(originalBranch, {
+    type: "SELECT_TURN_VERSION",
+    conversationId: "conversation-1",
+    turnId: "turn-1",
+    versionIndex: 1,
+    versionId: "version-1-edited",
+  });
+  assert.deepEqual(
+    getActiveConversationTurns(editedBranch.conversations[0]).map((turn) => turn.versions[turn.activeVersion].id),
+    ["version-1-edited", "version-2-edited"],
+  );
 });
 
 test("removes conversations and replaces an active chat with a blank conversation", () => {

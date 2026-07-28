@@ -5,7 +5,7 @@ import test from "node:test";
 const source = async (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("chat submission is durable, idempotent, and uses per-job event ordinals", async () => {
-  const [sql, ordinalSql, historySql, store, historyStore, runner, route] = await Promise.all([source("supabase/migrations/20260724000000_chat_jobs.sql"), source("supabase/migrations/20260725000000_chat_event_ordinals.sql"), source("supabase/migrations/20260724020000_chat_history.sql"), source("app/server/chat/chat-job-store.ts"), source("app/server/chat/chat-history-store.ts"), source("app/server/chat/chat-job-runner.ts"), source("app/api/chat/route.ts")]);
+  const [sql, ordinalSql, historySql, lineageSql, store, historyStore, runner, route] = await Promise.all([source("supabase/migrations/20260724000000_chat_jobs.sql"), source("supabase/migrations/20260725000000_chat_event_ordinals.sql"), source("supabase/migrations/20260724020000_chat_history.sql"), source("supabase/migrations/20260728180000_chat_version_lineage.sql"), source("app/server/chat/chat-job-store.ts"), source("app/server/chat/chat-history-store.ts"), source("app/server/chat/chat-job-runner.ts"), source("app/api/chat/route.ts")]);
   assert.match(sql, /unique \(owner_id, conversation_id, idempotency_key\)/);
   assert.match(sql, /chat_job_events/);
   assert.match(ordinalSql, /event_index bigint/);
@@ -18,6 +18,8 @@ test("chat submission is durable, idempotent, and uses per-job event ordinals", 
   assert.match(historySql, /chat_conversations/);
   assert.match(historySql, /chat_message_versions/);
   assert.match(historySql, /chat_messages/);
+  assert.match(lineageSql, /add column if not exists parent_version_id/i);
+  assert.match(lineageSql, /parent_version_id = v_parent_version_id/);
   assert.match(historySql, /activities jsonb/);
   assert.match(historySql, /alter table public\.chat_messages enable row level security/);
   assert.match(store, /error\.code !== "23505"/);
@@ -28,6 +30,7 @@ test("chat submission is durable, idempotent, and uses per-job event ordinals", 
   assert.doesNotMatch(store, /applyChatJobEvent/);
   assert.match(historyStore, /applyChatStreamEvent/);
   assert.match(historyStore, /finalizeChatHistoryMessage/);
+  assert.match(historyStore, /materializePersistedLineage/);
   assert.match(runner, /eventWriter\.enqueue/);
   assert.match(runner, /options\.onEvent/);
   assert.match(runner, /await eventWriter\.drain\(\)/);

@@ -137,16 +137,22 @@ function cloneMessage(value: ChatHistoryMessage): ChatHistoryMessage {
 }
 
 function cloneConversation(value: ChatConversation, maxTurns = Number.POSITIVE_INFINITY): ChatConversation {
+  const turns = value.turns.slice(-maxTurns);
   return {
     id: value.id,
     title: value.title,
-    turns: value.turns.slice(-maxTurns).map((turn) => ({
+    turns: turns.map((turn, turnIndex) => ({
       id: turn.id,
       activeVersion: turn.activeVersion,
       versions: turn.versions.map((version) => ({
         id: version.id,
         user: cloneMessage(version.user),
         assistant: cloneMessage(version.assistant),
+        ...(turnIndex === 0
+          ? { parentVersionId: null }
+          : version.parentVersionId !== undefined
+          ? { parentVersionId: version.parentVersionId }
+          : {}),
       })),
     })),
   };
@@ -278,7 +284,14 @@ function parseConversation(value: unknown): ChatConversation | null {
       const user = parseMessage(rawVersion.user);
       const assistant = parseMessage(rawVersion.assistant);
       if (!user || user.role !== "user" || !assistant || assistant.role !== "assistant") return null;
-      versions.push({ id: versionId, user, assistant });
+      versions.push({
+        id: versionId,
+        user,
+        assistant,
+        ...(typeof rawVersion.parentVersionId === "string" || rawVersion.parentVersionId === null
+          ? { parentVersionId: rawVersion.parentVersionId }
+          : {}),
+      });
     }
     if (!versions.length || activeVersion < 0 || activeVersion >= versions.length) return null;
     turns.push({ id: turnId, versions, activeVersion });

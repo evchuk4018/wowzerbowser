@@ -83,6 +83,38 @@ test("malformed turns are skipped while valid remote history remains usable", ()
   assert.equal(normalized?.turns[0].activeVersion, 0);
 });
 
+test("conversation persistence preserves version lineage", () => {
+  const normalized = normalizeConversation({
+    id: "conversation-branch",
+    title: "Branches",
+    turns: [
+      {
+        id: "turn-1",
+        activeVersion: 0,
+        versions: [{
+          id: "version-1",
+          parentVersionId: null,
+          user: { id: "u1", role: "user", content: "first" },
+          assistant: { id: "a1", role: "assistant", content: "one" },
+        }],
+      },
+      {
+        id: "turn-2",
+        activeVersion: 0,
+        versions: [{
+          id: "version-2",
+          parentVersionId: "version-1",
+          user: { id: "u2", role: "user", content: "second" },
+          assistant: { id: "a2", role: "assistant", content: "two" },
+        }],
+      },
+    ],
+  }, { freezeRunningActivities: false });
+
+  assert.equal(normalized?.turns[0].versions[0].parentVersionId, null);
+  assert.equal(normalized?.turns[1].versions[0].parentVersionId, "version-1");
+});
+
 test("settings loading falls back to canonical defaults when remote storage fails", async () => {
   const previousFetch = globalThis.fetch;
   globalThis.fetch = async () => { throw new Error("offline"); };

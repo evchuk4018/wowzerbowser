@@ -3,6 +3,7 @@ import type {
   ChatConversationTurn,
   ChatHistoryMessage,
 } from "../../lib/chat-history";
+import { getActiveConversationTurns } from "../../lib/chat-history";
 import {
   initialConversationState,
   type ConversationAction,
@@ -65,6 +66,38 @@ const withMessageUpdate = (
   update: (message: ChatHistoryMessage) => ChatHistoryMessage,
 ): ConversationState => updateConversation(state, conversationId, (conversation) =>
   updateMessage(conversation, messageId, update));
+
+/**
+ * Fill lineage for legacy descendants before creating or selecting a branch.
+ * Legacy rows had no way to identify which later version followed the active
+ * version, but the active linear path at migration time is unambiguous.
+ */
+function materializeLegacyLineage(
+  conversation: ChatConversation,
+  startIndex: number,
+): ChatConversation {
+  const activeTurns = getActiveConversationTurns(conversation);
+  let parentVersionId = startIndex > 0
+    ? activeTurns[startIndex - 1]?.versions[activeTurns[startIndex - 1].activeVersion]?.id ?? null
+    : null;
+  let changed = false;
+  const turns = conversation.turns.map((turn, index) => {
+    if (index < startIndex) return turn;
+    const activeTurn = activeTurns[index];
+    const selected = activeTurn?.versions[activeTurn.activeVersion]
+      ?? turn.versions[turn.activeVersion];
+    const versions = turn.versions.map((version) => {
+      if (version.parentVersionId !== undefined) return version;
+      changed = true;
+      return { ...version, parentVersionId };
+    });
+    parentVersionId = selected?.id ?? parentVersionId;
+    return versions.every((version, versionIndex) => version === turn.versions[versionIndex])
+      ? turn
+      : { ...turn, versions };
+  });
+  return changed ? { ...conversation, turns } : conversation;
+}
 
 /**
  * Apply a conversation action without mutating the previous state.
@@ -153,37 +186,59 @@ export function conversationReducer(
           : { ...conversation, title: action.title });
 
     case "APPEND_TURN":
-      return updateConversation(state, action.conversationId, (conversation) => ({
-        ...conversation,
-        turns: [...conversation.turns, action.turn],
-      }));
+      return updateConversation(state, action.conversationId, (conversation) => {
+        const activeTurns = getActiveConversationTurns(conversation);
+        const parentVersionId = activeTurns.at(-1)?.versions[activeTurns.at(-1)?.activeVersion ?? 0]?.id ?? null;
+        const turn = action.turn.versions.some((version) => version.parentVersionId !== undefined)
+          ? action.turn
+          : {
+              ...action.turn,
+              versions: action.turn.versions.map((version) => ({ ...version, parentVersionId })),
+            };
+        return { ...conversation, turns: [...conversation.turns, turn] };
+      });
 
     case "APPEND_TURN_VERSION":
       return updateConversation(state, action.conversationId, (conversation) => {
-        let changed = false;
-        const turns = conversation.turns.map((turn) => {
-          if (turn.id !== action.turnId) return turn;
-          changed = true;
-          const versions = [...turn.versions, action.version];
+        const turnIndex = conversation.turns.findIndex((turn) => turn.id === action.turnId);
+        if (turnIndex < 0) return conversation;
+        const materialized = materializeLegacyLineage(conversation, turnIndex);
+        const activeTurns = getActiveConversationTurns(conversation);
+        const parentVersionId = activeTurns[turnIndex - 1]
+          ?.versions[activeTurns[turnIndex - 1].activeVersion]?.id ?? null;
+        const turns = materialized.turns.map((turn, index) => {
+          if (index !== turnIndex) return turn;
+          const appendedVersion = action.version.parentVersionId === undefined
+            ? { ...action.version, parentVersionId }
+            : action.version;
+          const versions = [...turn.versions, appendedVersion];
           return { ...turn, versions, activeVersion: versions.length - 1 };
         });
-        return changed ? { ...conversation, turns } : conversation;
+        return { ...materialized, turns };
       });
 
     case "SELECT_TURN_VERSION":
       return updateConversation(state, action.conversationId, (conversation) => {
+        const turnIndex = conversation.turns.findIndex((turn) => turn.id === action.turnId);
+        if (turnIndex < 0) return conversation;
+        const materialized = materializeLegacyLineage(conversation, turnIndex);
         let changed = false;
-        const turns = conversation.turns.map((turn) => {
+        const turns = materialized.turns.map((turn) => {
           if (turn.id !== action.turnId || turn.versions.length === 0) return turn;
-          const activeVersion = Math.max(
-            0,
-            Math.min(turn.versions.length - 1, Math.trunc(action.versionIndex)),
-          );
+          const requestedIndex = action.versionId
+            ? turn.versions.findIndex((version) => version.id === action.versionId)
+            : Math.trunc(action.versionIndex);
+          const activeVersion = Math.max(0, Math.min(
+            turn.versions.length - 1,
+            requestedIndex < 0 ? 0 : requestedIndex,
+          ));
           if (activeVersion === turn.activeVersion) return turn;
           changed = true;
           return { ...turn, activeVersion };
         });
-        return changed ? { ...conversation, turns } : conversation;
+        return changed || materialized !== conversation
+          ? { ...materialized, turns }
+          : conversation;
       });
 
     case "UPDATE_MESSAGE":

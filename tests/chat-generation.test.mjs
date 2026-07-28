@@ -76,6 +76,71 @@ test("editing a prompt truncates context and increments version index", () => {
   assert.equal(request.thinking, false);
 });
 
+test("a follow-up after an older edit uses the selected branch position", () => {
+  const branchedConversation = {
+    id: "conversation-1",
+    title: "Chat",
+    turns: [
+      {
+        id: "turn-1",
+        activeVersion: 1,
+        versions: [
+          {
+            id: "version-1",
+            parentVersionId: null,
+            user: { id: "u1", role: "user", content: "first" },
+            assistant: { id: "a1", role: "assistant", content: "one", status: "complete" },
+          },
+          {
+            id: "version-1-edited",
+            parentVersionId: null,
+            user: { id: "u1e", role: "user", content: "revised first" },
+            assistant: { id: "a1e", role: "assistant", content: "one revised", status: "complete" },
+          },
+        ],
+      },
+      {
+        id: "turn-2",
+        activeVersion: 0,
+        versions: [{
+          id: "version-2",
+          parentVersionId: "version-1",
+          user: { id: "u2", role: "user", content: "second" },
+          assistant: { id: "a2", role: "assistant", content: "two", status: "complete" },
+        }],
+      },
+    ],
+  };
+  const request = buildChatGenerationRequest({
+    conversation: branchedConversation,
+    content: "follow-up on revised first",
+    editingTurnIndex: -1,
+    turnId: "turn-2",
+    versionId: "version-2-edited",
+    userMessageId: "u2e",
+    assistantMessageId: "a2e",
+    jobId: "job-branch",
+    settings,
+    model: "deepseek-v4-flash",
+    thinking: false,
+    reasoningEffort: "high",
+  });
+
+  assert.deepEqual(request.messages.map(({ role, content }) => ({ role, content })), [
+    { role: "user", content: "revised first" },
+    { role: "assistant", content: "one revised" },
+    { role: "user", content: "follow-up on revised first" },
+  ]);
+  assert.deepEqual(request.persistence, {
+    turnId: "turn-2",
+    versionId: "version-2-edited",
+    userMessageId: "u2e",
+    assistantMessageId: "a2e",
+    turnIndex: 1,
+    versionIndex: 1,
+  });
+});
+
 test("editing a prompt preserves its existing image attachments", () => {
   const attachment = {
     id: "img-1",

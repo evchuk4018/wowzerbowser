@@ -79,6 +79,8 @@ export type ChatTurnVersion = {
   id: string;
   user: ChatHistoryMessage;
   assistant: ChatHistoryMessage;
+  /** The version in the preceding turn that produced this version. */
+  parentVersionId?: string | null;
 };
 
 export type ChatConversationTurn = {
@@ -92,6 +94,42 @@ export type ChatConversation = {
   title: string;
   turns: ChatConversationTurn[];
 };
+
+/**
+ * Project a conversation onto the one branch selected by its active versions.
+ *
+ * Older history did not record lineage, so it continues to use the legacy
+ * linear projection until a new version gives the conversation lineage data.
+ * The returned turns contain only versions that can follow the selected
+ * version in the preceding turn; stored alternate branches remain untouched.
+ */
+export function getActiveConversationTurns(
+  conversation: ChatConversation,
+): ChatConversationTurn[] {
+  const hasLineage = conversation.turns.some((turn) =>
+    turn.versions.some((version) => typeof version.parentVersionId === "string"),
+  );
+  const activeTurns: ChatConversationTurn[] = [];
+  let parentVersionId: string | null = null;
+
+  for (const turn of conversation.turns) {
+    const candidates = hasLineage
+      ? turn.versions.filter((version) => (version.parentVersionId ?? null) === parentVersionId)
+      : turn.versions;
+    if (!candidates.length) break;
+
+    const preferred = turn.versions[turn.activeVersion];
+    const preferredIndex = preferred
+      ? candidates.findIndex((version) => version.id === preferred.id)
+      : -1;
+    const activeVersion = preferredIndex >= 0 ? preferredIndex : candidates.length - 1;
+    const selected = candidates[activeVersion];
+    activeTurns.push({ ...turn, versions: candidates, activeVersion });
+    parentVersionId = selected.id;
+  }
+
+  return activeTurns;
+}
 
 export type ChatConversationSummary = {
   id: string;

@@ -95,7 +95,14 @@ function normalizeConversation(value: unknown): ChatConversation | null {
       const versionId = requiredString(version?.id);
       if (!version || !versionId || !user || user.role !== "user"
         || !assistant || assistant.role !== "assistant") return null;
-      versions.push({ id: versionId, user, assistant });
+      versions.push({
+        id: versionId,
+        user,
+        assistant,
+        ...(typeof version.parentVersionId === "string" || version.parentVersionId === null
+          ? { parentVersionId: version.parentVersionId }
+          : {}),
+      });
     }
     if (!versions.length) return null;
     const activeVersion = typeof turn.activeVersion === "number" && Number.isInteger(turn.activeVersion)

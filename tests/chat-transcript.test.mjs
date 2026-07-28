@@ -27,6 +27,8 @@ test("transcript extraction keeps controlled transcript and prompt-action hooks"
   assert.match(turn, /AssistantActivityTimeline/);
   assert.match(workspace, /version\.user\.attachments/);
   assert.match(workspace, /version\.user\.documents/);
+  assert.match(workspace, /getActiveConversationTurns/);
+  assert.match(workspace, /turns=\{activeTurns\}/);
   assert.match(actions, /role=\"menu\"/);
   assert.match(actions, /Share prompt/);
   assert.doesNotMatch(transcript, /legacy renderer/);

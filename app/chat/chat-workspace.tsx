@@ -42,7 +42,7 @@ import { useMobileHistoryNavigation } from "./use-mobile-history-navigation";
 import { usePersistedJobRecovery } from "./use-persisted-job-recovery";
 import type { ChatArtifact, ChatImageAttachment } from "../../lib/chat-protocol";
 import type { ChatDocumentAttachment } from "../../lib/chat-document";
-import type { ChatConversationSummary } from "../../lib/chat-history";
+import { getActiveConversationTurns, type ChatConversationSummary } from "../../lib/chat-history";
 import {
   fetchChatArtifact,
   fetchChatBootstrap,
@@ -535,7 +535,11 @@ export function ChatWorkspace({
     }
   }, []);
 
-  const latestTurn = active?.turns.at(-1);
+  const activeTurns = active ? getActiveConversationTurns(active) : [];
+  const activeBranchKey = activeTurns
+    .map((turn) => turn.versions[turn.activeVersion]?.id ?? turn.id)
+    .join(":");
+  const latestTurn = activeTurns.at(-1);
   const latestMessage = latestTurn?.versions[latestTurn.activeVersion]?.assistant;
   const latestActivity = latestMessage?.activities?.at(-1);
   const snapshotSourceRef = useRef<{
@@ -579,7 +583,7 @@ export function ChatWorkspace({
   useEffect(() => {
     if (!remoteAuthorized) return;
     persistCurrentSnapshot();
-  }, [active?.id, active?.title, active?.turns.length, conversationSummaries, latestMessage?.status, persistCurrentSnapshot, remoteAuthorized, recoveredStreaming, settings.userPresence, state.activeId]);
+  }, [active?.id, active?.title, activeBranchKey, activeTurns.length, conversationSummaries, latestMessage?.status, persistCurrentSnapshot, remoteAuthorized, recoveredStreaming, settings.userPresence, state.activeId]);
 
   useEffect(() => () => {
     void flushSnapshot();
@@ -594,7 +598,8 @@ export function ChatWorkspace({
     });
   }, [
     active?.id,
-    active?.turns.length,
+    activeBranchKey,
+    activeTurns.length,
     latestActivity?.kind,
     latestActivity?.status,
     latestMessage?.activities?.length,
@@ -631,12 +636,12 @@ export function ChatWorkspace({
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
   const selectVersion = (turnId: string, direction: -1 | 1) => {
-    const turn = active?.turns.find(({ id }) => id === turnId);
+    const turn = activeTurns.find(({ id }) => id === turnId);
     if (!turn) return;
     const versionIndex = Math.max(0, Math.min(turn.versions.length - 1, turn.activeVersion + direction));
     const version = turn.versions[versionIndex];
     if (!version) return;
-    dispatch({ type: "SELECT_TURN_VERSION", conversationId: state.activeId, turnId, versionIndex });
+    dispatch({ type: "SELECT_TURN_VERSION", conversationId: state.activeId, turnId, versionIndex, versionId: version.id });
     void getAccessToken().then((token) =>
       token ? saveConversationSelection(state.activeId, turnId, version.id, token) : undefined,
     );
@@ -866,7 +871,7 @@ export function ChatWorkspace({
           </button>
         </div>
       )}
-      <section className={`chat-area ${active.turns.length ? "chat-active" : ""} ${openMessageActions ? "message-actions-active" : ""}`}>
+      <section className={`chat-area ${activeTurns.length ? "chat-active" : ""} ${openMessageActions ? "message-actions-active" : ""}`}>
         {openMessageActions && (
           <button
             type="button"
@@ -886,7 +891,7 @@ export function ChatWorkspace({
         ) : (
           <ChatTranscript
             conversationId={active.id}
-            turns={active.turns}
+            turns={activeTurns}
             openMessageActions={openMessageActions}
             isStreamingConversation={activeStreaming || Boolean(loadingConversationId)}
             waitingByMessage={generation.waitingByMessage}

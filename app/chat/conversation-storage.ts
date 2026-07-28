@@ -316,7 +316,14 @@ function normalizeTurnVersion(value: unknown, options: { freezeRunningActivities
   const user = normalizeStoredMessage(candidate.user, options);
   const assistant = normalizeStoredMessage(candidate.assistant, options);
   if (!id || !user || user.role !== "user" || !assistant || assistant.role !== "assistant") return null;
-  return { id, user, assistant };
+  return {
+    id,
+    user,
+    assistant,
+    ...(typeof candidate.parentVersionId === "string" || candidate.parentVersionId === null
+      ? { parentVersionId: candidate.parentVersionId }
+      : {}),
+  };
 }
 
 function normalizeTurn(value: unknown, options: { freezeRunningActivities?: boolean; now?: number } = {}): ConversationTurn | null {
@@ -362,9 +369,10 @@ export function normalizeConversation(
     const user = normalizeStoredMessage(candidate.messages[index], { ...options, freezeRunningActivities: true });
     const assistant = normalizeStoredMessage(candidate.messages[index + 1], { ...options, freezeRunningActivities: true });
     if (!user || user.role !== "user" || !assistant || assistant.role !== "assistant") continue;
+    const versionId = makeId();
     turns.push({
       id: makeId(),
-      versions: [{ id: makeId(), user, assistant }],
+      versions: [{ id: versionId, user, assistant, parentVersionId: turns.at(-1)?.versions[0]?.id ?? null }],
       activeVersion: 0,
     });
   }

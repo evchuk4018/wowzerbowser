@@ -5,6 +5,8 @@ import type {
   ChatTurnVersion,
 } from "../../lib/chat-history";
 
+export { getActiveConversationTurns } from "../../lib/chat-history";
+
 /** The state owned by the conversation workspace. */
 export type ConversationState = {
   conversations: ChatConversation[];
@@ -66,6 +68,8 @@ export type SelectTurnVersionAction = {
   turnId: string;
   /** The requested version index. The reducer clamps this to the valid range. */
   versionIndex: number;
+  /** Prefer the stable id when the transcript is a branch projection. */
+  versionId?: string;
 };
 
 export type UpdateMessageAction = {
