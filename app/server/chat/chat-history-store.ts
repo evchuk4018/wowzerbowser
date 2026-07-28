@@ -480,30 +480,30 @@ async function touchConversation(ownerId: string, conversationId: string): Promi
   if (error) throw error;
 }
 
+export type ChatConversationIndexRow = {
+  conversation_id: string;
+  title: string;
+  updated_at: string;
+  has_messages: boolean;
+  is_streaming: boolean;
+};
+
+export function mapChatConversationSummaryRows(rows: ChatConversationIndexRow[]): ChatConversationSummary[] {
+  return rows.map((row) => ({
+    id: row.conversation_id,
+    title: row.title,
+    updatedAt: row.updated_at,
+    hasMessages: row.has_messages,
+    isStreaming: row.is_streaming,
+  }));
+}
+
 export async function listChatConversations(ownerId: string): Promise<ChatConversationSummary[]> {
-  const db = client();
-  const [conversationResult, messageResult] = await Promise.all([
-    db.from("chat_conversations").select("conversation_id,title,updated_at").eq("owner_id", ownerId).order("updated_at", { ascending: false }),
-    db.from("chat_messages").select("conversation_id,role,status").eq("owner_id", ownerId),
-  ]);
-  if (conversationResult.error) throw conversationResult.error;
-  if (messageResult.error) throw messageResult.error;
-  const messagesByConversation = new Map<string, Array<{ role: string; status: string | null }>>();
-  for (const row of messageResult.data ?? []) {
-    const list = messagesByConversation.get(row.conversation_id) ?? [];
-    list.push({ role: row.role, status: row.status });
-    messagesByConversation.set(row.conversation_id, list);
-  }
-  return (conversationResult.data ?? []).map((row) => {
-    const messages = messagesByConversation.get(row.conversation_id) ?? [];
-    return {
-      id: row.conversation_id,
-      title: row.title,
-      updatedAt: row.updated_at,
-      hasMessages: messages.length > 0,
-      isStreaming: messages.some((message) => message.role === "assistant" && message.status === "streaming"),
-    };
+  const { data, error } = await client().rpc("list_chat_conversations_fast", {
+    p_owner_id: ownerId,
   });
+  if (error) throw error;
+  return mapChatConversationSummaryRows((data ?? []) as ChatConversationIndexRow[]);
 }
 
 export async function searchChatConversations(ownerId: string, query: string): Promise<ChatSearchResult[]> {
