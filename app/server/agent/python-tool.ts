@@ -12,6 +12,14 @@ import {
 
 export { PYTHON_TOOL_DEFINITION, PYTHON_TOOL_NAME } from "./python-tool-manifest";
 
+type PythonToolDependencies = {
+  registerProvenance: typeof registerGeneratedDocumentProvenance;
+};
+
+const DEFAULT_DEPENDENCIES: PythonToolDependencies = {
+  registerProvenance: registerGeneratedDocumentProvenance,
+};
+
 export function availableChatTools() {
   return isModalConfigured() ? [PYTHON_TOOL_DEFINITION] : [];
 }
@@ -30,6 +38,7 @@ export async function executePythonTool(
   ownerId: string,
   conversationId: string,
   onDocumentArtifact?: (artifact: ChatArtifact, bytes: Uint8Array) => Promise<void>,
+  dependencies: PythonToolDependencies = DEFAULT_DEPENDENCIES,
 ): Promise<ChatToolResult> {
   const startedAt = Date.now();
   if (call.name !== PYTHON_TOOL_NAME) {
@@ -49,14 +58,36 @@ export async function executePythonTool(
     for (const item of result.artifacts ?? []) {
       const contentType = contentTypeFor(item.path);
       if (contentType === "application/pdf" || contentType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
-        const provenance = await registerGeneratedDocumentProvenance({ ownerId, conversationId, jobId: call.id, pythonInput, executor, artifact: item });
-        artifacts.push(registerArtifact({
-          ownerId, conversationId, name: item.path.split("/").pop() || "artifact",
-          path: provenance.canonicalOutputPath, size: item.size, sha256: item.sha256, contentType,
-          projectId: provenance.projectId, revisionId: provenance.revisionId,
-          parentRevisionId: provenance.manifest.parentRevisionId, origin: "generated", editable: true,
-          ...(provenance.sourceCompleteness === null ? {} : { sourceCompleteness: provenance.sourceCompleteness }),
-        }));
+        try {
+          const provenance = await dependencies.registerProvenance({ ownerId, conversationId, jobId: call.id, pythonInput, executor, artifact: item });
+          artifacts.push(registerArtifact({
+            ownerId, conversationId, name: item.path.split("/").pop() || "artifact",
+            path: provenance.canonicalOutputPath, size: item.size, sha256: item.sha256, contentType,
+            projectId: provenance.projectId, revisionId: provenance.revisionId,
+            parentRevisionId: provenance.manifest.parentRevisionId, origin: "generated", editable: true,
+            ...(provenance.sourceCompleteness === null ? {} : { sourceCompleteness: provenance.sourceCompleteness }),
+          }));
+        } catch (error) {
+          console.warn({
+            event: "generated-document-provenance-fallback",
+            ownerId,
+            conversationId,
+            jobId: call.id,
+            artifactType: contentType,
+            failure: error instanceof Error ? error.name : "UnknownError",
+          });
+          artifacts.push(registerArtifact({
+            ownerId,
+            conversationId,
+            name: item.path.split("/").pop() || "artifact",
+            path: item.path,
+            size: item.size,
+            sha256: item.sha256,
+            contentType,
+            origin: "generated",
+            editable: false,
+          }));
+        }
       } else artifacts.push(registerArtifact({
         ownerId,
         conversationId,

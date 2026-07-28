@@ -12,7 +12,7 @@ export const RUN_PYTHON_INSTRUCTIONS = [
   "The code/file runs in a persistent conversation workspace. File paths must stay relative to that workspace; do not use absolute paths, parent traversal, .venv, or .runs.",
   `The runtime image preinstalls these trusted packages. Use the exact pip package/import pairs shown here: ${PYTHON_RUNTIME_PACKAGE_INSTRUCTIONS}.`,
   "packages is optional and may contain at most 20 package specifiers; args is optional and may contain at most 32 strings; stdin is optional.",
-  "Request files with artifacts when the user needs a downloadable output. Artifact paths are relative workspace paths and at most 20 may be requested.",
+  "Request files with artifacts when the user needs a downloadable output. Write each requested file to a relative workspace path and include that exact same path in artifacts; paths are relative and at most 20 may be requested.",
   "Generated PDF/DOCX files are persisted as source-backed document projects. Prefer a named reusable source file, keep required local source/assets under one bounded project directory, and ensure the source can rerender the document.",
   "After each call, inspect the result fields ok, stdout, stderr, exitCode, timedOut, stdoutTruncated, stderrTruncated, and artifacts before deciding what to do next.",
   "</run_python_policy>",

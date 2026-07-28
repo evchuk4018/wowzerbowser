@@ -30,6 +30,7 @@ import {
   availableImageTools,
   executeInspectImageTool,
 } from "../app/server/agent/image-tool.ts";
+import { executePythonTool } from "../app/server/agent/python-tool.ts";
 import { generateChatResponse } from "../app/chat/chat-server-service.ts";
 import { parseChatRequest } from "../lib/chat-protocol.ts";
 import { applyChatStreamEvent } from "../lib/chat-history.ts";
@@ -272,6 +273,97 @@ test("artifact reads are atomic, no-follow, and bounded before streaming", async
   assert.match(source, /PYTHON_TOOL_LIMITS\.maxArtifactBytes \+ 1/);
   assert.match(source, /readBoundedArtifactBytes/);
   assert.doesNotMatch(source, /filesystem\.readBytes/);
+});
+
+test("generated PDFs fall back to downloadable artifacts when provenance registration fails", async () => {
+  const originalSecret = process.env.ARTIFACT_SIGNING_SECRET;
+  const originalWarn = console.warn;
+  process.env.ARTIFACT_SIGNING_SECRET = "test-secret";
+  const warnings = [];
+  console.warn = (value) => warnings.push(value);
+  const sha256 = "0".repeat(64);
+  const executor = {
+    async run() {
+      return {
+        stdout: "created\n",
+        stderr: "",
+        exitCode: 0,
+        artifacts: [{ path: "story.pdf", size: 3, sha256 }],
+      };
+    },
+    async readArtifact() {
+      return new TextEncoder().encode("pdf");
+    },
+  };
+  const call = {
+    id: "call-pdf",
+    name: "run_python",
+    arguments: JSON.stringify({ code: "print('created')", artifacts: ["story.pdf"] }),
+  };
+  try {
+    const result = await executePythonTool(
+      call,
+      executor,
+      "owner-1",
+      "conversation-1",
+      undefined,
+      { registerProvenance: async () => { throw new Error("database details must not escape"); } },
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.stdout, "created\n");
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.artifacts?.[0]?.name, "story.pdf");
+    assert.equal(result.artifacts?.[0]?.editable, false);
+    assert.equal(result.artifacts?.[0]?.origin, "generated");
+    assert.equal(result.artifacts?.[0]?.projectId, undefined);
+    assert.equal(warnings[0]?.event, "generated-document-provenance-fallback");
+    assert.doesNotMatch(JSON.stringify(warnings), /database details/i);
+  } finally {
+    console.warn = originalWarn;
+    if (originalSecret === undefined) delete process.env.ARTIFACT_SIGNING_SECRET;
+    else process.env.ARTIFACT_SIGNING_SECRET = originalSecret;
+  }
+});
+
+test("generated PDFs retain editable provenance when registration succeeds", async () => {
+  const originalSecret = process.env.ARTIFACT_SIGNING_SECRET;
+  process.env.ARTIFACT_SIGNING_SECRET = "test-secret";
+  const executor = {
+    async run() {
+      return {
+        stdout: "",
+        stderr: "",
+        exitCode: 0,
+        artifacts: [{ path: "story.pdf", size: 3, sha256: "0".repeat(64) }],
+      };
+    },
+  };
+  try {
+    const result = await executePythonTool(
+      { id: "call-pdf", name: "run_python", arguments: '{"code":"pass","artifacts":["story.pdf"]}' },
+      executor,
+      "owner-1",
+      "conversation-1",
+      undefined,
+      {
+        registerProvenance: async () => ({
+          projectId: "project-1",
+          revisionId: "revision-1",
+          canonicalOutputPath: "documents/project-1/revisions/revision-1/output/story.pdf",
+          entrypoint: "documents/project-1/revisions/revision-1/source/main.py",
+          sourceCompleteness: "complete",
+          manifest: { parentRevisionId: null },
+        }),
+      },
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.artifacts?.[0]?.editable, true);
+    assert.equal(result.artifacts?.[0]?.projectId, "project-1");
+    assert.equal(result.artifacts?.[0]?.revisionId, "revision-1");
+  } finally {
+    if (originalSecret === undefined) delete process.env.ARTIFACT_SIGNING_SECRET;
+    else process.env.ARTIFACT_SIGNING_SECRET = originalSecret;
+  }
 });
 
 test("chat orchestration reserves one usage slot per round", async () => {
