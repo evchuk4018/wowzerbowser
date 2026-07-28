@@ -15,6 +15,7 @@ import type {
 } from "./assistant-activity-types";
 import { DocumentEditActivity } from "./document-edit-activity";
 import { fetchChatArtifact } from "./chat-service";
+import { ArtifactPreview } from "./artifact-preview";
 import { formatDuration } from "./format-duration";
 import type { ChatCitation, ChatSource } from "../../lib/chat-citations";
 
@@ -190,9 +191,11 @@ function ReasoningCard({ activity, pythonActivities, webActivities, imageActivit
 function ArtifactDownload({
   artifact,
   getAccessToken,
+  onOpen,
 }: {
   artifact: ChatArtifact;
   getAccessToken: () => Promise<string | null>;
+  onOpen: (artifact: ChatArtifact) => void;
 }) {
   const [state, setState] = useState<"idle" | "downloading" | "error">("idle");
 
@@ -219,7 +222,11 @@ function ArtifactDownload({
 
   return (
     <div className="artifact-download">
-      <button type="button" disabled={state === "downloading"} onClick={() => void download()}>
+      <button
+        type="button"
+        disabled={state === "downloading"}
+        onClick={() => artifact.contentType === "application/pdf" ? onOpen(artifact) : void download()}
+      >
         Created {artifact.name}
       </button>
       <span className="artifact-download-state" role="status" aria-live="polite">
@@ -244,6 +251,7 @@ export function AssistantActivityTimeline({
   sources?: ChatSource[];
   getAccessToken: () => Promise<string | null>;
 }) {
+  const [previewArtifact, setPreviewArtifact] = useState<ChatArtifact | null>(null);
   const rounds = activities.reduce<Map<number, { reasoning?: ReasoningActivity; python: PythonActivity[]; web: WebActivity[]; image: ImageActivity[]; document: DocumentActivity[] }>>((grouped, activity) => {
     const round = grouped.get(activity.round) ?? { python: [], web: [], image: [], document: [] };
     if (activity.kind === "reasoning") round.reasoning = round.reasoning
@@ -274,7 +282,13 @@ export function AssistantActivityTimeline({
       {activities.filter((activity): activity is DocumentActivity => activity.kind === "document").map((activity) => <DocumentEditActivity key={activity.id} activity={activity} />)}
       {content && (
         <div className="message-bubble">
-          <AssistantResponse content={content} annotations={annotations} sources={sources} />
+          <AssistantResponse
+            content={content}
+            annotations={annotations}
+            sources={sources}
+            artifacts={artifacts}
+            onOpenArtifact={setPreviewArtifact}
+          />
         </div>
       )}
       {artifacts.length > 0 && (
@@ -284,10 +298,16 @@ export function AssistantActivityTimeline({
               key={artifact.id}
               artifact={artifact}
               getAccessToken={getAccessToken}
+              onOpen={setPreviewArtifact}
             />
           ))}
         </div>
       )}
+      <ArtifactPreview
+        artifact={previewArtifact}
+        getAccessToken={getAccessToken}
+        onClose={() => setPreviewArtifact(null)}
+      />
     </>
   );
 }

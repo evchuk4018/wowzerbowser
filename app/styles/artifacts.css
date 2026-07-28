@@ -46,3 +46,148 @@
   color: var(--quiet);
   font-size: 12px;
 }
+
+.artifact-preview {
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  width: min(56vw, 920px);
+  min-width: 520px;
+  flex-direction: column;
+  border-left: 1px solid #3a3a3c;
+  background: #ededed;
+  box-shadow: -18px 0 48px rgba(0, 0, 0, .42);
+}
+
+.artifact-preview-header {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  background: #292928;
+  padding: 0 12px 0 24px;
+  color: #f3f3f1;
+}
+
+.artifact-preview-title {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.artifact-preview-title strong {
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 520;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-preview-title span {
+  flex: none;
+  color: #aaa9a4;
+  font-size: 13px;
+}
+
+.artifact-preview-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+}
+
+.artifact-preview-actions button {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #f5f5f3;
+  cursor: pointer;
+}
+
+.artifact-preview-actions button:hover:not(:disabled),
+.artifact-preview-actions button:focus-visible {
+  outline: 0;
+  background: rgba(255, 255, 255, .12);
+}
+
+.artifact-preview-actions button:disabled {
+  cursor: progress;
+  opacity: .4;
+}
+
+.artifact-preview-actions svg {
+  width: 21px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.artifact-preview-body {
+  position: relative;
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  place-items: stretch;
+  padding: 18px;
+}
+
+.artifact-preview-body iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.artifact-preview-status {
+  display: grid;
+  place-content: center;
+  color: #474747;
+  font-size: 14px;
+  text-align: center;
+}
+
+.artifact-preview-error {
+  gap: 12px;
+}
+
+.artifact-preview-error p {
+  margin: 0;
+}
+
+.artifact-preview-error button {
+  justify-self: center;
+  border: 1px solid #aaa;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px 13px;
+  color: #222;
+  cursor: pointer;
+}
+
+@media (max-width: 760px) {
+  .artifact-preview {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .artifact-preview-header {
+    padding-left: max(15px, env(safe-area-inset-left));
+    padding-right: max(8px, env(safe-area-inset-right));
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .artifact-preview-body {
+    padding: 8px;
+  }
+}
