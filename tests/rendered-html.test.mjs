@@ -366,6 +366,8 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(composer, /aria-label="Choose thinking mode"/);
   assert.match(composer, /aria-label="Stop generating"/);
   assert.match(composer, /aria-label=\{expanded \? "Close expanded editor" : "Expand message editor"\}/);
+  assert.match(composer, /className="composer-expand-icon"/);
+  assert.doesNotMatch(composer, /expanded \? "↙" : "↗"/);
   assert.match(composer, /useLayoutEffect\(\(\) =>/);
   assert.match(composer, /event\.key === "Escape" && expanded/);
   assert.match(composer, /composer-wrap--expanded/);

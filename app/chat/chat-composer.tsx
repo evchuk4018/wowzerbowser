@@ -276,7 +276,19 @@ export function ChatComposer({
           aria-label={expanded ? "Close expanded editor" : "Expand message editor"}
           onClick={() => setExpanded((current) => !current)}
         >
-          {expanded ? "↙" : "↗"}
+          <svg className="composer-expand-icon" viewBox="0 0 16 16" aria-hidden="true">
+            {expanded ? (
+              <>
+                <path d="M12 4 4 12" />
+                <path d="M10 12H4V6" />
+              </>
+            ) : (
+              <>
+                <path d="M4 12 12 4" />
+                <path d="M6 4h6v6" />
+              </>
+            )}
+          </svg>
         </button>
         {editing && (
           <div className="composer-editing">
