@@ -17,7 +17,7 @@ import type { ChatToolResult } from "../../../lib/chat-protocol";
 import type { ChatToolCall } from "../../../lib/chat-protocol";
 import { recordUsage } from "../usage/usage-store";
 import { askOpenRouterAboutImage } from "../../providers/openrouter/openrouter-image-adapter";
-import { OPENROUTER_FREE_MODEL } from "../../providers/openrouter/openrouter-config";
+import { OPENROUTER_QWEN_FLASH_MODEL } from "../../providers/openrouter/openrouter-config";
 import {
   attachmentFromUploadRecord,
   chatImageStoragePath,
@@ -84,7 +84,7 @@ async function recordImageUsage(input: {
   prompt: string;
   answer: string;
 }): Promise<void> {
-  const model = input.model ?? OPENROUTER_FREE_MODEL;
+  const model = input.model ?? OPENROUTER_QWEN_FLASH_MODEL;
   await recordUsage({
     ownerId: input.ownerId,
     provider: "openrouter",

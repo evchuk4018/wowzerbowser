@@ -9,13 +9,12 @@ import {
 } from "../../../lib/chat-image";
 import {
   OPENROUTER_BASE_URL,
-  OPENROUTER_FREE_MODEL,
   OPENROUTER_IMAGE_MODELS,
-  shouldUseOpenRouterQuotaFallback,
+  OPENROUTER_QWEN_FLASH_MODEL,
 } from "./openrouter-config";
 
-export { OPENROUTER_BASE_URL, OPENROUTER_QUOTA_FALLBACK_MODEL } from "./openrouter-config";
-export const OPENROUTER_IMAGE_MODEL = OPENROUTER_FREE_MODEL;
+export { OPENROUTER_BASE_URL } from "./openrouter-config";
+export const OPENROUTER_IMAGE_MODEL = OPENROUTER_QWEN_FLASH_MODEL;
 export const PDF_PAGE_OCR_PROMPT = "Extract all visible text from this PDF page. Preserve reading order and line breaks where practical. Return only the text; do not describe the page, add markdown, or summarize.";
 
 export type OpenRouterImageAnswer = {
@@ -78,7 +77,7 @@ function answerText(value: unknown): string {
 
 function safeProviderMessage(body: string, status: number): string {
   if (status === 429) return "Image understanding is rate limited. Please try again.";
-  if (status === 404 || status === 400) return "No eligible free vision model is available right now.";
+  if (status === 404 || status === 400) return "Qwen 3.7 Flash image understanding is unavailable right now.";
   return `Image understanding failed (${status}).`;
 }
 
@@ -127,7 +126,6 @@ export async function askOpenRouterAboutImage(
     }
     if (response.ok) break;
     await response.text().catch(() => "");
-    if (shouldUseOpenRouterQuotaFallback(response.status, model)) continue;
     const code = response.status === 429
       ? "rate_limit"
       : response.status === 408 || response.status >= 500
