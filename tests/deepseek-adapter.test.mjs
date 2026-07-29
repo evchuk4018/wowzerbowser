@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import "./openrouter-chat.test.mjs";
 import test from "node:test";
 import { DeepSeekDsmlParser, parseDeepSeekDsml } from "../app/providers/deepseek/deepseek-dsml.ts";
-import { streamDeepSeekChatRound } from "../app/providers/deepseek/deepseek-adapter.ts";
+import { buildDeepSeekMessages, streamDeepSeekChatRound } from "../app/providers/deepseek/deepseek-adapter.ts";
+import { RESPONSE_STYLE_INSTRUCTIONS } from "../app/server/agent/response-style-instructions.ts";
 
 const request = {
   model: "deepseek-v4-flash",
@@ -12,6 +13,20 @@ const request = {
   thinking: false,
   reasoningEffort: "high",
 };
+
+test("DeepSeek messages keep response style after tool instructions", () => {
+  const messages = buildDeepSeekMessages(request, {
+    systemInstructions: ["tool instructions", RESPONSE_STYLE_INSTRUCTIONS],
+  });
+
+  assert.deepEqual(messages.slice(0, 4), [
+    { role: "system", content: "system" },
+    { role: "system", content: "present" },
+    { role: "system", content: "tool instructions" },
+    { role: "system", content: RESPONSE_STYLE_INSTRUCTIONS },
+  ]);
+  assert.equal(messages.filter((message) => message.content === RESPONSE_STYLE_INSTRUCTIONS).length, 1);
+});
 
 function tag(bar, name, closing = false) {
   return `<${closing ? "/" : ""}${bar}DSML${bar}${name}>`;

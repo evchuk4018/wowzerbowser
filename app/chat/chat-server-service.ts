@@ -34,6 +34,7 @@ import { executeCustomToolCall } from "../server/tools/custom-tool-executor";
 import { chatMemoryToolDefinitions, executeChatMemoryTool } from "../server/agent/chat-memory-tool";
 import { executeUserMemoryTool, userMemoryToolDefinitions } from "../server/agent/user-memory-tool";
 import { USER_MEMORY_TOOL_INSTRUCTIONS } from "../server/agent/user-memory-tool-instructions";
+import { RESPONSE_STYLE_INSTRUCTIONS } from "../server/agent/response-style-instructions";
 import { recordUsage } from "../server/usage/usage-store";
 
 const MAX_RESPONSE_MS = 240_000;
@@ -146,6 +147,7 @@ export async function generateChatResponse(
             ...(phaseTools.length ? [PHASE_BREAK_INSTRUCTIONS] : []),
             ...customToolInstructions(customTools),
             USER_MEMORY_TOOL_INSTRUCTIONS,
+            RESPONSE_STYLE_INSTRUCTIONS,
           ];
           const reasoningParts: string[] = [];
           const contentParts: string[] = [];

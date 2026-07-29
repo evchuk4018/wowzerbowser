@@ -15,7 +15,7 @@ export type ChatModelPreference = {
 
 export const DEFAULT_CHAT_MODEL_PREFERENCE: ChatModelPreference = {
   model: DEFAULT_CHAT_MODELS[0].ref,
-  thinking: true,
+  thinking: false,
   reasoningEffort: "high",
 };
 

@@ -28,7 +28,7 @@ function appendInput(target: ProviderMessage[], message: ChatMessageInput) {
   }
   if (message.content || !message.rounds?.length) target.push({ role: "assistant", content: message.content, ...(message.reasoning ? { reasoning: message.reasoning } : {}) });
 }
-function messages(request: ChatRequest, options: ChatProviderRoundOptions): ProviderMessage[] {
+export function buildOpenRouterMessages(request: ChatRequest, options: ChatProviderRoundOptions): ProviderMessage[] {
   const result: ProviderMessage[] = [
     { role: "system", content: [request.systemPrompt, request.userPresence, ...options.systemInstructions].filter(Boolean).join("\n\n") },
   ];
@@ -52,7 +52,7 @@ export async function* streamOpenRouterChatRound(request: ChatRequest, metadata:
   const response = await fetchImpl(`${OPENROUTER_BASE_URL}/chat/completions`, {
     method: "POST", headers: openRouterHeaders(), signal,
     body: JSON.stringify({
-      model: request.model.model, messages: messages(request, options), stream: true,
+      model: request.model.model, messages: buildOpenRouterMessages(request, options), stream: true,
       ...(reasoning ? { reasoning } : {}),
       ...(options.tools?.length ? { tools: options.tools, ...(metadata.supportedParameters.includes("tool_choice") ? { tool_choice: "auto" } : {}) } : {}),
     }),

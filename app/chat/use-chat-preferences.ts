@@ -44,7 +44,7 @@ export type UseChatPreferencesOptions = { activeConversationId: string; getAcces
 export function useChatPreferences({ activeConversationId, getAccessToken, initialModelPreferences = {}, bootstrapComplete = false }: UseChatPreferencesOptions): ChatPreferences {
   const [models, setModels] = useState<ChatModelInfo[]>(DEFAULT_CHAT_MODELS);
   const [model, setModel] = useState(DEFAULT_CHAT_MODEL_PREFERENCE.model);
-  const [thinking, setThinking] = useState(true);
+  const [thinking, setThinking] = useState(false);
   const [effort, setEffort] = useState<ChatReasoningEffort>("high");
   const [modelPreferences, setModelPreferences] = useState(initialModelPreferences);
   const [modelPreferencesLoaded, setModelPreferencesLoaded] = useState(bootstrapComplete);

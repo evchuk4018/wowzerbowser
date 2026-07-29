@@ -5,6 +5,8 @@ import { parseChatRequest } from "../lib/chat-protocol.ts";
 import { normalizeOpenRouterModel } from "../app/providers/openrouter/openrouter-catalog-adapter.ts";
 import { canonicalCatalogQuery, catalogQueryHash, parseCatalogQuery } from "../app/server/chat/chat-model-catalog-query.ts";
 import { normalizeModelPreference, parseChatModelPreference } from "../lib/chat-model-preference.ts";
+import { buildOpenRouterMessages } from "../app/providers/openrouter/openrouter-chat-adapter.ts";
+import { RESPONSE_STYLE_INSTRUCTIONS } from "../app/server/agent/response-style-instructions.ts";
 
 const eligible = {
   id: "author/model", name: "Model", description: "Useful model", context_length: 131072, created: 1_700_000_000,
@@ -61,4 +63,27 @@ test("OpenRouter adapter keeps provider wire behavior server-side", async () => 
   assert.match(source, /metadata\.reasoningRequired/);
   assert.match(source, /supportedParameters\.includes\("tool_choice"\)/);
   assert.doesNotMatch(source, /deepseek/i);
+});
+
+test("OpenRouter messages keep response style after tool instructions", () => {
+  const messages = buildOpenRouterMessages({
+    systemPrompt: "canonical system prompt",
+    userPresence: "editable presence",
+    model: { provider: "openrouter", model: "author/model" },
+    messages: [{ role: "user", content: "Question" }],
+    thinking: false,
+    reasoningEffort: "high",
+  }, {
+    replayRounds: [],
+    systemInstructions: ["tool instructions", RESPONSE_STYLE_INSTRUCTIONS],
+  });
+
+  assert.equal(messages.length, 2);
+  const systemContent = messages[0].content;
+  assert.equal(typeof systemContent, "string");
+  assert.equal(systemContent.indexOf("canonical system prompt"), 0);
+  assert.ok(systemContent.indexOf("editable presence") > systemContent.indexOf("canonical system prompt"));
+  assert.ok(systemContent.indexOf("tool instructions") > systemContent.indexOf("editable presence"));
+  assert.ok(systemContent.indexOf(RESPONSE_STYLE_INSTRUCTIONS) > systemContent.indexOf("tool instructions"));
+  assert.equal(systemContent.split(RESPONSE_STYLE_INSTRUCTIONS).length - 1, 1);
 });
