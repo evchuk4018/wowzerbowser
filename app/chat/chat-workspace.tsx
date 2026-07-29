@@ -167,6 +167,7 @@ export function ChatWorkspace({
         setSettings({
           ...DEFAULT_CHAT_SETTINGS,
           userPresence: bootstrap.userPreferences.userPresence,
+          visionModel: bootstrap.userPreferences.visionModel ?? null,
         });
         setBootstrapModelPreferences(modelPreferencesRecord(bootstrap.modelPreferences));
         setBootstrapComplete(true);
@@ -238,6 +239,7 @@ export function ChatWorkspace({
       setSettings({
         ...DEFAULT_CHAT_SETTINGS,
         userPresence: snapshot.userPresence,
+        visionModel: snapshot.visionModel ?? null,
       });
       setBootstrapModelPreferences(modelPreferencesRecord(snapshot.modelPreferences));
     }
@@ -580,6 +582,7 @@ export function ChatWorkspace({
       activeConversation: current,
       activeConversationId: current.id,
       userPresence: source.settings.userPresence,
+      visionModel: source.settings.visionModel,
       modelPreferences: Object.entries(source.modelPreferences).map(([conversationId, preference]) => ({
         conversationId,
         ...preference,

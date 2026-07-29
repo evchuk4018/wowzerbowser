@@ -97,6 +97,19 @@ test("OpenRouter sends the ordered model fallback chain in one request", async (
   assert.equal(answer.model, OPENROUTER_GEMINI_FLASH_LITE_MODEL);
 });
 
+test("OpenRouter sends a configured vision model without the automatic fallback chain", async () => {
+  let body;
+  await askOpenRouterAboutImage("Question", png, "image/png", {
+    model: "google/gemini-2.5-flash",
+    fetchImpl: async (_url, init) => {
+      body = JSON.parse(String(init.body));
+      return new Response(JSON.stringify({ choices: [{ message: { content: "Configured answer" } }] }), { status: 200 });
+    },
+  });
+  assert.equal(body.model, "google/gemini-2.5-flash");
+  assert.equal(body.models, undefined);
+});
+
 test("OpenRouter image validation failures do not retry another model", async () => {
   let calls = 0;
   await assert.rejects(

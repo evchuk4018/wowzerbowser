@@ -96,6 +96,7 @@ function safeProviderMessage(status: number, errorType?: string): string {
 }
 
 export type OpenRouterImageRequestOptions = {
+  model?: string | null;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
@@ -165,7 +166,7 @@ async function requestOpenRouterImage(
   const timeout = AbortSignal.timeout(timeoutMs);
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
   const body = {
-    models: [...OPENROUTER_IMAGE_MODELS],
+    ...(options.model ? { model: options.model } : { models: [...OPENROUTER_IMAGE_MODELS] }),
     messages: [{
       role: "user",
       content: [

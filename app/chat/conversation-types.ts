@@ -4,6 +4,7 @@ import type {
   ChatHistoryMessage,
   ChatTurnVersion,
 } from "../../lib/chat-history";
+import type { ChatModelRef } from "../../lib/chat-protocol";
 
 /** The persisted assistant/user message shape used by chat history. */
 export type Message = ChatHistoryMessage;
@@ -21,4 +22,5 @@ export type Conversation = ChatConversation;
 export type ChatSettings = {
   systemPrompt: string;
   userPresence: string;
+  visionModel: ChatModelRef | null;
 };

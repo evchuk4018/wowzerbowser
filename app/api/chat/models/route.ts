@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { isChatModelRef } from "../../../../lib/chat-protocol";
 import { authorizeOwnerSession } from "../../../auth/owner-auth-service";
 import { CatalogQueryError } from "../../../server/chat/chat-model-catalog-query";
-import { ChatModelAuthorizationError, composerChatModels, discoverChatModels, enableChatModel } from "../../../server/chat/chat-model-catalog-service";
+import { ChatModelAuthorizationError, composerChatModels, discoverChatModels, enableChatModel, visionChatModels } from "../../../server/chat/chat-model-catalog-service";
 import { OpenRouterError } from "../../../providers/openrouter/openrouter-catalog-adapter";
 
 async function ownerFor(request: Request) {
@@ -15,6 +15,7 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     if (url.searchParams.get("scope") === "catalog") return NextResponse.json(await discoverChatModels(owner.id, url.searchParams));
+    if (url.searchParams.get("scope") === "vision") return NextResponse.json({ models: await visionChatModels(owner.id) });
     if ([...url.searchParams.keys()].length) return NextResponse.json({ error: "scope must be catalog." }, { status: 400 });
     return NextResponse.json({ models: await composerChatModels(owner.id) });
   } catch (error) {

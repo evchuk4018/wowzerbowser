@@ -18,6 +18,7 @@ import type { ChatToolCall } from "../../../lib/chat-protocol";
 import { recordUsage } from "../usage/usage-store";
 import { analyzeOpenRouterImage, askOpenRouterAboutImage } from "../../providers/openrouter/openrouter-image-adapter";
 import { OPENROUTER_QWEN_FLASH_MODEL } from "../../providers/openrouter/openrouter-config";
+import { configuredVisionModel } from "./chat-model-catalog-service";
 import {
   attachmentFromUploadRecord,
   chatImageStoragePath,
@@ -43,6 +44,7 @@ export type ChatImageUpload = {
 export type ChatImageServiceOptions = {
   signal?: AbortSignal;
   jobId?: string;
+  visionModel?: string | null;
 };
 
 const IMAGE_ANALYSIS_PROMPT = [
@@ -151,7 +153,7 @@ async function analyzeOneChatImage(input: {
   try {
     await uploadChatImageObject(claimed.record.storagePath, upload.bytes, contentType, options.signal);
     const storedBytes = await downloadChatImageObjectByPath(claimed.record.storagePath, contentType);
-    const analysis = await analyzeOpenRouterImage(IMAGE_ANALYSIS_PROMPT, storedBytes, contentType, { signal: options.signal });
+    const analysis = await analyzeOpenRouterImage(IMAGE_ANALYSIS_PROMPT, storedBytes, contentType, { signal: options.signal, model: options.visionModel ?? await configuredVisionModel(ownerId).catch(() => null) });
     const visibleText = analysis.visibleText?.slice(0, MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH) ?? null;
     const mainVisuals = analysis.mainVisuals.slice(0, MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH);
     await recordImageUsage({
@@ -252,7 +254,7 @@ export async function inspectChatImage(input: {
   }
   const image = await findChatImageAttachment(input.ownerId, input.conversationId, input.imageId);
   const bytes = await downloadChatImageObject(input.ownerId, input.conversationId, image);
-  const answer = await askOpenRouterAboutImage(`${FOLLOWUP_SYSTEM_PROMPT}\n\nQuestion: ${question}`, bytes, image.contentType, { signal: input.signal });
+  const answer = await askOpenRouterAboutImage(`${FOLLOWUP_SYSTEM_PROMPT}\n\nQuestion: ${question}`, bytes, image.contentType, { signal: input.signal, model: await configuredVisionModel(input.ownerId).catch(() => null) });
   await recordImageUsage({
     ownerId: input.ownerId,
     conversationId: input.conversationId,
@@ -279,9 +281,9 @@ export function chatToolResultForImageError(callId: string, error: unknown): Cha
 
 export const chatImagePrompts = { IMAGE_ANALYSIS_PROMPT, FOLLOWUP_SYSTEM_PROMPT } as const;
 
-export async function analyzeDocumentImage(bytes: Uint8Array, contentType: ChatImageContentType, signal?: AbortSignal): Promise<{ visibleText: string | null; mainVisuals: string | null }> {
+export async function analyzeDocumentImage(bytes: Uint8Array, contentType: ChatImageContentType, signal?: AbortSignal, visionModel?: string | null): Promise<{ visibleText: string | null; mainVisuals: string | null }> {
   const storedLimit = 2_000;
-  const analysis = await analyzeOpenRouterImage(IMAGE_ANALYSIS_PROMPT, bytes, contentType, { signal });
+  const analysis = await analyzeOpenRouterImage(IMAGE_ANALYSIS_PROMPT, bytes, contentType, { signal, model: visionModel });
   return {
     visibleText: analysis.visibleText?.slice(0, storedLimit) ?? null,
     mainVisuals: analysis.mainVisuals ? analysis.mainVisuals.slice(0, storedLimit) : null,

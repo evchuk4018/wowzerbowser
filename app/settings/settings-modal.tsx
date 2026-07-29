@@ -10,6 +10,7 @@ import type { ChatSettings } from "../chat/conversation-types";
 import { MemorySettings } from "./memory-settings";
 import { ToolsSettings } from "./tools-settings";
 import { ModelsSettings } from "./models-settings";
+import { ConfigurablesSettings } from "./configurables-settings";
 
 export type SettingsModalProps = {
   settings: ChatSettings;
@@ -38,7 +39,7 @@ const sections: Array<{ id: SettingsSection; label: string; description: string;
   { id: "models", label: "Models", description: "Enable built-in and OpenRouter chat models.", icon: "✦" },
   { id: "memory", label: "Memory", description: "Review what the model remembers about you.", icon: "◉" },
   { id: "storage", label: "Storage", description: "Review stored data and retention options.", icon: "▱" },
-  { id: "safety", label: "Safety", description: "Control safeguards and content preferences.", icon: "◇" },
+  { id: "safety", label: "Configurables", description: "Choose runtime models and provider behavior.", icon: "◇" },
   { id: "security", label: "Security and login", description: "Protect your account and active sessions.", icon: "⌾" },
   { id: "account", label: "Account", description: "Manage your profile and account details.", icon: "◎" },
   { id: "keyboard", label: "Keyboard", description: "View and customize keyboard shortcuts.", icon: "⌨" },
@@ -407,11 +408,17 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage, getAccessT
               <ModelsSettings getAccessToken={getAccessToken} />
             ) : activeSection === "memory" ? (
               <MemorySettings getAccessToken={getAccessToken} />
+            ) : activeSection === "safety" ? (
+              <ConfigurablesSettings
+                getAccessToken={getAccessToken}
+                visionModel={draft.visionModel}
+                onVisionModelChange={(visionModel) => setDraft((current) => ({ ...current, visionModel }))}
+              />
             ) : (
               <PlaceholderSettings label={activeLabel} />
             )}
           </div>
-          {(showIndex || activeSection === "general") && (
+          {(showIndex || activeSection === "general" || activeSection === "safety") && (
             <div className="settings-actions">
               <button type="button" className="settings-cancel" onClick={onClose}>Cancel</button>
               <button
@@ -420,6 +427,7 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage, getAccessT
                 onClick={() => onSave({
                   systemPrompt: settings.systemPrompt,
                   userPresence: draft.userPresence.trim(),
+                  visionModel: draft.visionModel,
                 })}
               >
                 Save

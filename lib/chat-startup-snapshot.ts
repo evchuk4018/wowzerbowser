@@ -10,6 +10,7 @@ import {
 } from "./chat-model-preference";
 import type { ChatDocumentAttachment } from "./chat-document";
 import type { ChatImageAttachment } from "./chat-image";
+import { isChatModelRef, type ChatModelRef } from "./chat-protocol";
 
 export const CHAT_STARTUP_SNAPSHOT_SCHEMA_VERSION = 1 as const;
 export const CHAT_STARTUP_SNAPSHOT_MAX_TURNS = 30;
@@ -25,6 +26,7 @@ export type ChatStartupSnapshotV1 = {
   activeConversation: ChatConversation | null;
   activeConversationId: string | null;
   userPresence: string;
+  visionModel: ChatModelRef | null;
   modelPreferences: Array<ChatModelPreference & { conversationId: string }>;
   originalTurnCount: number;
 };
@@ -37,6 +39,7 @@ export type ChatStartupSnapshotInput = {
   activeConversation: ChatConversation | null;
   activeConversationId: string | null;
   userPresence: string;
+  visionModel?: ChatModelRef | null;
   modelPreferences: readonly (ChatModelPreference & { conversationId: string })[];
 };
 
@@ -316,6 +319,7 @@ function parseSummary(value: unknown): ChatConversationSummary | null {
 export function parseChatStartupSnapshot(value: unknown, expectedUserId: string): ChatStartupSnapshotV1 | null {
   const savedAt = isRecord(value) && typeof value.savedAt === "string" ? value.savedAt : null;
   const userPresence = isRecord(value) && typeof value.userPresence === "string" ? value.userPresence : null;
+  const visionModel = isRecord(value) && (value.visionModel === null || value.visionModel === undefined || isChatModelRef(value.visionModel)) ? (value.visionModel ?? null) as ChatModelRef | null : null;
   const originalTurnCount = isRecord(value) && typeof value.originalTurnCount === "number"
     ? value.originalTurnCount
     : null;
@@ -323,6 +327,7 @@ export function parseChatStartupSnapshot(value: unknown, expectedUserId: string)
     || value.userId !== expectedUserId || savedAt === null
     || !Array.isArray(value.summaries) || !Array.isArray(value.modelPreferences)
     || userPresence === null || userPresence.length > 12_000
+    || (value.visionModel !== undefined && !isChatModelRef(value.visionModel) && value.visionModel !== null)
     || originalTurnCount === null || !Number.isInteger(originalTurnCount) || originalTurnCount < 0) return null;
 
   const summaries = value.summaries.map(parseSummary);
@@ -354,6 +359,7 @@ export function parseChatStartupSnapshot(value: unknown, expectedUserId: string)
     activeConversation,
     activeConversationId,
     userPresence,
+    visionModel,
     modelPreferences: modelPreferences as Array<ChatModelPreference & { conversationId: string }>,
     originalTurnCount,
   };
@@ -380,6 +386,7 @@ export function createChatStartupSnapshot(input: ChatStartupSnapshotInput): Chat
     activeConversation,
     activeConversationId: activeConversation?.id ?? input.activeConversationId,
     userPresence: input.userPresence,
+    visionModel: input.visionModel ?? null,
     modelPreferences: input.modelPreferences.flatMap(({ conversationId, ...preference }) => {
       const parsed = parseChatModelPreference(preference);
       return parsed ? [{ conversationId, ...parsed }] : [];

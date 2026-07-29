@@ -6,6 +6,7 @@ export { DEFAULT_CHAT_SYSTEM_PROMPT } from "../../lib/chat-protocol";
 export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   systemPrompt: DEFAULT_CHAT_SYSTEM_PROMPT,
   userPresence: "",
+  visionModel: null,
 };
 
 export function makeId(): string {

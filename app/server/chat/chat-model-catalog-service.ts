@@ -44,6 +44,28 @@ export async function composerChatModels(ownerId: string): Promise<ChatModelInfo
   const catalog = await discoverChatModels(ownerId, new URLSearchParams());
   return [...DEFAULT_CHAT_MODELS, ...catalog.models.filter((item) => item.enabled && item.toolSupport && item.outputModalities.includes("text"))];
 }
+
+export function isVisionChatModel(model: ChatModelInfo): boolean {
+  return model.ref.provider === "openrouter"
+    && model.inputModalities.includes("image")
+    && model.outputModalities.includes("text")
+    && model.supportedParameters.includes("structured_outputs");
+}
+
+export async function visionChatModels(ownerId: string): Promise<ChatModelInfo[]> {
+  const catalog = await discoverChatModels(ownerId, new URLSearchParams({ input_modalities: "image" }));
+  const enabled = new Set(await listEnabledOpenRouterModels(ownerId));
+  return catalog.models.filter((model) => enabled.has(model.ref.model) && isVisionChatModel(model));
+}
+
+export async function configuredVisionModel(ownerId: string): Promise<string | null> {
+  const { getChatUserPreferences } = await import("./chat-user-preferences-store");
+  const preference = await getChatUserPreferences(ownerId);
+  const ref = preference.visionModel;
+  if (!ref) return null;
+  const models = await visionChatModels(ownerId);
+  return models.some((model) => chatModelIdentity(model.ref) === chatModelIdentity(ref)) ? ref.model : null;
+}
 export async function enableChatModel(ownerId: string, ref: ChatModelRef, enabled: boolean) {
   if (ref.provider !== "openrouter") throw new ChatModelAuthorizationError("Built-in models cannot be disabled.");
   const catalog = await discoverChatModels(ownerId, new URLSearchParams({ q: ref.model }));
