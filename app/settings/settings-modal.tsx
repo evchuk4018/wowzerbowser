@@ -33,7 +33,7 @@ type SettingsSection =
   | "keyboard";
 
 const sections: Array<{ id: SettingsSection; label: string; description: string; icon: string }> = [
-  { id: "general", label: "General", description: "Conversation context and app preferences.", icon: "⚙" },
+  { id: "general", label: "General", description: "Conversation context and app preferences.", icon: "settings" },
   { id: "usage", label: "Usage", description: "Review token volume and estimated costs.", icon: "◫" },
   { id: "tools", label: "Tools", description: "Create Python tools and securely connect APIs.", icon: "♢" },
   { id: "models", label: "Models", description: "Enable built-in and OpenRouter chat models.", icon: "✦" },
@@ -385,7 +385,14 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage, getAccessT
                     aria-current={activeSection === section.id ? "page" : undefined}
                     onClick={() => openSection(section.id)}
                   >
-                    <span className="settings-card-icon" aria-hidden="true">{section.icon}</span>
+                    <span className="settings-card-icon" aria-hidden="true">
+                      {section.icon === "settings" ? (
+                        <svg viewBox="0 0 24 24">
+                          <circle cx="12" cy="12" r="3.5" />
+                          <path d="M12 2.75v2.1M12 19.15v2.1M21.25 12h-2.1M4.85 12h-2.1M18.54 5.46l-1.49 1.49M6.95 17.05l-1.49 1.49M18.54 18.54l-1.49-1.49M6.95 6.95 5.46 5.46" />
+                        </svg>
+                      ) : section.icon}
+                    </span>
                     <span className="settings-card-copy">
                       <strong>{section.label}</strong>
                       <span>{section.description}</span>

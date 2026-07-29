@@ -561,7 +561,10 @@ export function ChatComposer({
               aria-label="Send message"
               disabled={disabled || (!draft.trim() && attachments.length === 0 && documents.length === 0 && preservedAttachments.length === 0 && preservedDocuments.length === 0)}
             >
-              ↑
+              <svg className="send-icon" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M8 13V3" />
+                <path d="m4.5 6.5 3.5-3.5 3.5 3.5" />
+              </svg>
             </button>
           )}
         </div>

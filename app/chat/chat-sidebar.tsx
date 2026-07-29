@@ -163,7 +163,10 @@ export function ChatSidebar({
             aria-label="Open settings"
             onClick={onOpenSettings}
           >
-            <span className="settings-icon" aria-hidden="true">⚙</span>
+            <svg className="settings-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="3.5" />
+              <path d="M12 2.75v2.1M12 19.15v2.1M21.25 12h-2.1M4.85 12h-2.1M18.54 5.46l-1.49 1.49M6.95 17.05l-1.49 1.49M18.54 18.54l-1.49-1.49M6.95 6.95 5.46 5.46" />
+            </svg>
           </button>
           <div className="account-details">
             <div className="account-name">{userEmail}</div>

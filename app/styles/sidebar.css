@@ -279,8 +279,13 @@
 }
 
 .settings-icon {
-  font-size: 19px;
-  line-height: 1;
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
 }
 
 .account-name {
