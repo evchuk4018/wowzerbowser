@@ -7,6 +7,7 @@ import type {
   ChatStreamEvent,
 } from "./chat-protocol";
 import type { ChatCitation, ChatSource } from "./chat-citations";
+import type { TodoList } from "./todo-protocol";
 
 export type ChatMessageStatus = "streaming" | "complete" | "error" | "cancelled";
 
@@ -73,6 +74,7 @@ export type ChatHistoryMessage = {
   tracePhase?: number;
   annotations?: ChatCitation[];
   sources?: ChatSource[];
+  todos?: TodoList;
 };
 
 export type ChatTurnVersion = {
@@ -93,6 +95,7 @@ export type ChatConversation = {
   id: string;
   title: string;
   turns: ChatConversationTurn[];
+  todos?: TodoList;
 };
 
 /**
@@ -209,6 +212,8 @@ export function applyChatStreamEvent(
     }
     next.reasoning = `${next.reasoning ?? ""}${event.delta}`;
     next.activities = activities;
+  } else if (event.type === "todo_update") {
+    next.todos = event.todos;
   } else if (event.type === "phase_summary") {
     next.activities = next.activities?.map((activity) =>
       activity.kind === "reasoning" && activity.phase === event.phase && (activity.summaryRevision ?? -1) <= event.revision

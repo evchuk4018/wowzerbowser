@@ -16,6 +16,7 @@ export const USAGE_REQUEST_KINDS = [
   "chat_summary",
   "chat_recall",
   "dreaming",
+  "todo_planner",
 ] as const;
 export type UsageRequestKind = (typeof USAGE_REQUEST_KINDS)[number];
 

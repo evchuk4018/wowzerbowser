@@ -20,6 +20,7 @@ import {
 } from "./chat-image-attachments";
 import { validateChatDocument, type PendingChatDocument } from "./chat-document-attachments";
 import { DOCX_CONTENT_TYPE, DOCUMENT_CONTENT_TYPES, type ChatDocumentAttachment } from "../../lib/chat-document";
+import type { TodoList } from "../../lib/todo-protocol";
 
 function formatDocumentSize(size: number): string {
   if (size < 1024) return `${size} B`;
@@ -82,7 +83,28 @@ export type ChatComposerProps = {
   onCancelDocumentPreparation: (document: PendingChatDocument) => Promise<void>;
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onStop: () => void;
+  todos?: TodoList;
 };
+
+function TodoBar({ todos }: { todos?: TodoList }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!todos?.items.length) return null;
+  const active = todos.items.filter((item) => item.status !== "completed");
+  const top = active[0] ?? todos.items.at(-1)!;
+  const completed = todos.items.length - active.length;
+  return (
+    <div className={`composer-todos ${expanded ? "composer-todos--expanded" : ""}`}>
+      <button type="button" className="composer-todos-trigger" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
+        <span className="composer-todos-label">Todo {completed}/{todos.items.length}</span>
+        <span className="composer-todos-top" title={top.text}>{top.text}</span>
+        <span aria-hidden="true">{expanded ? "⌃" : "⌄"}</span>
+      </button>
+      {expanded && <ol className="composer-todos-list">
+        {todos.items.map((item) => <li key={item.id} className={item.status === "completed" ? "is-complete" : ""}><span aria-hidden="true">{item.status === "completed" ? "✓" : "○"}</span>{item.text}</li>)}
+      </ol>}
+    </div>
+  );
+}
 
 export function ChatComposer({
   draft,
@@ -120,6 +142,7 @@ export function ChatComposer({
   onCancelDocumentPreparation,
   onKeyDown,
   onStop,
+  todos,
 }: ChatComposerProps) {
   const [attachments, setAttachments] = useState<PendingChatImage[]>([]);
   const [documents, setDocuments] = useState<PendingChatDocument[]>([]);
@@ -338,6 +361,7 @@ export function ChatComposer({
             })}
           </div>
         )}
+        <TodoBar todos={todos} />
         <textarea
           ref={textareaRef}
           value={draft}

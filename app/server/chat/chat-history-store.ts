@@ -15,6 +15,7 @@ import {
 import { getServerClient } from "../../auth/supabase-server-adapter";
 import { attachmentFromUploadRecord, listChatImageUploadRecords } from "./chat-image-store";
 import type { ChatSearchResult } from "../../../lib/chat-search";
+import type { TodoList } from "../../../lib/todo-protocol";
 
 type MessageRow = {
   owner_id: string;
@@ -38,6 +39,7 @@ type MessageRow = {
   trace_round: number | null;
   annotations: unknown;
   sources: unknown;
+  todos: unknown;
 };
 
 function client() {
@@ -85,6 +87,7 @@ function messageFromRow(row: MessageRow): ChatHistoryMessage {
     tracePhase,
     ...(Array.isArray(row.annotations) && row.annotations.length ? { annotations: row.annotations } : {}),
     ...(Array.isArray(row.sources) && row.sources.length ? { sources: row.sources } : {}),
+    ...(row.todos && typeof row.todos === "object" ? { todos: row.todos as TodoList } : {}),
   };
 }
 
@@ -117,6 +120,7 @@ function messageRow(
     trace_round: message.traceRound ?? null,
     annotations: message.annotations ?? [],
     sources: message.sources ?? [],
+    todos: message.todos ?? null,
     updated_at: new Date().toISOString(),
   };
 }

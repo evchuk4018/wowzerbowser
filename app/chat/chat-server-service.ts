@@ -36,6 +36,9 @@ import { executeUserMemoryTool, userMemoryToolDefinitions } from "../server/agen
 import { USER_MEMORY_TOOL_INSTRUCTIONS } from "../server/agent/user-memory-tool-instructions";
 import { RESPONSE_STYLE_INSTRUCTIONS } from "../server/agent/response-style-instructions";
 import { recordUsage } from "../server/usage/usage-store";
+import { TODO_TOOL_DEFINITIONS, executeTodoTool } from "../server/agent/todo-tool";
+import { getTodoList } from "../server/chat/chat-todo-store";
+import { planTodos } from "../server/chat/chat-todo-planner";
 
 const MAX_RESPONSE_MS = 240_000;
 
@@ -76,6 +79,32 @@ export async function generateChatResponse(
   const responseDeadlineAt = Date.now() + MAX_RESPONSE_MS;
   const responseId = chatRequest.jobId;
   const conversationId = stableConversationId(chatRequest);
+  const currentTodos = await getTodoList(ownerId, conversationId).catch(() => ({ revision: 0, items: [] }));
+  const latestPreviousAssistant = [...chatRequest.messages].reverse().find((message) => message.role === "assistant")?.content;
+  const planner = await planTodos({
+    ownerId,
+    conversationId,
+    userMessage: chatRequest.messages.at(-1)?.content ?? "",
+    previousAssistantOutput: latestPreviousAssistant,
+    current: currentTodos,
+    signal,
+    onUsage: async (answer) => {
+      await recordUsage({
+        ownerId,
+        provider: "openrouter",
+        model: answer.model,
+        requestKind: "todo_planner",
+        requestId: responseId ?? `todo-${conversationId}`,
+        round: 0,
+        usage: answer.usage ?? answer.estimatedUsage,
+        source: answer.usage ? "exact" : "estimated",
+        exactCostUsd: answer.exactCostUsd,
+        unpriced: answer.exactCostUsd === undefined,
+        conversationId,
+        jobId: responseId,
+      }).catch(() => undefined);
+    },
+  });
   const pythonTools = availableChatTools();
   const webTools = availableWebTools();
   const customTools = isModalConfigured()
@@ -107,12 +136,13 @@ export async function generateChatResponse(
   const pdfEditTools = availablePdfEditTools([...authoritativePdfs.values()].some((document) => document.contentType === "application/pdf"));
   const allowedProjectIds = new Set([...authoritativePdfs.values()].map((document) => document.projectId).filter((projectId): projectId is string => Boolean(projectId)));
   const phaseTools = chatRequest.thinking ? [PHASE_BREAK_TOOL_DEFINITION] : [];
-  const baseToolDefinitions = [...pythonTools, ...imageTools, ...webTools, ...pdfEditTools, ...phaseTools, ...customDefinitions, ...chatMemoryTools, ...userMemoryTools];
+  const baseToolDefinitions = [...pythonTools, ...imageTools, ...webTools, ...pdfEditTools, ...phaseTools, ...customDefinitions, ...chatMemoryTools, ...userMemoryTools, ...TODO_TOOL_DEFINITIONS];
   const imageToolAdvertised = imageTools.some((tool) => tool.function.name === INSPECT_IMAGE_TOOL_NAME);
 
   const enqueue = async (event: ChatStreamEvent) => {
     if (!signal.aborted) await persistEvent(event);
   };
+      if (planner) await enqueue({ type: "todo_update", todos: planner });
       await enqueue({
         type: "meta",
         model: chatRequest.model,
@@ -294,6 +324,12 @@ export async function generateChatResponse(
                 ownerId,
                 conversationId,
                 jobId: responseId ?? `chat-${conversationId}`,
+              });
+            } else if (TODO_TOOL_DEFINITIONS.some((tool) => tool.function.name === call.name)) {
+              result = await executeTodoTool(call, {
+                ownerId,
+                conversationId,
+                onUpdate: async (todos) => enqueue({ type: "todo_update", todos }),
               });
             } else if (pdfEditTools.some((tool) => tool.function.name === call.name)) {
               if (!isModalConfigured() && call.name !== "inspect_pdf_editability" && call.name !== "compare_document_revisions") throw new Error("PDF editing is not configured.");

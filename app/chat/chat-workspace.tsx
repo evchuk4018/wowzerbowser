@@ -967,6 +967,7 @@ export function ChatWorkspace({
           onCancelDocumentPreparation={generation.cancelChatDocumentPreparation}
           onKeyDown={handleKeyDown}
           onStop={() => void generation.stopStreaming()}
+          todos={latestMessage?.todos}
         />
       </section>
       {pdfPreview && (

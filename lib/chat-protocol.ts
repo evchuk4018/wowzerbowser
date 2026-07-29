@@ -1,4 +1,5 @@
 import { sourceForUrl, type ChatCitation, type ChatSource } from "./chat-citations";
+import type { TodoList } from "./todo-protocol";
 
 export const DEFAULT_CHAT_SYSTEM_PROMPT = `<bobert_behavior>
 
@@ -284,6 +285,7 @@ export type ChatModelPricing = {
 };
 
 export type ChatStreamEvent =
+  | { type: "todo_update"; todos: TodoList }
   | { type: "round"; round: number }
   | { type: "reasoning"; delta: string }
   | { type: "reasoning_details"; details: unknown[] }

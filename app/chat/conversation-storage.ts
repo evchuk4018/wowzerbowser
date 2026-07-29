@@ -11,6 +11,7 @@ import type {
 } from "../../lib/chat-history";
 import { DOCUMENT_CONTENT_TYPES, type ChatDocumentAttachment } from "../../lib/chat-document";
 import { sourceForUrl } from "../../lib/chat-citations";
+import { normalizeTodoList } from "../../lib/todo-protocol";
 import {
   deleteChatConversation,
   fetchChatConversation,
@@ -276,6 +277,7 @@ export function normalizeStoredMessage(
     message.status = candidate.status as Message["status"];
   }
   if (typeof candidate.error === "string") message.error = candidate.error;
+  if (candidate.todos && typeof candidate.todos === "object") message.todos = normalizeTodoList(candidate.todos);
   if (typeof candidate.jobId === "string" && candidate.jobId.length > 0) message.jobId = candidate.jobId;
   const lastSequence = finiteNumber(candidate.lastSequence);
   if (lastSequence !== undefined && lastSequence >= 0) message.lastSequence = lastSequence;

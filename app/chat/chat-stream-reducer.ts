@@ -67,6 +67,9 @@ export function reduceChatStreamEvent(
     case "annotations":
       waiting = false;
       break;
+    case "todo_update":
+      waiting = false;
+      break;
     case "error":
       waiting = false;
       streamError = true;
