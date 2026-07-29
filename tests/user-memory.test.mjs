@@ -6,8 +6,55 @@ import {
   parseDreamingActions,
 } from "../lib/user-memory.ts";
 import { buildDreamingPrompt } from "../app/server/memory/dreaming-prompt.ts";
+import {
+  describeBackgroundError,
+  formatBackgroundError,
+  logBackgroundTaskFailure,
+} from "../app/server/observability/background-error.ts";
 
 const source = async (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+
+test("background errors preserve database fields and redact credentials", () => {
+  const error = {
+    code: "23505",
+    message: "duplicate key sk-test-secret-value",
+    details: "A row already exists.",
+    hint: "Use the existing row.",
+  };
+  assert.deepEqual(describeBackgroundError(error), {
+    code: "23505",
+    message: "duplicate key [redacted]",
+    details: "A row already exists.",
+    hint: "Use the existing row.",
+  });
+  assert.match(formatBackgroundError(error), /\[23505\]/);
+  assert.doesNotMatch(formatBackgroundError(error), /sk-test-secret-value/);
+});
+
+test("background failure logs retain searchable context and error code", () => {
+  const writes = [];
+  const originalWarn = console.warn;
+  console.warn = (value) => writes.push(value);
+  try {
+    logBackgroundTaskFailure("user-memory-dreaming-failed", {
+      runId: "run-1",
+      conversationId: "chat-1",
+      jobId: "job-1",
+      attempt: 3,
+    }, { code: "PGRST116", message: "Expected one row." });
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.deepEqual(writes[0], {
+    event: "user-memory-dreaming-failed",
+    runId: "run-1",
+    conversationId: "chat-1",
+    jobId: "job-1",
+    attempt: 3,
+    errorCode: "PGRST116",
+    errorMessage: "Expected one row.",
+  });
+});
 
 test("memory normalization makes exact duplicate keys stable", () => {
   assert.equal(normalizeMemoryKey("  Pokémon   GO "), normalizeMemoryKey("Pokémon GO"));
@@ -89,6 +136,20 @@ test("dreaming repository deduplicates three source jobs by conversation using t
   assert.match(repository, /newestByChat\.set\(row\.conversation_id, row\)/);
   assert.match(repository, /result_summary/);
   assert.match(repository, /status === "completed"/);
+  assert.match(repository, /action_plan,last_error/);
+  assert.match(repository, /saveDreamingActionPlan/);
+});
+
+test("dreaming stores an action plan before applying it and reuses it on retry", async () => {
+  const [service, migration] = await Promise.all([
+    source("app/server/memory/dreaming-service.ts"),
+    source("supabase/migrations/20260729010000_user_memory_dreaming_reliability.sql"),
+  ]);
+  assert.match(service, /const persistedActions = run\.actionPlan\?\.actions \?\? null/);
+  assert.match(service, /if \(!persistedActions\) await saveDreamingActionPlan/);
+  assert.match(service, /for \(const \[index, action\] of actions\.entries\(\)\) await applyAction/);
+  assert.match(migration, /add column if not exists result_summary/);
+  assert.match(migration, /add column if not exists action_plan/);
 });
 
 test("agent memory tools keep server-owned provenance and expose all requested operations", async () => {
@@ -112,5 +173,6 @@ test("post-chat dreaming remains isolated from normal response delivery", async 
   assert.match(route, /await completion/);
   assert.match(route, /processChatSummaryForCompletedJob/);
   assert.match(route, /processDreamingForCompletedJob/);
-  assert.match(route, /processDreamingForCompletedJob[\s\S]*?\.catch\(\(\) => undefined\)/);
+  assert.match(route, /user-memory-dreaming-background-failed/);
+  assert.match(route, /chat-summary-background-failed/);
 });

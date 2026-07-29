@@ -3,6 +3,7 @@ import "server-only";
 import type { DreamingAction, DreamingSource } from "../../../lib/user-memory";
 import { consolidateUserMemoryWithQwen } from "../../providers/openrouter/openrouter-dreaming-adapter";
 import { recordUsage } from "../usage/usage-store";
+import { formatBackgroundError, logBackgroundTaskFailure } from "../observability/background-error";
 import {
   claimDreamingRun,
   beginDreamingAttempt,
@@ -13,6 +14,7 @@ import {
   hasAppliedDreamingAction,
   markDreamingActionApplied,
   registerCompletedJobForDreaming,
+  saveDreamingActionPlan,
 } from "./dreaming-repository";
 import { buildDreamingPrompt } from "./dreaming-prompt";
 import {
@@ -53,23 +55,39 @@ async function applyAction(ownerId: string, runId: string, index: number, action
   await markDreamingActionApplied(runId, index);
 }
 
-async function executeRun(ownerId: string, runId: string): Promise<boolean> {
+async function executeRun(
+  ownerId: string,
+  runId: string,
+  trigger: { conversationId: string; jobId: string },
+): Promise<boolean> {
   const run = await getDreamingRun(ownerId, runId);
   if (!run || run.status === "completed" || run.status === "failed") return false;
   const sources = await getDreamingSources(ownerId, runId);
   if (!sources) {
     if (await beginDreamingAttempt(ownerId, runId, run.attemptCount)) {
-      await failDreamingRun(ownerId, runId, run.attemptCount + 1, "Source chat summaries are not ready.").catch(() => undefined);
+      const error = new Error("Source chat summaries are not ready.");
+      await failDreamingRun(ownerId, runId, run.attemptCount + 1, formatBackgroundError(error)).catch(() => undefined);
+      logBackgroundTaskFailure("user-memory-dreaming-failed", {
+        ownerId,
+        runId,
+        conversationId: trigger.conversationId,
+        jobId: trigger.jobId,
+        attempt: run.attemptCount + 1,
+      }, error);
     }
     return run.attemptCount + 1 >= 3;
   }
   if (!await beginDreamingAttempt(ownerId, runId, run.attemptCount)) return false;
   try {
     const tree = await getUserMemoryTree(ownerId);
-    const answer = await consolidateUserMemoryWithQwen(buildDreamingPrompt(tree, sources));
+    const persistedActions = run.actionPlan?.actions ?? null;
+    const answer = persistedActions
+      ? { actions: persistedActions, model: run.model ?? "qwen/qwen3.7-flash", usage: null }
+      : await consolidateUserMemoryWithQwen(buildDreamingPrompt(tree, sources));
     const actions = answer.actions.some((action) => action.action !== "noop")
       ? answer.actions.filter((action) => action.action !== "noop")
       : answer.actions.slice(0, 1);
+    if (!persistedActions) await saveDreamingActionPlan(ownerId, runId, answer.model, { actions });
     for (const [index, action] of actions.entries()) await applyAction(ownerId, runId, index, action, sources);
     const completedTree = await getUserMemoryTree(ownerId);
     await completeDreamingRun(ownerId, runId, completedTree.revision, answer.model, { actions });
@@ -89,9 +107,15 @@ async function executeRun(ownerId: string, runId: string): Promise<boolean> {
     }
     return true;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Dreaming failed.";
-    await failDreamingRun(ownerId, runId, run.attemptCount + 1, message).catch(() => undefined);
-    console.warn({ event: "user-memory-dreaming-failed", runId, attempt: run.attemptCount + 1, error: message });
+    const attempt = run.attemptCount + 1;
+    await failDreamingRun(ownerId, runId, attempt, formatBackgroundError(error)).catch(() => undefined);
+    logBackgroundTaskFailure("user-memory-dreaming-failed", {
+      ownerId,
+      runId,
+      conversationId: trigger.conversationId,
+      jobId: trigger.jobId,
+      attempt,
+    }, error);
     return true;
   }
 }
@@ -106,7 +130,7 @@ export async function processDreamingForCompletedJob(
   for (let processed = 0; processed < 8; processed += 1) {
     const runId = await claimDreamingRun(ownerId);
     if (!runId) return;
-    const shouldContinue = await executeRun(ownerId, runId);
+    const shouldContinue = await executeRun(ownerId, runId, { conversationId, jobId });
     if (!shouldContinue) return;
   }
 }

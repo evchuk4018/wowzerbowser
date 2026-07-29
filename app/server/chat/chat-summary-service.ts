@@ -7,6 +7,7 @@ import {
   type ChatSummaryTask,
 } from "../../../lib/chat-summary";
 import { recordUsage } from "../usage/usage-store";
+import { formatBackgroundError, logBackgroundTaskFailure } from "../observability/background-error";
 import { summarizeChatWithQwen } from "../../providers/openrouter/openrouter-qwen-text-adapter";
 import { OpenRouterError } from "../../providers/openrouter/openrouter-catalog-adapter";
 import {
@@ -30,12 +31,6 @@ function enabled(): boolean {
   const summaries = ["1", "true", "yes", "on"].includes(process.env.CHAT_DURABLE_SUMMARIES_ENABLED?.trim().toLowerCase() ?? "");
   const dreaming = !["0", "false", "no", "off"].includes(process.env.USER_MEMORY_DREAMING_ENABLED?.trim().toLowerCase() ?? "");
   return summaries || dreaming;
-}
-
-function safeErrorCode(error: unknown): string {
-  if (error instanceof OpenRouterError) return error.name || "OpenRouterError";
-  if (error instanceof Error) return error.name || "Error";
-  return "UnknownError";
 }
 
 function retryableError(error: unknown): boolean {
@@ -166,16 +161,15 @@ async function processChatSummaryTasks(ownerId: string, conversationId: string):
       await executeChatSummaryTask(task);
     } catch (error) {
       const retryable = error instanceof ChatSummaryConflictError || retryableError(error);
-      const message = safeErrorCode(error);
+      const message = formatBackgroundError(error);
       await failChatSummaryTask(task, message, retryable).catch(() => undefined);
-      console.warn({
-        event: "chat-summary-failed",
+      logBackgroundTaskFailure("chat-summary-failed", {
+        ownerId,
         conversationId,
         sourceJobId: task.sourceJobId,
         attempt: task.attemptCount,
         retryable,
-        error: message,
-      });
+      }, error);
       if (task.attemptCount >= CHAT_SUMMARY_MAX_ATTEMPTS || !retryable) continue;
     }
   }

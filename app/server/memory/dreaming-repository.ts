@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { DreamingSource } from "../../../lib/user-memory";
+import type { DreamingAction, DreamingSource } from "../../../lib/user-memory";
 import { getServerClient } from "../../auth/supabase-server-adapter";
 
 const db = () => getServerClient();
@@ -10,6 +10,9 @@ export type DreamingRun = {
   ownerId: string;
   status: "queued" | "running" | "completed" | "failed";
   attemptCount: number;
+  model: string | null;
+  actionPlan: { actions: DreamingAction[] } | null;
+  lastError: string | null;
 };
 
 type SourceRow = {
@@ -44,7 +47,7 @@ export async function claimDreamingRun(ownerId: string): Promise<string | null> 
 }
 
 export async function getDreamingRun(ownerId: string, runId: string): Promise<DreamingRun | null> {
-  const { data, error } = await db().from("dreaming_runs").select("id,owner_id,status,attempt_count")
+  const { data, error } = await db().from("dreaming_runs").select("id,owner_id,status,attempt_count,model,action_plan,last_error")
     .eq("owner_id", ownerId).eq("id", runId).maybeSingle();
   if (error) throw error;
   return data ? {
@@ -52,6 +55,12 @@ export async function getDreamingRun(ownerId: string, runId: string): Promise<Dr
     ownerId: data.owner_id,
     status: data.status as DreamingRun["status"],
     attemptCount: Number(data.attempt_count),
+    model: typeof data.model === "string" ? data.model : null,
+    actionPlan: data.action_plan && typeof data.action_plan === "object" && !Array.isArray(data.action_plan)
+      && Array.isArray((data.action_plan as { actions?: unknown }).actions)
+      ? { actions: (data.action_plan as { actions: DreamingAction[] }).actions }
+      : null,
+    lastError: typeof data.last_error === "string" ? data.last_error : null,
   } : null;
 }
 
@@ -100,6 +109,22 @@ export async function hasAppliedDreamingAction(runId: string, actionIndex: numbe
     .eq("run_id", runId).eq("action_index", actionIndex).maybeSingle();
   if (error) throw error;
   return Boolean(data);
+}
+
+export async function saveDreamingActionPlan(
+  ownerId: string,
+  runId: string,
+  model: string,
+  actionPlan: { actions: DreamingAction[] },
+): Promise<void> {
+  const { data, error } = await db().from("dreaming_runs").update({
+    model,
+    action_plan: actionPlan,
+    updated_at: new Date().toISOString(),
+  }).eq("owner_id", ownerId).eq("id", runId).eq("status", "running")
+    .select("id").maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("The dreaming run changed while its action plan was being saved.");
 }
 
 export async function markDreamingActionApplied(runId: string, actionIndex: number): Promise<void> {
