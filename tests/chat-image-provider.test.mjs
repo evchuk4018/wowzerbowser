@@ -14,7 +14,6 @@ import {
   OPENROUTER_GEMINI_FLASH_LITE_MODEL,
   OPENROUTER_IMAGE_MODELS,
   OPENROUTER_NEX_N2_MINI_MODEL,
-  OPENROUTER_QWEN_FLASH_MODEL,
 } from "../app/providers/openrouter/openrouter-config.ts";
 
 process.env.OPENROUTER_API_KEY ??= "test-key";
@@ -51,13 +50,13 @@ test("OpenRouter image transport sends the prompt before the image and returns a
   assert.equal(answer.usage?.totalTokens, 15);
   const body = JSON.parse(calls[0].init.body);
   assert.equal(calls[0].url, "https://openrouter.ai/api/v1/chat/completions");
-  assert.equal(OPENROUTER_IMAGE_MODEL, OPENROUTER_QWEN_FLASH_MODEL);
+  assert.equal(OPENROUTER_IMAGE_MODEL, OPENROUTER_AUTO_MODEL);
   assert.deepEqual(body.models, [
-    OPENROUTER_QWEN_FLASH_MODEL,
     OPENROUTER_AUTO_MODEL,
     OPENROUTER_NEX_N2_MINI_MODEL,
     OPENROUTER_GEMINI_FLASH_LITE_MODEL,
   ]);
+  assert.equal(body.models.length, 3);
   assert.deepEqual(body.models, [...OPENROUTER_IMAGE_MODELS]);
   assert.equal(body.model, undefined);
   assert.equal(body.messages[0].content[0].type, "text");

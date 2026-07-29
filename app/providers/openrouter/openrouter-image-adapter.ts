@@ -10,11 +10,11 @@ import {
 import {
   OPENROUTER_BASE_URL,
   OPENROUTER_IMAGE_MODELS,
-  OPENROUTER_QWEN_FLASH_MODEL,
+  OPENROUTER_AUTO_MODEL,
 } from "./openrouter-config";
 
 export { OPENROUTER_BASE_URL } from "./openrouter-config";
-export const OPENROUTER_IMAGE_MODEL = OPENROUTER_QWEN_FLASH_MODEL;
+export const OPENROUTER_IMAGE_MODEL = OPENROUTER_AUTO_MODEL;
 export const PDF_PAGE_OCR_PROMPT = "Extract all visible text from this PDF page. Preserve reading order and line breaks where practical. Return only the text; do not describe the page, add markdown, or summarize.";
 
 export type OpenRouterImageAnswer = {
