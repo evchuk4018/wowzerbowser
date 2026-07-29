@@ -109,10 +109,9 @@ test("run_python instructions are absent unless the tool is advertised", () => {
   assert.match(RUN_PYTHON_INSTRUCTIONS, /packages.*20/i);
   assert.match(RUN_PYTHON_INSTRUCTIONS, /args.*32/i);
   assert.match(RUN_PYTHON_INSTRUCTIONS, /artifacts.*20/i);
-  assert.match(RUN_PYTHON_INSTRUCTIONS, /PDF.*actual run_python call/i);
-  assert.match(RUN_PYTHON_INSTRUCTIONS, /preinstalled ReportLab.*do not install.*separate probe/i);
-  assert.match(RUN_PYTHON_INSTRUCTIONS, /one call.*short_story\.pdf.*identical path.*artifacts/i);
   assert.match(RUN_PYTHON_INSTRUCTIONS, /Do not claim.*ok: true.*expected file.*artifacts/i);
+  assert.doesNotMatch(RUN_PYTHON_INSTRUCTIONS, /When the user asks.*PDF/i);
+  assert.doesNotMatch(RUN_PYTHON_INSTRUCTIONS, /short_story\.pdf|source-backed document projects/i);
   assert.doesNotMatch(RUN_PYTHON_INSTRUCTIONS, /six \(6\) run_python calls/i);
   assert.match(RUN_PYTHON_INSTRUCTIONS, /ok.*stdout.*stderr.*exitCode.*artifacts/i);
 });

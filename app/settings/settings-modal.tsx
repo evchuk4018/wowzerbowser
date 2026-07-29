@@ -11,6 +11,7 @@ import { MemorySettings } from "./memory-settings";
 import { ToolsSettings } from "./tools-settings";
 import { ModelsSettings } from "./models-settings";
 import { ConfigurablesSettings } from "./configurables-settings";
+import { SkillsSettings } from "./skills-settings";
 
 export type SettingsModalProps = {
   settings: ChatSettings;
@@ -30,7 +31,7 @@ type SettingsSection =
   | "safety"
   | "security"
   | "account"
-  | "keyboard";
+  | "skills";
 
 const sections: Array<{ id: SettingsSection; label: string; description: string; icon: string }> = [
   { id: "general", label: "General", description: "Conversation context and app preferences.", icon: "settings" },
@@ -42,7 +43,7 @@ const sections: Array<{ id: SettingsSection; label: string; description: string;
   { id: "safety", label: "Configurables", description: "Choose runtime models and provider behavior.", icon: "◇" },
   { id: "security", label: "Security and login", description: "Protect your account and active sessions.", icon: "⌾" },
   { id: "account", label: "Account", description: "Manage your profile and account details.", icon: "◎" },
-  { id: "keyboard", label: "Keyboard", description: "View and customize keyboard shortcuts.", icon: "⌨" },
+  { id: "skills", label: "Skills", description: "Create reusable instructions the assistant loads on demand.", icon: "✦" },
 ];
 
 const ranges: Array<{ id: UsageRange; label: string }> = [
@@ -415,6 +416,8 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage, getAccessT
               <ModelsSettings getAccessToken={getAccessToken} />
             ) : activeSection === "memory" ? (
               <MemorySettings getAccessToken={getAccessToken} />
+            ) : activeSection === "skills" ? (
+              <SkillsSettings getAccessToken={getAccessToken} />
             ) : activeSection === "safety" ? (
               <ConfigurablesSettings
                 getAccessToken={getAccessToken}

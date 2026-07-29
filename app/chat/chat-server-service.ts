@@ -39,6 +39,11 @@ import { recordUsage } from "../server/usage/usage-store";
 import { TODO_TOOL_DEFINITIONS, executeTodoTool } from "../server/agent/todo-tool";
 import { getTodoList } from "../server/chat/chat-todo-store";
 import { planTodos } from "../server/chat/chat-todo-planner";
+import { listOwnerSkills } from "../server/skills/skill-service";
+import { skillCatalogInstructions } from "../server/agent/skill-instructions";
+import { executeReadSkillTool } from "../server/agent/skill-tool";
+import { READ_SKILL_TOOL_NAME, SKILL_TOOL_DEFINITIONS } from "../server/agent/skill-tool-manifest";
+import { builtinSkillFallbacks } from "../server/skills/builtin-skills";
 
 const MAX_RESPONSE_MS = 240_000;
 
@@ -117,6 +122,11 @@ export async function generateChatResponse(
   const customDefinitions = customToolDefinitions(customTools);
   const chatMemoryTools = chatMemoryToolDefinitions();
   const userMemoryTools = userMemoryToolDefinitions();
+  const skills = await listOwnerSkills(ownerId).catch((error) => {
+    console.warn({ event: "skills-unavailable", ownerId, failure: error instanceof Error ? error.name : "UnknownError" });
+    return builtinSkillFallbacks();
+  });
+  const skillsById = new Map(skills.map((skill) => [skill.id, skill]));
   const allowedImageIds = await getAuthoritativeChatImageIdsForRequest(ownerId, chatRequest);
   const requestedPdfIds = [...new Set(chatRequest.messages.flatMap((message) => message.documents?.map((item) => item.id) ?? []))];
   const allowedPdfIds = new Set<string>();
@@ -136,7 +146,7 @@ export async function generateChatResponse(
   const pdfEditTools = availablePdfEditTools([...authoritativePdfs.values()].some((document) => document.contentType === "application/pdf"));
   const allowedProjectIds = new Set([...authoritativePdfs.values()].map((document) => document.projectId).filter((projectId): projectId is string => Boolean(projectId)));
   const phaseTools = chatRequest.thinking ? [PHASE_BREAK_TOOL_DEFINITION] : [];
-  const baseToolDefinitions = [...pythonTools, ...imageTools, ...webTools, ...pdfEditTools, ...phaseTools, ...customDefinitions, ...chatMemoryTools, ...userMemoryTools, ...TODO_TOOL_DEFINITIONS];
+  const baseToolDefinitions = [...pythonTools, ...imageTools, ...webTools, ...pdfEditTools, ...phaseTools, ...customDefinitions, ...chatMemoryTools, ...userMemoryTools, ...SKILL_TOOL_DEFINITIONS, ...TODO_TOOL_DEFINITIONS];
   const imageToolAdvertised = imageTools.some((tool) => tool.function.name === INSPECT_IMAGE_TOOL_NAME);
 
   const enqueue = async (event: ChatStreamEvent) => {
@@ -176,6 +186,7 @@ export async function generateChatResponse(
             ...(pdfEditTools.length ? PDF_EDIT_TOOL_INSTRUCTIONS : []),
             ...(phaseTools.length ? [PHASE_BREAK_INSTRUCTIONS] : []),
             ...customToolInstructions(customTools),
+            skillCatalogInstructions(skills),
             USER_MEMORY_TOOL_INSTRUCTIONS,
             RESPONSE_STYLE_INSTRUCTIONS,
           ];
@@ -325,6 +336,8 @@ export async function generateChatResponse(
                 conversationId,
                 jobId: responseId ?? `chat-${conversationId}`,
               });
+            } else if (call.name === READ_SKILL_TOOL_NAME) {
+              result = executeReadSkillTool(call, skillsById);
             } else if (TODO_TOOL_DEFINITIONS.some((tool) => tool.function.name === call.name)) {
               result = await executeTodoTool(call, {
                 ownerId,
