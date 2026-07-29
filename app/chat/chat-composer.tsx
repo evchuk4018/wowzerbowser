@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ClipboardEvent,
@@ -147,10 +148,28 @@ export function ChatComposer({
   const [attachments, setAttachments] = useState<PendingChatImage[]>([]);
   const [documents, setDocuments] = useState<PendingChatDocument[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentsRef = useRef(attachments);
   const documentsRef = useRef(documents);
   const disabled = isStreaming || isSubmittingAttachments || startupPending;
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const lineHeight = Number.parseFloat(window.getComputedStyle(textarea).lineHeight) || 24;
+    const minHeight = lineHeight * 2;
+    const maxHeight = lineHeight * 8;
+    textarea.style.height = "auto";
+    const height = Math.max(minHeight, Math.min(textarea.scrollHeight, maxHeight));
+    textarea.style.height = `${height}px`;
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, [draft, expanded, textareaRef]);
+
+  useEffect(() => {
+    if (!expanded) return;
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, [expanded, textareaRef]);
 
   useEffect(() => {
     attachmentsRef.current = attachments;
@@ -233,18 +252,32 @@ export function ChatComposer({
     addFiles(images);
   };
 
+  const closeExpandedEditor = () => setExpanded(false);
+  const submitAndClose = (event?: FormEvent<HTMLFormElement>, pendingAttachments?: readonly PendingChatImage[], pendingDocuments?: readonly PendingChatDocument[]) => {
+    closeExpandedEditor();
+    return onSubmit(event, pendingAttachments, pendingDocuments);
+  };
+
   return (
     <form
-      className="composer-wrap"
+      className={`composer-wrap ${expanded ? "composer-wrap--expanded" : ""}`}
       onSubmit={(event) => {
         if (startupPending) {
           event.preventDefault();
           return;
         }
-        void onSubmit(event, attachments, documents);
+        void submitAndClose(event, attachments, documents);
       }}
     >
-      <div className="composer">
+      <div className={`composer ${expanded ? "composer--expanded" : ""}`}>
+        <button
+          type="button"
+          className="composer-expand-button"
+          aria-label={expanded ? "Close expanded editor" : "Expand message editor"}
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {expanded ? "↙" : "↗"}
+        </button>
         {editing && (
           <div className="composer-editing">
             <span>Editing prompt</span>
@@ -371,9 +404,14 @@ export function ChatComposer({
           disabled={isSubmittingAttachments}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
+            if (event.key === "Escape" && expanded) {
+              event.preventDefault();
+              closeExpandedEditor();
+              return;
+            }
             if (event.key === "Enter" && !event.shiftKey && (attachments.length > 0 || documents.length > 0 || preservedAttachments.length > 0 || preservedDocuments.length > 0)) {
               event.preventDefault();
-              if (!startupPending) void onSubmit(undefined, attachments, documents);
+              if (!startupPending) void submitAndClose(undefined, attachments, documents);
               return;
             }
             onKeyDown(event);

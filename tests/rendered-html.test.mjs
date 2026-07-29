@@ -365,6 +365,10 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(composer, /aria-label="Choose model"/);
   assert.match(composer, /aria-label="Choose thinking mode"/);
   assert.match(composer, /aria-label="Stop generating"/);
+  assert.match(composer, /aria-label=\{expanded \? "Close expanded editor" : "Expand message editor"\}/);
+  assert.match(composer, /useLayoutEffect\(\(\) =>/);
+  assert.match(composer, /event\.key === "Escape" && expanded/);
+  assert.match(composer, /composer-wrap--expanded/);
   assert.match(composer, /className="send-button stop-button"/);
   assert.match(composer, /<rect x="3" y="3" width="10" height="10" rx="1"/);
   assert.match(composer, /aria-controls="model-options"/);
@@ -427,6 +431,9 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(styles, /\.chat-area[\s\S]*?overflow: hidden;/);
   assert.match(styles, /\.transcript[\s\S]*?overflow-x: hidden;[\s\S]*?overflow-y: auto;/);
   assert.match(styles, /\.chat-active \.composer-wrap[\s\S]*?position: absolute;/);
+  assert.match(styles, /\.composer textarea[\s\S]*?max-height: 192px;/);
+  assert.match(styles, /\.composer-wrap--expanded[\s\S]*?position: fixed;/);
+  assert.match(styles, /\.composer--expanded textarea[\s\S]*?overflow-y: auto;/);
 });
 
 test("keeps the transcript scroll viewport full-width with compact mobile composer clearance", async () => {

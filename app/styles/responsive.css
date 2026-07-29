@@ -236,6 +236,18 @@
     transform: translateX(-50%);
   }
 
+  .composer-wrap--expanded {
+    inset: 0;
+    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  }
+
+  .chat-active .composer-wrap--expanded {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    margin: 0;
+  }
+
   .composer {
     min-height: 106px;
     border-radius: 17px;
@@ -243,7 +255,18 @@
   }
 
   .composer textarea {
-    height: 42px;
+    min-height: 42px;
+    max-height: 192px;
+  }
+
+  .composer--expanded {
+    height: 100%;
+    max-height: 100%;
+    padding-top: 48px;
+  }
+
+  .composer--expanded textarea {
+    min-height: 0;
   }
 
   .settings-field textarea {
