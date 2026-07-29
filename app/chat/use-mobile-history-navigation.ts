@@ -75,12 +75,11 @@ export function useMobileHistoryNavigation({
   };
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLElement>) => {
-    const hasHorizontalIntent = gestureRef.current.move({
+    gestureRef.current.move({
       clientX: event.clientX,
       clientY: event.clientY,
       pointerId: event.pointerId,
     });
-    if (hasHorizontalIntent && event.cancelable) event.preventDefault();
   };
 
   const scheduleClickSuppressionReset = () => {
@@ -96,6 +95,10 @@ export function useMobileHistoryNavigation({
 
   const handlePointerUp = (event: ReactPointerEvent<HTMLElement>) => {
     if (!gestureRef.current.isTrackingPointer(event.pointerId)) return;
+    if (window.getSelection()?.isCollapsed === false) {
+      gestureRef.current.cancel(event.pointerId);
+      return;
+    }
     const action = gestureRef.current.end({
       clientX: event.clientX,
       clientY: event.clientY,

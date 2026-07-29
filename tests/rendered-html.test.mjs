@@ -760,6 +760,9 @@ test("wires mobile history swipes without pointer capture", async () => {
   assert.match(client, /window\.addEventListener\("resize"/);
   assert.match(client, /disabled: settingsOpen/);
   assert.match(client, /action === "open"[\s\S]*?onBeforeSidebarOpen[\s\S]*?onSidebarOpen\(\)/);
+  assert.match(client, /window\.getSelection\(\)\?\.isCollapsed === false/);
+  assert.match(client, /gestureRef\.current\.cancel\(event\.pointerId\)/);
+  assert.doesNotMatch(client, /hasHorizontalIntent && event\.cancelable\) event\.preventDefault\(\)/);
   assert.match(client, /aria-label="Collapse sidebar"[\s\S]*?onCloseSidebar/);
   assert.doesNotMatch(client, /setPointerCapture|releasePointerCapture/);
   assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.app-shell \{[\s\S]*?touch-action: pan-y;/);
