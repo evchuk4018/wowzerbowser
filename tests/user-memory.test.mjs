@@ -79,6 +79,7 @@ test("persistence schema provides auditable provenance and exclusive three-job b
   assert.match(migration, /unique \(owner_id, job_id\)/);
   assert.match(migration, /chat_recall', 'dreaming'/);
   assert.match(migration, /owner_id uuid primary key/);
+  assert.match(migration, /user_memories\|folder_id uuid/);
   assert.doesNotMatch(migration, /\buser_id\b/);
 });
 

@@ -2,21 +2,88 @@ alter table public.chat_summary_jobs
   add column if not exists result_summary text;
 
 -- Keep a partially-created schema runnable. `create table if not exists`
--- does not add columns to an existing relation, so make the owner key
--- explicit before the indexes and foreign keys below use it.
+-- does not add columns to an existing relation, so repair the columns used
+-- below before the indexes, foreign keys, and function are created.
 do $$
 declare
+  repair_definition text;
   memory_table text;
+  column_definition text;
+  target_column_name text;
 begin
-  foreach memory_table in array array[
-    'user_memory_profiles',
-    'user_memory_folders',
-    'user_memories',
-    'user_memory_revisions',
-    'dreaming_completed_jobs',
-    'dreaming_runs',
-    'dreaming_run_sources'
+  foreach repair_definition in array array[
+    'user_memory_profiles|owner_id uuid',
+    'user_memory_profiles|revision bigint default 0',
+    'user_memory_profiles|created_at timestamptz default now()',
+    'user_memory_profiles|updated_at timestamptz default now()',
+    'user_memory_folders|id uuid default gen_random_uuid()',
+    'user_memory_folders|owner_id uuid',
+    'user_memory_folders|parent_id uuid',
+    'user_memory_folders|name text',
+    'user_memory_folders|normalized_name text',
+    'user_memory_folders|created_by text',
+    'user_memory_folders|source_chat_id text',
+    'user_memory_folders|source_job_id text',
+    'user_memory_folders|created_at timestamptz default now()',
+    'user_memory_folders|updated_at timestamptz default now()',
+    'user_memory_folders|deleted_at timestamptz',
+    'user_memories|id uuid default gen_random_uuid()',
+    'user_memories|owner_id uuid',
+    'user_memories|folder_id uuid',
+    'user_memories|content text',
+    'user_memories|content_fingerprint text',
+    'user_memories|source_chat_id text',
+    'user_memories|source_job_id text',
+    'user_memories|writer text',
+    'user_memories|created_at timestamptz default now()',
+    'user_memories|updated_at timestamptz default now()',
+    'user_memories|deleted_at timestamptz',
+    'user_memory_revisions|id bigint generated always as identity',
+    'user_memory_revisions|owner_id uuid',
+    'user_memory_revisions|profile_revision bigint',
+    'user_memory_revisions|memory_id uuid',
+    'user_memory_revisions|folder_id uuid',
+    'user_memory_revisions|operation text',
+    'user_memory_revisions|before_state jsonb',
+    'user_memory_revisions|after_state jsonb',
+    'user_memory_revisions|source_chat_id text',
+    'user_memory_revisions|source_job_id text',
+    'user_memory_revisions|writer text',
+    'user_memory_revisions|dreaming_run_id uuid',
+    'user_memory_revisions|action_index integer',
+    'user_memory_revisions|created_at timestamptz default now()',
+    'dreaming_completed_jobs|sequence bigint generated always as identity',
+    'dreaming_completed_jobs|owner_id uuid',
+    'dreaming_completed_jobs|job_id text',
+    'dreaming_completed_jobs|conversation_id text',
+    'dreaming_completed_jobs|completed_at timestamptz',
+    'dreaming_completed_jobs|created_at timestamptz default now()',
+    'dreaming_runs|id uuid default gen_random_uuid()',
+    'dreaming_runs|owner_id uuid',
+    'dreaming_runs|status text',
+    'dreaming_runs|attempt_count integer default 0',
+    'dreaming_runs|profile_revision bigint',
+    'dreaming_runs|model text',
+    'dreaming_runs|action_plan jsonb',
+    'dreaming_runs|last_error text',
+    'dreaming_runs|lease_expires_at timestamptz',
+    'dreaming_runs|created_at timestamptz default now()',
+    'dreaming_runs|started_at timestamptz',
+    'dreaming_runs|completed_at timestamptz',
+    'dreaming_runs|updated_at timestamptz default now()',
+    'dreaming_run_sources|run_id uuid',
+    'dreaming_run_sources|owner_id uuid',
+    'dreaming_run_sources|job_id text',
+    'dreaming_run_sources|sequence bigint',
+    'dreaming_run_sources|conversation_id text',
+    'dreaming_run_sources|completed_at timestamptz',
+    'dreaming_applied_actions|run_id uuid',
+    'dreaming_applied_actions|action_index integer',
+    'dreaming_applied_actions|completed_at timestamptz default now()'
   ] loop
+    memory_table := split_part(repair_definition, '|', 1);
+    column_definition := split_part(repair_definition, '|', 2);
+    target_column_name := split_part(column_definition, ' ', 1);
     if to_regclass(format('public.%I', memory_table)) is not null
       and exists (
         select 1
@@ -28,12 +95,12 @@ begin
       )
       and not exists (
         select 1
-        from information_schema.columns
-        where table_schema = 'public'
-          and table_name = memory_table
-          and column_name = 'owner_id'
+        from information_schema.columns as columns
+        where columns.table_schema = 'public'
+          and columns.table_name = memory_table
+          and columns.column_name = target_column_name
       ) then
-      execute format('alter table public.%I add column owner_id uuid', memory_table);
+      execute format('alter table public.%I add column %s', memory_table, column_definition);
     end if;
   end loop;
 end;
