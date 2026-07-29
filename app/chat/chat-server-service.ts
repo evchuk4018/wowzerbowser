@@ -270,16 +270,18 @@ export async function generateChatResponse(
                 ownerId,
                 signal: roundSignal,
                 contextCache: recalledContexts,
-                onRecallUsage: async ({ model, usage }) => {
+                onRecallUsage: async ({ model, usage, exactCostUsd }) => {
                   await recordUsage({
                     ownerId,
-                    provider: "deepseek",
+                    provider: "openrouter",
                     model,
                     requestKind: "chat_recall",
                     requestId: responseId ?? `chat-${conversationId}`,
                     round: round * 10_000 + callIndex,
                     usage,
                     source: "exact",
+                    exactCostUsd,
+                    unpriced: exactCostUsd === undefined,
                     conversationId,
                     jobId: responseId,
                   });

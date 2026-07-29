@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { ChatStreamEvent } from "../../../lib/chat-protocol";
-import { summarizeReasoningWithDeepSeekFlash, type ReasoningSummaryAnswer } from "../../providers/deepseek/deepseek-reasoning-summary-adapter";
+import { summarizeReasoningWithQwenFlash, type QwenReasoningSummaryAnswer } from "../../providers/openrouter/openrouter-qwen-text-adapter";
 
 const FIRST_TITLE_DELAY_MS = 1_000;
 const REFRESH_DELAY_MS = 2_000;
@@ -15,13 +15,13 @@ Describe the activity rather than repeating private details. Example: Debating h
 Reasoning:
 `;
 
-export type ReasoningTitleUsage = ReasoningSummaryAnswer & { phase: number; revision: number };
+export type ReasoningTitleUsage = QwenReasoningSummaryAnswer & { phase: number; revision: number };
 
 type Options = {
   signal: AbortSignal;
   emit: (event: ChatStreamEvent) => Promise<void>;
   onUsage?: (usage: ReasoningTitleUsage) => Promise<void>;
-  summarizeDeepSeek?: typeof summarizeReasoningWithDeepSeekFlash;
+  summarizeQwen?: typeof summarizeReasoningWithQwenFlash;
   firstDelayMs?: number;
   refreshDelayMs?: number;
   finalWaitMs?: number;
@@ -43,10 +43,10 @@ export class ReasoningTitleCoordinator {
   private inFlight: Promise<void> | null = null;
   private phaseStartedAt = 0;
   private lastStartedAt = 0;
-  private readonly summarizeDeepSeek;
+  private readonly summarizeQwen;
 
   constructor(private readonly options: Options) {
-    this.summarizeDeepSeek = options.summarizeDeepSeek ?? summarizeReasoningWithDeepSeekFlash;
+    this.summarizeQwen = options.summarizeQwen ?? summarizeReasoningWithQwenFlash;
   }
 
   append(delta: string): void {
@@ -97,7 +97,7 @@ export class ReasoningTitleCoordinator {
     this.lastStartedAt = Date.now();
     this.inFlight = (async () => {
       try {
-        const answer: ReasoningSummaryAnswer = await this.summarizeDeepSeek(`${PROMPT_PREFIX}${monologue}`, this.options.signal);
+        const answer: QwenReasoningSummaryAnswer = await this.summarizeQwen(`${PROMPT_PREFIX}${monologue}`, this.options.signal);
         const summary = cleanTitle(answer.summary);
         if (!summary) return;
         await this.options.onUsage?.({ ...answer, phase, revision });

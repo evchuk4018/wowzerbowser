@@ -87,7 +87,7 @@ test("usage persistence and API keep provider data server-side and owner-scoped"
     source("app/server/usage/usage-store.ts"),
     source("app/api/chat/usage/route.ts"),
     source("app/server/chat/chat-job-runner.ts"),
-    source("app/providers/deepseek/deepseek-title.ts"),
+    source("app/providers/openrouter/openrouter-qwen-text-adapter.ts"),
     source("app/chat/chat-usage-service.ts"),
   ]);
   assert.match(migration, /chat_model_pricing/);

@@ -112,7 +112,7 @@ export async function runChatJob(
           unpriced: exactCostUsd === undefined && (!pricing || pricing.inputUsdPerMillion === null || pricing.outputUsdPerMillion === null),
         });
       },
-      async ({ provider, model, usage: summaryUsage, phase, revision }) => {
+      async ({ provider, model, usage: summaryUsage, phase, revision, exactCostUsd }) => {
         if (!summaryUsage) return;
         await recordUsage({
           ownerId,
@@ -123,6 +123,8 @@ export async function runChatJob(
           round: phase * 100_000 + revision,
           usage: summaryUsage,
           source: "exact",
+          exactCostUsd,
+          unpriced: exactCostUsd === undefined,
           conversationId,
           jobId,
         });

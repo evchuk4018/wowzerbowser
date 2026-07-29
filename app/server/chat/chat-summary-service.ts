@@ -7,8 +7,8 @@ import {
   type ChatSummaryTask,
 } from "../../../lib/chat-summary";
 import { recordUsage } from "../usage/usage-store";
-import { summarizeChatWithDeepSeek } from "../../providers/deepseek/deepseek-chat-summary-adapter";
-import { DeepSeekError } from "../../providers/deepseek/deepseek-error";
+import { summarizeChatWithQwen } from "../../providers/openrouter/openrouter-qwen-text-adapter";
+import { OpenRouterError } from "../../providers/openrouter/openrouter-catalog-adapter";
 import {
   buildIncrementalChatSummaryPrompt,
   buildRebuildChatSummaryPrompt,
@@ -33,13 +33,13 @@ function enabled(): boolean {
 }
 
 function safeErrorCode(error: unknown): string {
-  if (error instanceof DeepSeekError) return error.name || "DeepSeekError";
+  if (error instanceof OpenRouterError) return error.name || "OpenRouterError";
   if (error instanceof Error) return error.name || "Error";
   return "UnknownError";
 }
 
 function retryableError(error: unknown): boolean {
-  return error instanceof DeepSeekError && (error.status === 408 || error.status === 429 || error.status >= 500);
+  return error instanceof OpenRouterError && (error.status === 408 || error.status === 429 || error.status >= 500);
 }
 
 class ChatSummaryOutputError extends Error {
@@ -75,9 +75,10 @@ async function persistSummaryUsage(input: {
   ownerId: string;
   conversationId: string;
   jobId: string;
-  provider: "deepseek";
+  provider: "openrouter";
   model: string;
-  usage: NonNullable<Awaited<ReturnType<typeof summarizeChatWithDeepSeek>>["usage"]>;
+  usage: NonNullable<Awaited<ReturnType<typeof summarizeChatWithQwen>>["usage"]>;
+  exactCostUsd?: number;
 }): Promise<void> {
   await recordUsage({
     ownerId: input.ownerId,
@@ -88,6 +89,8 @@ async function persistSummaryUsage(input: {
     round: 0,
     usage: input.usage,
     source: "exact",
+    exactCostUsd: input.exactCostUsd,
+    unpriced: input.exactCostUsd === undefined,
     conversationId: input.conversationId,
     jobId: input.jobId,
   }).catch(() => undefined);
@@ -126,7 +129,7 @@ async function executeChatSummaryTask(task: ChatSummaryTask): Promise<void> {
         userContent: source.userContent,
         assistantContent: source.assistantContent,
       });
-  const answer = await summarizeChatWithDeepSeek(prompt);
+  const answer = await summarizeChatWithQwen(prompt);
   const summary = summaryFromAnswer(answer.summary, previousSummary, needsRebuild);
   const expectedRevision = summaryState?.revision ?? 0;
   const latestActive = activeInteractions.at(-1);
@@ -148,6 +151,7 @@ async function executeChatSummaryTask(task: ChatSummaryTask): Promise<void> {
       provider: answer.provider,
       model: answer.model,
       usage: answer.usage,
+      exactCostUsd: answer.exactCostUsd,
     });
   }
   await completeChatSummaryTask(task, summary);

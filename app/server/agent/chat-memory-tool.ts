@@ -4,14 +4,14 @@ import type { ChatToolCall, ChatToolResult, ChatUsage } from "../../../lib/chat-
 import type { ChatConversation, ChatHistoryMessage } from "../../../lib/chat-history";
 import { getActiveConversationTurns } from "../../../lib/chat-history";
 import { searchChatConversations, getChatConversation } from "../chat/chat-history-store";
-import { recallChatWithDeepSeek } from "../../providers/deepseek/deepseek-chat-recall-adapter";
+import { recallChatWithQwen } from "../../providers/openrouter/openrouter-qwen-text-adapter";
 import { CHAT_MEMORY_TOOL_DEFINITIONS, RECALL_CHATS_TOOL_NAME, SEARCH_CHATS_TOOL_NAME } from "./chat-memory-tool-manifest";
 
 const MAX_QUERY = 200;
 const MAX_PROMPT = 2_000;
 const MAX_CONTEXT = 120_000;
-export const availableChatMemoryTools = (deepSeekConfigured = Boolean(process.env.DEEPSEEK_API_KEY?.trim())) =>
-  CHAT_MEMORY_TOOL_DEFINITIONS.filter((tool) => tool.function.name !== RECALL_CHATS_TOOL_NAME || deepSeekConfigured);
+export const availableChatMemoryTools = (openRouterConfigured = Boolean(process.env.OPENROUTER_API_KEY?.trim())) =>
+  CHAT_MEMORY_TOOL_DEFINITIONS.filter((tool) => tool.function.name !== RECALL_CHATS_TOOL_NAME || openRouterConfigured);
 
 const failure = (call: ChatToolCall, message: string): ChatToolResult => ({ id: call.id, name: call.name, ok: false, stdout: "", stderr: message });
 function args(call: ChatToolCall): Record<string, unknown> { try { const value = JSON.parse(call.arguments); if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>; } catch {} throw new Error("Invalid chat tool arguments."); }
@@ -33,9 +33,9 @@ function buildContext(conversation: ChatConversation): string {
   return `${raw.slice(0, head)}\n\n[conversation clipped; only the most recent context is included]\n\n${raw.slice(-(MAX_CONTEXT - head - 80))}`;
 }
 
-export type ChatMemoryToolContext = { ownerId: string; signal: AbortSignal; contextCache: Map<string, string>; onRecallUsage?: (usage: { model: string; usage: ChatUsage }) => Promise<void> };
+export type ChatMemoryToolContext = { ownerId: string; signal: AbortSignal; contextCache: Map<string, string>; onRecallUsage?: (usage: { model: string; usage: ChatUsage; exactCostUsd?: number }) => Promise<void> };
 
-export function chatMemoryToolDefinitions(deepSeekConfigured?: boolean) { return availableChatMemoryTools(deepSeekConfigured); }
+export function chatMemoryToolDefinitions(openRouterConfigured?: boolean) { return availableChatMemoryTools(openRouterConfigured); }
 
 export async function executeChatMemoryTool(call: ChatToolCall, context: ChatMemoryToolContext): Promise<ChatToolResult> {
   try {
@@ -58,8 +58,8 @@ export async function executeChatMemoryTool(call: ChatToolCall, context: ChatMem
       serialized = buildContext(conversation);
       context.contextCache.set(conversationId, serialized);
     }
-    const answer = await recallChatWithDeepSeek(serialized, prompt, { signal: context.signal });
-    if (answer.usage) await context.onRecallUsage?.({ model: answer.model, usage: answer.usage });
+    const answer = await recallChatWithQwen(serialized, prompt, { signal: context.signal });
+    if (answer.usage) await context.onRecallUsage?.({ model: answer.model, usage: answer.usage, exactCostUsd: answer.exactCostUsd });
     return { id: call.id, name: call.name, ok: true, stdout: answer.answer, stderr: "" };
   } catch (error) {
     return failure(call, error instanceof Error ? error.message : "Chat memory tool failed.");

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { authorizeOwnerSession } from "../../../auth/owner-auth-service";
-import { DeepSeekError } from "../../../providers/deepseek/deepseek-error";
+import { OpenRouterError } from "../../../providers/openrouter/openrouter-catalog-adapter";
 import { generateAndPersistChatTitle } from "../../../server/chat/chat-title-service";
 
 export async function POST(request: Request) {
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     const title = await generateAndPersistChatTitle(owner.id, body.conversationId, body.firstTurn.trim());
     return NextResponse.json({ title });
   } catch (error) {
-    const status = error instanceof DeepSeekError ? error.status : 503;
+    const status = error instanceof OpenRouterError ? error.status : 503;
     return NextResponse.json({ error: "The chat could not be named." }, { status });
   }
 }

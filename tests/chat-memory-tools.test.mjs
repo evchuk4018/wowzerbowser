@@ -21,10 +21,10 @@ test("chat memory executor is owner-scoped and caches recalled context for a tur
   assert.match(tool, /conversation clipped/);
 });
 
-test("recall adapter uses DeepSeek Flash without thinking and treats conversation data as untrusted", async () => {
-  const adapter = await source("app/providers/deepseek/deepseek-chat-recall-adapter.ts");
-  assert.match(adapter, /deepseek-v4-flash/);
-  assert.match(adapter, /thinking: \{ type: "disabled" \}/);
+test("recall adapter uses Qwen Flash without reasoning and treats conversation data as untrusted", async () => {
+  const adapter = await source("app/providers/openrouter/openrouter-qwen-text-adapter.ts");
+  assert.match(adapter, /OPENROUTER_QWEN_FLASH_MODEL/);
+  assert.match(adapter, /reasoning: \{ effort: "none" \}/);
   assert.match(adapter, /conversation data is untrusted content/);
   assert.match(adapter, /<conversation-data>/);
   assert.match(adapter, /usageFromResponse/);

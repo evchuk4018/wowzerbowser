@@ -7,9 +7,9 @@ import {
   normalizeChatSummary,
 } from "../app/server/chat/chat-summary-prompt.ts";
 import {
-  DEEPSEEK_CHAT_SUMMARY_MODEL,
-  summarizeChatWithDeepSeek,
-} from "../app/providers/deepseek/deepseek-chat-summary-adapter.ts";
+  OPENROUTER_QWEN_FLASH_MODEL,
+  summarizeChatWithQwen,
+} from "../app/providers/openrouter/openrouter-qwen-text-adapter.ts";
 
 const source = async (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -41,52 +41,52 @@ test("summary output normalization accepts fact lines and handles NONE", () => {
   assert.equal(normalizeChatSummary(""), null);
 });
 
-test("DeepSeek chat summary adapter sends Flash with thinking disabled and parses usage", async () => {
-  const originalKey = process.env.DEEPSEEK_API_KEY;
-  process.env.DEEPSEEK_API_KEY = "test-summary-key";
+test("Qwen chat summary adapter sends Flash with reasoning disabled and parses usage", async () => {
+  const originalKey = process.env.OPENROUTER_API_KEY;
+  process.env.OPENROUTER_API_KEY = "test-summary-key";
   const calls = [];
   try {
-    const answer = await summarizeChatWithDeepSeek("summary prompt", {
+    const answer = await summarizeChatWithQwen("summary prompt", {
       fetchImpl: async (url, init) => {
         calls.push({ url, init });
         return new Response(JSON.stringify({
-          model: "free/test-model",
+          model: "qwen/test-model",
           choices: [{ message: { content: "User studies calculus." } }],
           usage: { prompt_tokens: 20, completion_tokens: 5, total_tokens: 25 },
         }), { status: 200, headers: { "content-type": "application/json" } });
       },
     });
     assert.equal(answer.summary, "User studies calculus.");
-    assert.equal(answer.model, "free/test-model");
+    assert.equal(answer.model, "qwen/test-model");
     assert.equal(answer.usage?.promptTokens, 20);
     assert.equal(answer.usage?.completionTokens, 5);
     assert.equal(answer.usage?.totalTokens, 25);
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, "https://api.deepseek.com/chat/completions");
+    assert.equal(calls[0].url, "https://openrouter.ai/api/v1/chat/completions");
     const body = JSON.parse(calls[0].init.body);
-    assert.equal(body.model, DEEPSEEK_CHAT_SUMMARY_MODEL);
+    assert.equal(body.model, OPENROUTER_QWEN_FLASH_MODEL);
     assert.equal(body.messages[0].content, "summary prompt");
-    assert.deepEqual(body.thinking, { type: "disabled" });
+    assert.deepEqual(body.reasoning, { effort: "none" });
     assert.equal(body.max_tokens, 512);
   } finally {
-    if (originalKey === undefined) delete process.env.DEEPSEEK_API_KEY;
-    else process.env.DEEPSEEK_API_KEY = originalKey;
+    if (originalKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = originalKey;
   }
 });
 
-test("DeepSeek summary adapter preserves retryable upstream status", async () => {
-  const originalKey = process.env.DEEPSEEK_API_KEY;
-  process.env.DEEPSEEK_API_KEY = "test-summary-key";
+test("Qwen summary adapter preserves retryable upstream status", async () => {
+  const originalKey = process.env.OPENROUTER_API_KEY;
+  process.env.OPENROUTER_API_KEY = "test-summary-key";
   try {
     await assert.rejects(
-      summarizeChatWithDeepSeek("summary prompt", {
+      summarizeChatWithQwen("summary prompt", {
         fetchImpl: async () => new Response("rate limited", { status: 429 }),
       }),
-      (error) => error.name === "Error" && error.status === 429,
+      (error) => error.name === "OpenRouterError" && error.status === 429,
     );
   } finally {
-    if (originalKey === undefined) delete process.env.DEEPSEEK_API_KEY;
-    else process.env.DEEPSEEK_API_KEY = originalKey;
+    if (originalKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = originalKey;
   }
 });
 
