@@ -45,19 +45,19 @@ test("bootstrap selects an existing requested conversation", () => {
   });
 });
 
-test("bootstrap selects the newest conversation for /chat", () => {
+test("bootstrap leaves /chat without an active conversation", () => {
   assert.deepEqual(resolveChatBootstrapSelection(summaries), {
     requestedConversationId: null,
-    activeConversationId: existingId,
-    loadConversationId: existingId,
+    activeConversationId: null,
+    loadConversationId: null,
   });
 });
 
-test("bootstrap treats an invalid route like /chat", () => {
+test("bootstrap treats an invalid route like a blank /chat route", () => {
   assert.deepEqual(resolveChatBootstrapSelection(summaries, "not-a-uuid"), {
     requestedConversationId: null,
-    activeConversationId: existingId,
-    loadConversationId: existingId,
+    activeConversationId: null,
+    loadConversationId: null,
   });
 });
 

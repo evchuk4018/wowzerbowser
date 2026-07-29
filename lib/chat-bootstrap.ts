@@ -121,15 +121,12 @@ export function resolveChatBootstrapSelection(
   const requestedId = isValidConversationId(requestedConversationId)
     ? requestedConversationId
     : null;
-  const newestId = summaries[0]?.id ?? null;
   return {
     requestedConversationId: requestedId,
     activeConversationId: requestedId && summaries.some(({ id }) => id === requestedId)
       ? requestedId
-      : requestedId
-        ? null
-        : newestId,
-    loadConversationId: requestedId ?? newestId,
+      : null,
+    loadConversationId: requestedId,
   };
 }
 

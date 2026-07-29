@@ -82,7 +82,7 @@ test("bounds cached transcript turns while preserving the original count", () =>
 
 test("uses only route-compatible cached conversations", () => {
   const snapshot = createChatStartupSnapshot(input());
-  assert.equal(resolveSnapshotStartup(snapshot).type, "cached");
+  assert.equal(resolveSnapshotStartup(snapshot).type, "shell");
   assert.equal(resolveSnapshotStartup(snapshot, activeId).type, "cached");
   assert.equal(resolveSnapshotStartup(snapshot, otherId).type, "shell");
   const created = resolveSnapshotStartup(snapshot, unknownId);

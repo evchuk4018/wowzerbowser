@@ -399,9 +399,7 @@ export function resolveSnapshotStartup(
       : { type: "shell" };
   }
   if (!requestedId) {
-    return snapshot.activeConversation
-      ? { type: "cached", conversation: snapshot.activeConversation }
-      : { type: "shell" };
+    return { type: "shell" };
   }
   if (isValidConversationId(requestedId) && snapshot.activeConversation?.id === requestedId) {
     return { type: "cached", conversation: snapshot.activeConversation };

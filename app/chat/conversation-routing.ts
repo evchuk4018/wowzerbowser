@@ -17,9 +17,7 @@ export function resolveConversationRoute(
   knownConversationIds: ReadonlySet<string> = new Set(),
 ): ConversationRouteResolution {
   if (!requestedConversationId) {
-    return state.activeId
-      ? { type: "redirect", conversationId: state.activeId }
-      : { type: "none" };
+    return { type: "create", conversation: createConversation() };
   }
   if (
     state.conversations.some(

@@ -80,6 +80,20 @@ test("new chat with existing history stays local and active", () => {
   assert.equal(resolveConversationRoute(state, existing.id).type, "select");
 });
 
+test("the base chat route creates a fresh blank conversation", () => {
+  const existing = conversation("67bf57e2-fb3c-4f4c-a67f-cc9aeb1db3dd", [{}]);
+  const state = conversationReducer(initialConversationState, {
+    type: "LOAD_CONVERSATIONS",
+    conversations: [existing],
+    activeId: existing.id,
+  });
+
+  const resolution = resolveConversationRoute(state);
+  assert.equal(resolution.type, "create");
+  assert.equal(resolution.conversation.turns.length, 0);
+  assert.notEqual(resolution.conversation.id, existing.id);
+});
+
 test("a known but unhydrated direct-link route requests one transcript", () => {
   const existing = conversation("67bf57e2-fb3c-4f4c-a67f-cc9aeb1db3dd");
   const state = conversationReducer(initialConversationState, {
