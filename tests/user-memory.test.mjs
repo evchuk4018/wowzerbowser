@@ -152,6 +152,13 @@ test("dreaming stores an action plan before applying it and reuses it on retry",
   assert.match(migration, /add column if not exists action_plan/);
 });
 
+test("legacy user memory columns cannot block durable profile writes", async () => {
+  const migration = await source("supabase/migrations/20260729020000_user_memory_legacy_table_compatibility.sql");
+  for (const column of ["user_id", "memory_type", "dedup_key_hash", "origin"]) {
+    assert.match(migration, new RegExp(`alter column ${column} drop not null`));
+  }
+});
+
 test("agent memory tools keep server-owned provenance and expose all requested operations", async () => {
   const [manifest, executor, service] = await Promise.all([
     source("app/server/agent/user-memory-tool-manifest.ts"),
@@ -164,6 +171,7 @@ test("agent memory tools keep server-owned provenance and expose all requested o
   assert.match(executor, /sourceChatId: context\.conversationId/);
   assert.match(executor, /sourceJobId: context\.jobId/);
   assert.match(executor, /writer: "agent"/);
+  assert.match(executor, /formatBackgroundError\(error\)/);
   assert.match(service, /USER_MEMORY_TOOL_INSTRUCTIONS/);
   assert.match(service, /executeUserMemoryTool/);
 });

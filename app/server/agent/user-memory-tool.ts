@@ -10,6 +10,7 @@ import {
   relocateUserMemory,
   updateUserMemory,
 } from "../memory/user-memory-service";
+import { formatBackgroundError } from "../observability/background-error";
 import {
   ADD_USER_MEMORY_TOOL,
   BROWSE_USER_MEMORY_TOOL,
@@ -76,6 +77,6 @@ export async function executeUserMemoryTool(call: ChatToolCall, context: UserMem
     } else return failure(call, `Unknown user-memory tool: ${call.name}`);
     return { id: call.id, name: call.name, ok: true, stdout: JSON.stringify(result), stderr: "" };
   } catch (error) {
-    return failure(call, error instanceof Error ? error.message : "User-memory tool failed.");
+    return failure(call, formatBackgroundError(error));
   }
 }
