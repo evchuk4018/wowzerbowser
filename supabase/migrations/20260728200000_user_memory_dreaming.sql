@@ -1,12 +1,52 @@
 alter table public.chat_summary_jobs
   add column if not exists result_summary text;
 
+-- Keep a partially-created schema runnable. `create table if not exists`
+-- does not add columns to an existing relation, so make the owner key
+-- explicit before the indexes and foreign keys below use it.
+do $$
+declare
+  memory_table text;
+begin
+  foreach memory_table in array array[
+    'user_memory_profiles',
+    'user_memory_folders',
+    'user_memories',
+    'user_memory_revisions',
+    'dreaming_completed_jobs',
+    'dreaming_runs',
+    'dreaming_run_sources'
+  ] loop
+    if to_regclass(format('public.%I', memory_table)) is not null
+      and exists (
+        select 1
+        from pg_class relation
+        join pg_namespace namespace on namespace.oid = relation.relnamespace
+        where namespace.nspname = 'public'
+          and relation.relname = memory_table
+          and relation.relkind in ('r', 'p')
+      )
+      and not exists (
+        select 1
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = memory_table
+          and column_name = 'owner_id'
+      ) then
+      execute format('alter table public.%I add column owner_id uuid', memory_table);
+    end if;
+  end loop;
+end;
+$$;
+
 create table if not exists public.user_memory_profiles (
   owner_id uuid primary key,
   revision bigint not null default 0 check (revision >= 0),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+create unique index if not exists user_memory_profiles_owner
+  on public.user_memory_profiles(owner_id);
 
 create table if not exists public.user_memory_folders (
   id uuid primary key default gen_random_uuid(),
@@ -125,17 +165,17 @@ declare
 begin
   perform pg_advisory_xact_lock(hashtextextended(p_owner_id::text, 701));
 
-  update public.dreaming_runs
+  update public.dreaming_runs as runs
     set status = 'queued', lease_expires_at = null, updated_at = now()
-    where owner_id = p_owner_id and status = 'running' and lease_expires_at < now();
+    where runs.owner_id = p_owner_id and runs.status = 'running' and runs.lease_expires_at < now();
 
-  select id into v_run_id from public.dreaming_runs
-    where owner_id = p_owner_id and status = 'queued'
-    order by created_at limit 1;
+  select runs.id into v_run_id from public.dreaming_runs as runs
+    where runs.owner_id = p_owner_id and runs.status = 'queued'
+    order by runs.created_at limit 1;
   if v_run_id is not null then return v_run_id; end if;
 
   select count(*) into v_job_count from (
-    select completed.job_id from public.dreaming_completed_jobs completed
+    select completed.job_id from public.dreaming_completed_jobs as completed
     where completed.owner_id = p_owner_id
       and not exists (
         select 1 from public.dreaming_run_sources source
@@ -149,7 +189,7 @@ begin
   insert into public.dreaming_runs(owner_id, status) values (p_owner_id, 'queued') returning id into v_run_id;
   insert into public.dreaming_run_sources(run_id, owner_id, job_id, sequence, conversation_id, completed_at)
     select v_run_id, completed.owner_id, completed.job_id, completed.sequence, completed.conversation_id, completed.completed_at
-    from public.dreaming_completed_jobs completed
+    from public.dreaming_completed_jobs as completed
     where completed.owner_id = p_owner_id
       and not exists (
         select 1 from public.dreaming_run_sources source

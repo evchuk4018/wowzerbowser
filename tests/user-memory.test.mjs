@@ -78,6 +78,8 @@ test("persistence schema provides auditable provenance and exclusive three-job b
   assert.match(migration, /v_job_count < 3/);
   assert.match(migration, /unique \(owner_id, job_id\)/);
   assert.match(migration, /chat_recall', 'dreaming'/);
+  assert.match(migration, /owner_id uuid primary key/);
+  assert.doesNotMatch(migration, /\buser_id\b/);
 });
 
 test("dreaming repository deduplicates three source jobs by conversation using the newest source", async () => {
