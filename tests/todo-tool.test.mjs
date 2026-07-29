@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { normalizeTodoList, MAX_TODOS } from "../lib/todo-protocol.ts";
 import { TODO_TOOL_DEFINITIONS, GET_TODOS_TOOL_NAME, COMPLETE_TODO_TOOL_NAME } from "../app/server/agent/todo-tool.ts";
+import { shouldPlanTodos } from "../app/server/chat/chat-todo-planner.ts";
 import { applyChatStreamEvent } from "../lib/chat-history.ts";
 
 test("todo protocol bounds, normalizes, and orders five items", () => {
@@ -22,6 +23,20 @@ test("todo protocol bounds, normalizes, and orders five items", () => {
 test("todo tools expose read and complete without add/edit operations", () => {
   assert.deepEqual(TODO_TOOL_DEFINITIONS.map((tool) => tool.function.name), [GET_TODOS_TOOL_NAME, COMPLETE_TODO_TOOL_NAME]);
   assert.equal(TODO_TOOL_DEFINITIONS[1].function.parameters.required[0], "todoId");
+});
+
+test("todo planning is reserved for substantial work", () => {
+  const empty = { revision: 0, items: [] };
+  const active = { revision: 1, items: [{ id: "research", text: "Research the topic", status: "pending", position: 0 }] };
+
+  assert.equal(shouldPlanTodos("What is 2 + 2?", empty), false);
+  assert.equal(shouldPlanTodos("Help me solve this calculus problem and explain each step.", empty), false);
+  assert.equal(shouldPlanTodos("Explain how photosynthesis works.", empty), false);
+  assert.equal(shouldPlanTodos("Do a deep research dive into the history of renewable energy and compare the major sources.", empty), true);
+  assert.equal(shouldPlanTodos("Research this topic, compare the sources, and create a detailed document with citations.", empty), true);
+  assert.equal(shouldPlanTodos("Build a complete migration plan for our production database and rollout workflow.", empty), true);
+  assert.equal(shouldPlanTodos("What is 2 + 2?", active), false);
+  assert.equal(shouldPlanTodos("Continue by updating the research report with the new sources.", active), true);
 });
 
 test("todo updates are durable through the chat event projection", () => {
