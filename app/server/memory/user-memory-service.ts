@@ -12,7 +12,9 @@ import {
 import {
   addUserMemory,
   deleteUserMemory,
+  deleteUserMemoryFromSettings as deleteUserMemoryRecordFromSettings,
   editUserMemory,
+  editUserMemoryFromSettings as editUserMemoryRecordFromSettings,
   ensureMemoryFolderPath,
   getUserMemoryTree,
   moveUserMemory,
@@ -92,6 +94,42 @@ export async function updateUserMemory(context: MemoryWriteContext, memoryId: st
   const validContent = validateContent(content);
   await assertProfileCapacity(context.ownerId, validContent.length);
   return editUserMemory(context, memoryId, validContent);
+}
+
+export class UserMemoryNotFoundError extends Error {
+  constructor() {
+    super("Memory not found.");
+    this.name = "UserMemoryNotFoundError";
+  }
+}
+
+export class UserMemoryDuplicateError extends Error {
+  constructor() {
+    super("A memory with that content already exists in this folder.");
+    this.name = "UserMemoryDuplicateError";
+  }
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "23505");
+}
+
+export async function updateUserMemoryFromSettings(ownerId: string, memoryId: string, content: string) {
+  const validContent = validateContent(content);
+  await assertProfileCapacity(ownerId, validContent.length);
+  try {
+    const memory = await editUserMemoryRecordFromSettings(ownerId, memoryId, validContent);
+    if (!memory) throw new UserMemoryNotFoundError();
+    return memory;
+  } catch (error) {
+    if (error instanceof UserMemoryNotFoundError) throw error;
+    if (isUniqueViolation(error)) throw new UserMemoryDuplicateError();
+    throw error;
+  }
+}
+
+export async function deleteUserMemoryFromSettings(ownerId: string, memoryId: string): Promise<void> {
+  if (!await deleteUserMemoryRecordFromSettings(ownerId, memoryId)) throw new UserMemoryNotFoundError();
 }
 
 export async function relocateUserMemory(context: MemoryWriteContext, memoryId: string, path: string[]) {

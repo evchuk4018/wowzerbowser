@@ -9,6 +9,7 @@ import {
   type ChatSummaryMode,
   type ChatSummaryTask,
 } from "../../../lib/chat-summary";
+import type { MemorySummary } from "../../../lib/memory-protocol";
 import { getServerClient } from "../../auth/supabase-server-adapter";
 
 const client = () => getServerClient();
@@ -85,6 +86,39 @@ export async function getChatSummary(
     .maybeSingle();
   if (error) throw error;
   return data ? summaryFromRow(data as SummaryRow) : null;
+}
+
+export async function listChatConversationSummaries(ownerId: string): Promise<MemorySummary[]> {
+  const database = client();
+  const [summariesResult, conversationsResult] = await Promise.all([
+    database.from("chat_conversation_summaries")
+      .select("conversation_id,summary,summary_revision,updated_at")
+      .eq("owner_id", ownerId)
+      .order("updated_at", { ascending: false }),
+    database.from("chat_conversations")
+      .select("conversation_id,title")
+      .eq("owner_id", ownerId),
+  ]);
+  if (summariesResult.error) throw summariesResult.error;
+  if (conversationsResult.error) throw conversationsResult.error;
+
+  const titleByConversation = new Map(
+    (conversationsResult.data ?? []).map((row) => [row.conversation_id, row.title]),
+  );
+  return ((summariesResult.data ?? []) as Array<{
+    conversation_id: string;
+    summary: string;
+    summary_revision: number | string;
+    updated_at: string;
+  }>)
+    .filter((row) => row.summary.trim().length > 0)
+    .map((row) => ({
+      conversationId: row.conversation_id,
+      title: titleByConversation.get(row.conversation_id) ?? "Conversation",
+      summary: row.summary,
+      revision: Number(row.summary_revision),
+      updatedAt: row.updated_at,
+    }));
 }
 
 async function ensureChatSummary(ownerId: string, conversationId: string): Promise<void> {

@@ -7,6 +7,7 @@ import type {
   UsageReport,
 } from "../../lib/usage-protocol";
 import type { ChatSettings } from "../chat/conversation-types";
+import { MemorySettings } from "./memory-settings";
 import { ToolsSettings } from "./tools-settings";
 import { ModelsSettings } from "./models-settings";
 
@@ -23,7 +24,7 @@ type SettingsSection =
   | "usage"
   | "tools"
   | "models"
-  | "plugins"
+  | "memory"
   | "storage"
   | "safety"
   | "security"
@@ -35,7 +36,7 @@ const sections: Array<{ id: SettingsSection; label: string; description: string;
   { id: "usage", label: "Usage", description: "Review token volume and estimated costs.", icon: "◫" },
   { id: "tools", label: "Tools", description: "Create Python tools and securely connect APIs.", icon: "♢" },
   { id: "models", label: "Models", description: "Enable built-in and OpenRouter chat models.", icon: "✦" },
-  { id: "plugins", label: "Plugins", description: "Manage connected tools and extensions.", icon: "⌘" },
+  { id: "memory", label: "Memory", description: "Review what the model remembers about you.", icon: "◉" },
   { id: "storage", label: "Storage", description: "Review stored data and retention options.", icon: "▱" },
   { id: "safety", label: "Safety", description: "Control safeguards and content preferences.", icon: "◇" },
   { id: "security", label: "Security and login", description: "Protect your account and active sessions.", icon: "⌾" },
@@ -404,6 +405,8 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage, getAccessT
               <ToolsSettings getAccessToken={getAccessToken} />
             ) : activeSection === "models" ? (
               <ModelsSettings getAccessToken={getAccessToken} />
+            ) : activeSection === "memory" ? (
+              <MemorySettings getAccessToken={getAccessToken} />
             ) : (
               <PlaceholderSettings label={activeLabel} />
             )}

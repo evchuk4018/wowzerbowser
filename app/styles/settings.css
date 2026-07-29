@@ -758,6 +758,55 @@
 @media (max-width: 680px) {
   .tool-form-grid, .tool-secret-row { grid-template-columns: 1fr; }
 }
+
+.memory-settings { display: grid; gap: 28px; }
+.memory-section { display: grid; gap: 12px; }
+.memory-section + .memory-section { padding-top: 26px; border-top: 1px solid var(--line); }
+.memory-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.memory-section-heading h4 { margin: 0; color: var(--text); font-size: 15px; font-weight: 620; }
+.memory-section-heading p { margin: 5px 0 0; color: var(--quiet); font-size: 12px; line-height: 1.45; }
+.memory-refresh,
+.memory-card-actions button { min-height: 30px; border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; color: var(--muted); background: transparent; cursor: pointer; font-size: 12px; }
+.memory-refresh:hover,
+.memory-card-actions button:hover { color: var(--text); background: var(--panel-hover); }
+.memory-refresh:disabled,
+.memory-card-actions button:disabled { cursor: default; opacity: .55; }
+.memory-folder-list,
+.memory-summary-list { display: grid; gap: 16px; }
+.memory-folder { display: grid; gap: 8px; }
+.memory-folder-heading { display: flex; align-items: baseline; gap: 9px; padding: 0 2px; }
+.memory-folder-heading strong { color: var(--text); font-size: 13px; }
+.memory-folder-heading span { overflow: hidden; color: var(--quiet); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.memory-card,
+.memory-summary-card { border: 1px solid var(--line); border-radius: 11px; padding: 14px; background: rgba(255, 255, 255, .018); }
+.memory-content { margin: 0; color: var(--text); font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
+.memory-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 13px; }
+.memory-meta { display: flex; flex-wrap: wrap; gap: 8px 12px; color: var(--quiet); font-size: 10px; }
+.memory-card-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.memory-primary-action { border-color: var(--accent) !important; background: var(--accent) !important; color: #20211f !important; }
+.memory-danger-action { color: #e18484 !important; }
+.memory-delete-confirm { align-items: center; }
+.memory-delete-confirm > span { color: #e8bd71; font-size: 11px; }
+.memory-editor { display: grid; gap: 7px; }
+.memory-editor > span { color: var(--muted); font-size: 12px; font-weight: 600; }
+.memory-editor textarea { width: 100%; box-sizing: border-box; resize: vertical; border: 1px solid var(--line); border-radius: 9px; padding: 10px 11px; color: var(--text); background: var(--panel); font: inherit; font-size: 13px; line-height: 1.5; }
+.memory-editor textarea:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px rgba(212, 255, 112, .08); }
+.memory-folder-empty,
+.memory-empty { margin: 0; border: 1px dashed var(--line); border-radius: 10px; padding: 16px; color: var(--quiet); font-size: 12px; text-align: center; }
+.memory-summary-card { display: grid; gap: 11px; }
+.memory-summary-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.memory-summary-heading h5 { margin: 0; color: var(--text); font-size: 13px; font-weight: 620; }
+.memory-summary-heading time { display: block; margin-top: 4px; color: var(--quiet); font-size: 10px; }
+.memory-summary-heading > span { flex: none; color: var(--quiet); font-size: 10px; }
+.memory-summary-card > p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
+@media (max-width: 560px) {
+  .memory-section-heading,
+  .memory-card-footer,
+  .memory-summary-heading { align-items: stretch; flex-direction: column; }
+  .memory-refresh { justify-self: start; }
+  .memory-card-actions { justify-content: flex-start; }
+  .memory-delete-confirm { align-items: flex-start; }
+}
 .models-settings h4 { margin: 1.25rem 0 .65rem; }
 .model-catalog-heading, .model-card > div { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
 .model-toolbar { display: flex; flex-wrap: wrap; gap: .5rem; }

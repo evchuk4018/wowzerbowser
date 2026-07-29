@@ -235,6 +235,17 @@ export async function editUserMemory(context: MemoryWriteContext, memoryId: stri
   return memory;
 }
 
+export async function editUserMemoryFromSettings(ownerId: string, memoryId: string, content: string): Promise<UserMemory | null> {
+  const { data, error } = await db().from("user_memories").update({
+    content,
+    content_fingerprint: fingerprint(content),
+    updated_at: new Date().toISOString(),
+  }).eq("owner_id", ownerId).eq("id", memoryId).is("deleted_at", null)
+    .select("id,folder_id,content,source_chat_id,source_job_id,writer,created_at,updated_at").maybeSingle();
+  if (error) throw error;
+  return data ? memoryValue(data as MemoryRow) : null;
+}
+
 export async function moveUserMemory(context: MemoryWriteContext, memoryId: string, folderId: string): Promise<UserMemory> {
   const before = await currentMemory(context.ownerId, memoryId);
   const { data, error } = await db().from("user_memories").update({
@@ -263,4 +274,14 @@ export async function deleteUserMemory(context: MemoryWriteContext, memoryId: st
   }).eq("owner_id", context.ownerId).eq("id", memoryId).is("deleted_at", null);
   if (error) throw error;
   await audit(context, "delete", { memoryId, folderId: before.folder_id, before: memoryValue(before), after: null });
+}
+
+export async function deleteUserMemoryFromSettings(ownerId: string, memoryId: string): Promise<boolean> {
+  const { data, error } = await db().from("user_memories").update({
+    deleted_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }).eq("owner_id", ownerId).eq("id", memoryId).is("deleted_at", null)
+    .select("id").maybeSingle();
+  if (error) throw error;
+  return Boolean(data);
 }
