@@ -148,6 +148,7 @@ export function ChatWorkspace({
   }, [getAccessToken]);
 
   useEffect(() => {
+    if (!snapshotLoaded) return;
     let mounted = true;
     const requestId = ++bootstrapRequestRef.current;
     void (async () => {
@@ -169,10 +170,16 @@ export function ChatWorkspace({
         });
         setBootstrapModelPreferences(modelPreferencesRecord(bootstrap.modelPreferences));
         setBootstrapComplete(true);
-        if (bootstrap.requestedConversationId === initialConversationIdRef.current) {
+        if (
+          bootstrap.requestedConversationId === initialConversationIdRef.current
+          || !initialConversationIdRef.current
+        ) {
           handledRouteRef.current = initialConversationIdRef.current;
         }
         let initialConversation = bootstrap.activeConversation;
+        if (!initialConversation && !initialConversationIdRef.current) {
+          initialConversation = snapshot?.activeConversation ?? null;
+        }
         // A valid unknown UUID represents a new client-only conversation.
         if (!initialConversation) {
           initialConversation = bootstrap.requestedConversationId
@@ -219,7 +226,7 @@ export function ChatWorkspace({
     return () => {
       mounted = false;
     };
-  }, [bootstrapAttempt, getAccessToken, onSessionInvalid, persistSnapshot, user.id]);
+  }, [bootstrapAttempt, getAccessToken, onSessionInvalid, persistSnapshot, snapshot, snapshotLoaded, user.id]);
 
   useEffect(() => {
     if (!snapshotLoaded || remoteAuthorized) return;

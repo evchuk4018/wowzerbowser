@@ -82,13 +82,39 @@ test("bounds cached transcript turns while preserving the original count", () =>
 
 test("uses only route-compatible cached conversations", () => {
   const snapshot = createChatStartupSnapshot(input());
-  assert.equal(resolveSnapshotStartup(snapshot).type, "shell");
+  const restored = resolveSnapshotStartup(snapshot);
+  assert.equal(restored.type, "cached");
+  assert.equal(restored.conversation.id, activeId);
   assert.equal(resolveSnapshotStartup(snapshot, activeId).type, "cached");
   assert.equal(resolveSnapshotStartup(snapshot, otherId).type, "shell");
   const created = resolveSnapshotStartup(snapshot, unknownId);
   assert.equal(created.type, "create");
   assert.equal(created.conversation.id, unknownId);
   assert.equal(resolveSnapshotStartup(snapshot, "not-a-conversation").type, "shell");
+});
+
+test("restores the saved active conversation even when another chat is newer", () => {
+  const snapshot = createChatStartupSnapshot(input({
+    summaries: [
+      { id: otherId, title: "Newest chat", updatedAt: "2026-07-28T19:00:00.000Z", hasMessages: true, isStreaming: false },
+      { id: activeId, title: "Older active chat", updatedAt: "2026-07-28T16:00:00.000Z", hasMessages: true, isStreaming: false },
+    ],
+  }));
+
+  const restored = resolveSnapshotStartup(snapshot);
+  assert.equal(restored.type, "cached");
+  assert.equal(restored.conversation.id, activeId);
+});
+
+test("restores a saved blank active conversation", () => {
+  const snapshot = createChatStartupSnapshot(input({
+    activeConversation: { id: activeId, title: "Unsent chat", turns: [] },
+  }));
+
+  const restored = resolveSnapshotStartup(snapshot);
+  assert.equal(restored.type, "cached");
+  assert.equal(restored.conversation.id, activeId);
+  assert.deepEqual(restored.conversation.turns, []);
 });
 
 test("falls back to the shell or exact blank route without a snapshot", () => {

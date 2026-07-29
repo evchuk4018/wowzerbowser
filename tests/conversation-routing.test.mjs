@@ -57,6 +57,8 @@ test("chat routes keep the workspace in a persistent layout", async () => {
   assert.match(page, /return null/);
   assert.match(workspace, /useParams/);
   assert.match(workspace, /handledRouteRef\.current === requestedConversationId/);
+  assert.match(workspace, /if \(!snapshotLoaded\) return;/);
+  assert.match(workspace, /snapshot\?\.activeConversation/);
   assert.match(workspace, /router\.push\(`\/chat\/\$\{conversationId\}`\)/);
   assert.match(workspace, /router\.push\(`\/chat\/\$\{conversation\.id\}`\)/);
   assert.match(workspace, /router\.replace\(`\/chat\/\$\{replacement\.id\}`\)/);
