@@ -433,6 +433,7 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(styles, /\.chat-active \.composer-wrap[\s\S]*?position: absolute;/);
   assert.match(styles, /\.composer textarea[\s\S]*?max-height: 192px;/);
   assert.match(styles, /\.composer-wrap--expanded[\s\S]*?position: fixed;/);
+  assert.match(styles, /\.composer-wrap--expanded[\s\S]*?transform: none;/);
   assert.match(styles, /\.composer--expanded textarea[\s\S]*?overflow-y: auto;/);
 });
 
