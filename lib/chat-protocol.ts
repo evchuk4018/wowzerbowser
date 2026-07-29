@@ -459,6 +459,7 @@ function readImageAnalysis(value: unknown, field: string): ChatImageAnalysis {
   const error = value.error === undefined
     ? undefined
     : readBoundedNonEmptyString(value.error, `${field}.error`, 2_000);
+  const analysisUsage = readImageUsage(value.analysisUsage, `${field}.analysisUsage`);
   const textUsage = readImageUsage(value.textUsage, `${field}.textUsage`);
   const visualUsage = readImageUsage(value.visualUsage, `${field}.visualUsage`);
   if (value.status === "failed" && error === undefined) {
@@ -472,6 +473,7 @@ function readImageAnalysis(value: unknown, field: string): ChatImageAnalysis {
     mainVisuals,
     textModel: readImageModel(value.textModel, `${field}.textModel`),
     visualModel: readImageModel(value.visualModel, `${field}.visualModel`),
+    ...(analysisUsage === undefined ? {} : { analysisUsage }),
     ...(textUsage === undefined ? {} : { textUsage }),
     ...(visualUsage === undefined ? {} : { visualUsage }),
     ...(error === undefined ? {} : { error }),

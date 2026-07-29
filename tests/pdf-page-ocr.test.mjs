@@ -130,7 +130,10 @@ test("OpenRouter HTTP status classes only retry transient provider failures", as
   try {
     for (const status of [401, 403, 413, 422, 429, 500, 503]) {
       await assert.rejects(
-        askOpenRouterAboutImage("OCR", png, "image/png", { fetchImpl: async () => new Response("failure", { status }) }),
+        askOpenRouterAboutImage("OCR", png, "image/png", {
+          fetchImpl: async () => new Response("failure", { status }),
+          retryDelayMs: 0,
+        }),
         (error) => {
           assert.equal(isTransientPdfOcrFailure(error), status === 429 || status >= 500);
           return true;

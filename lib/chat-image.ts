@@ -25,6 +25,7 @@ export type ChatImageAnalysis = {
   mainVisuals: string | null;
   textModel: string | null;
   visualModel: string | null;
+  analysisUsage?: ChatUsage | null;
   textUsage?: ChatUsage | null;
   visualUsage?: ChatUsage | null;
   error?: string;

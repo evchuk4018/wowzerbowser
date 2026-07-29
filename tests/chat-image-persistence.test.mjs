@@ -28,6 +28,7 @@ const attachment = (overrides = {}) => ({
     mainVisuals: "A settings page with a save button.",
     textModel: "vision-text",
     visualModel: "vision-visual",
+    analysisUsage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
   },
   ...overrides,
 });
@@ -49,6 +50,7 @@ test("image attachments are normalized into provider-neutral request metadata", 
   assert.equal(parsed.messages[0].attachments?.[0]?.analysis.visibleText, null);
   assert.equal(parsed.messages[0].attachments?.[0]?.storagePath, "owner-1/conversation-1/message-1/img_123");
   assert.equal(parsed.messages[0].attachments?.[0]?.analysis.mainVisuals, "A settings page with a save button.");
+  assert.equal(parsed.messages[0].attachments?.[0]?.analysis.analysisUsage?.totalTokens, 15);
 });
 
 test("attachment validation rejects unsupported, oversized, URL, and duplicate metadata", () => {
@@ -245,7 +247,10 @@ test("server image authorization uses upload rows and claim-token retries", asyn
   assert.match(store, /\.is\("claim_token", null\)/);
   assert.match(store, /\.eq\("claim_token", existing\.claimToken\)/);
   assert.match(store, /existing\.status === "complete"/);
-  assert.match(service, /Promise\.all\(\[/);
+  assert.match(service, /for \(const \{ input, contentType, contentHash \} of prepared\)/);
+  assert.doesNotMatch(service, /Promise\.all\(prepared\.map/);
+  assert.match(service, /analyzeOpenRouterImage\(IMAGE_ANALYSIS_PROMPT/);
+  assert.match(service, /requestKind: "image_analysis"/);
   assert.match(service, /await waitForChatImageUpload/);
   assert.match(history, /listChatImageUploadRecords/);
   assert.match(history, /active_version/);
@@ -256,4 +261,17 @@ test("server image authorization uses upload rows and claim-token retries", asyn
   assert.match(history, /requestUsers\.length !== activeHistory\.length/);
   assert.match(orchestration, /await getAuthoritativeChatImageIdsForRequest/);
   assert.doesNotMatch(orchestration, /imageIdsFromValidatedRequestHistory/);
+});
+
+test("combined image analysis usage remains compatible with legacy usage records", async () => {
+  const [protocol, migration] = await Promise.all([
+    readFile(new URL("../lib/usage-protocol.ts", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/migrations/20260729210000_combined_image_analysis_usage.sql", import.meta.url), "utf8"),
+  ]);
+  assert.match(protocol, /"image_analysis"/);
+  assert.match(migration, /'image_analysis'/);
+  assert.match(migration, /'image_text_analysis'/);
+  assert.match(migration, /'image_visual_analysis'/);
+  assert.match(migration, /chat_usage_records_request_kind_check/);
+  assert.match(migration, /chat_usage_outbox_request_kind_check/);
 });

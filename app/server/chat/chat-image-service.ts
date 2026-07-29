@@ -16,7 +16,7 @@ import { estimateUsageFromText } from "../../../lib/usage-pricing";
 import type { ChatToolResult } from "../../../lib/chat-protocol";
 import type { ChatToolCall } from "../../../lib/chat-protocol";
 import { recordUsage } from "../usage/usage-store";
-import { askOpenRouterAboutImage } from "../../providers/openrouter/openrouter-image-adapter";
+import { analyzeOpenRouterImage, askOpenRouterAboutImage } from "../../providers/openrouter/openrouter-image-adapter";
 import { OPENROUTER_QWEN_FLASH_MODEL } from "../../providers/openrouter/openrouter-config";
 import {
   attachmentFromUploadRecord,
@@ -45,26 +45,18 @@ export type ChatImageServiceOptions = {
   jobId?: string;
 };
 
-const VISIBLE_TEXT_PROMPT = [
-  "Determine whether this image contains visible text.",
+const IMAGE_ANALYSIS_PROMPT = [
+  "Analyze this image once and return both requested fields.",
   "",
-  "If text is present, transcribe it faithfully. Preserve useful line breaks.",
-  "Do not correct, complete, or guess unclear text. Mark unreadable portions as",
-  "[unclear].",
+  "For visibleText, transcribe visible text faithfully and preserve useful line",
+  "breaks. Do not correct, complete, or guess unclear text; mark unreadable",
+  "portions as [unclear]. Return null when no text is visible.",
   "",
-  "If no visible text is present, respond with exactly:",
-  "NONE",
-].join("\n");
-
-const MAIN_VISUALS_PROMPT = [
-  "Describe the main things visibly present in this image.",
-  "",
-  "Include the important subjects, objects, interface elements, chart elements,",
-  "or scene components needed for another model to understand the image.",
+  "For mainVisuals, concisely describe the important subjects, objects, interface",
+  "elements, chart elements, or scene components needed to understand the image.",
   "",
   "Only state details supported by visible evidence. Clearly mark uncertainty.",
   "Do not infer hidden identities, motives, events, or facts.",
-  "Keep the answer concise.",
 ].join("\n");
 
 const FOLLOWUP_SYSTEM_PROMPT = [
@@ -78,7 +70,7 @@ async function recordImageUsage(input: {
   conversationId: string;
   jobId?: string;
   requestId: string;
-  requestKind: "image_text_analysis" | "image_visual_analysis" | "image_followup";
+  requestKind: "image_analysis" | "image_followup";
   model: string | null;
   usage: { promptTokens?: number; completionTokens?: number; totalTokens?: number; cachedPromptTokens?: number; reasoningTokens?: number } | null;
   prompt: string;
@@ -159,24 +151,27 @@ async function analyzeOneChatImage(input: {
   try {
     await uploadChatImageObject(claimed.record.storagePath, upload.bytes, contentType, options.signal);
     const storedBytes = await downloadChatImageObjectByPath(claimed.record.storagePath, contentType);
-    const [text, visuals] = await Promise.all([
-      askOpenRouterAboutImage(VISIBLE_TEXT_PROMPT, storedBytes, contentType, { signal: options.signal }),
-      askOpenRouterAboutImage(MAIN_VISUALS_PROMPT, storedBytes, contentType, { signal: options.signal }),
-    ]);
-    const visibleText = text.content.trim() === "NONE" ? null : text.content.slice(0, MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH);
-    const mainVisuals = visuals.content.slice(0, MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH);
-    await Promise.allSettled([
-      recordImageUsage({ ownerId, conversationId, jobId: options.jobId, requestId: `${upload.id}:text`, requestKind: "image_text_analysis", model: text.model, usage: text.usage, prompt: VISIBLE_TEXT_PROMPT, answer: text.content }),
-      recordImageUsage({ ownerId, conversationId, jobId: options.jobId, requestId: `${upload.id}:visual`, requestKind: "image_visual_analysis", model: visuals.model, usage: visuals.usage, prompt: MAIN_VISUALS_PROMPT, answer: visuals.content }),
-    ]);
+    const analysis = await analyzeOpenRouterImage(IMAGE_ANALYSIS_PROMPT, storedBytes, contentType, { signal: options.signal });
+    const visibleText = analysis.visibleText?.slice(0, MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH) ?? null;
+    const mainVisuals = analysis.mainVisuals.slice(0, MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH);
+    await recordImageUsage({
+      ownerId,
+      conversationId,
+      jobId: options.jobId,
+      requestId: `${upload.id}:analysis`,
+      requestKind: "image_analysis",
+      model: analysis.model,
+      usage: analysis.usage,
+      prompt: IMAGE_ANALYSIS_PROMPT,
+      answer: JSON.stringify({ visibleText, mainVisuals }),
+    }).catch(() => undefined);
     const completed = await completeChatImageUpload(ownerId, conversationId, upload.id, claimToken, {
       status: "complete",
       visibleText,
       mainVisuals,
-      textModel: text.model,
-      visualModel: visuals.model,
-      textUsage: text.usage,
-      visualUsage: visuals.usage,
+      textModel: analysis.model,
+      visualModel: analysis.model,
+      analysisUsage: analysis.usage,
     });
     const attachment = attachmentFromUploadRecord(completed);
     if (!attachment) throw new ChatImageError("storage", "Image analysis metadata is incomplete.", 503);
@@ -216,15 +211,19 @@ export async function analyzeAndStoreChatImages(
     contentHash: hashImageBytes(input.bytes),
   }));
   await ensureChatImageConversation(ownerId, conversationId);
-  return Promise.all(prepared.map(({ input, contentType, contentHash }) => analyzeOneChatImage({
-    ownerId,
-    conversationId,
-    userMessageId,
-    upload: input,
-    contentType,
-    contentHash,
-    options,
-  })));
+  const attachments: ChatImageAttachment[] = [];
+  for (const { input, contentType, contentHash } of prepared) {
+    attachments.push(await analyzeOneChatImage({
+      ownerId,
+      conversationId,
+      userMessageId,
+      upload: input,
+      contentType,
+      contentHash,
+      options,
+    }));
+  }
+  return attachments;
 }
 
 export async function readChatImagePreviewForOwner(input: {
@@ -278,17 +277,14 @@ export function chatToolResultForImageError(callId: string, error: unknown): Cha
   return { id: callId, name: "inspect_image", ok: false, stdout: "", stderr: message };
 }
 
-export const chatImagePrompts = { VISIBLE_TEXT_PROMPT, MAIN_VISUALS_PROMPT, FOLLOWUP_SYSTEM_PROMPT } as const;
+export const chatImagePrompts = { IMAGE_ANALYSIS_PROMPT, FOLLOWUP_SYSTEM_PROMPT } as const;
 
 export async function analyzeDocumentImage(bytes: Uint8Array, contentType: ChatImageContentType, signal?: AbortSignal): Promise<{ visibleText: string | null; mainVisuals: string | null }> {
   const storedLimit = 2_000;
-  const [text, visuals] = await Promise.all([
-    askOpenRouterAboutImage(VISIBLE_TEXT_PROMPT, bytes, contentType, { signal }),
-    askOpenRouterAboutImage(MAIN_VISUALS_PROMPT, bytes, contentType, { signal }),
-  ]);
+  const analysis = await analyzeOpenRouterImage(IMAGE_ANALYSIS_PROMPT, bytes, contentType, { signal });
   return {
-    visibleText: text.content.trim() === "NONE" ? null : text.content.slice(0, storedLimit),
-    mainVisuals: visuals.content.trim() ? visuals.content.slice(0, storedLimit) : null,
+    visibleText: analysis.visibleText?.slice(0, storedLimit) ?? null,
+    mainVisuals: analysis.mainVisuals ? analysis.mainVisuals.slice(0, storedLimit) : null,
   };
 }
 
