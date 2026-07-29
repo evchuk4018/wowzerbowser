@@ -104,7 +104,8 @@ test("Qwen dreaming adapter enables thinking and parses validated JSON actions",
     assert.equal(answer.actions[0].action, "noop");
     assert.equal(answer.usage?.reasoningTokens, 2);
     const body = JSON.parse(calls[0].init.body);
-    assert.equal(body.model, "qwen/qwen3.7-flash");
+    assert.deepEqual(body.models, ["qwen/qwen3.7-flash", "deepseek/deepseek-v4-flash"]);
+    assert.equal(body.model, undefined);
     assert.deepEqual(body.reasoning, { enabled: true });
     assert.deepEqual(body.response_format, { type: "json_object" });
   } finally {

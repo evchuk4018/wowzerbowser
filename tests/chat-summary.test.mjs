@@ -10,6 +10,7 @@ import {
   OPENROUTER_QWEN_FLASH_MODEL,
   summarizeChatWithQwen,
 } from "../app/providers/openrouter/openrouter-qwen-text-adapter.ts";
+import { OPENROUTER_DEEPSEEK_FLASH_MODEL } from "../app/providers/openrouter/openrouter-config.ts";
 
 const source = async (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -64,7 +65,8 @@ test("Qwen chat summary adapter sends Flash with reasoning disabled and parses u
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, "https://openrouter.ai/api/v1/chat/completions");
     const body = JSON.parse(calls[0].init.body);
-    assert.equal(body.model, OPENROUTER_QWEN_FLASH_MODEL);
+    assert.deepEqual(body.models, [OPENROUTER_QWEN_FLASH_MODEL, OPENROUTER_DEEPSEEK_FLASH_MODEL]);
+    assert.equal(body.model, undefined);
     assert.equal(body.messages[0].content, "summary prompt");
     assert.deepEqual(body.reasoning, { effort: "none" });
     assert.equal(body.max_tokens, 512);

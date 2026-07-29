@@ -10,6 +10,7 @@ import {
 import { estimateUsageFromText } from "../../../lib/usage-pricing";
 import {
   OPENROUTER_BASE_URL,
+  OPENROUTER_DEEPSEEK_FLASH_MODEL,
   OPENROUTER_QWEN_FLASH_MODEL,
   openRouterApiKey,
   openRouterHeaders,
@@ -111,7 +112,7 @@ export async function completeOpenRouterQwenText(
   const timeout = options.timeoutMs === undefined ? null : AbortSignal.timeout(options.timeoutMs);
   const signal = signalFor(options, timeout);
   const body = {
-    model: OPENROUTER_QWEN_FLASH_MODEL,
+    models: [OPENROUTER_QWEN_FLASH_MODEL, OPENROUTER_DEEPSEEK_FLASH_MODEL],
     messages: [
       ...(options.systemPrompt ? [{ role: "system", content: options.systemPrompt }] : []),
       { role: "user", content: prompt },

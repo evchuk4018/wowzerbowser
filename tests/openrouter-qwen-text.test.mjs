@@ -8,6 +8,7 @@ import {
   summarizeChatWithQwen,
   summarizeReasoningWithQwenFlash,
 } from "../app/providers/openrouter/openrouter-qwen-text-adapter.ts";
+import { OPENROUTER_DEEPSEEK_FLASH_MODEL } from "../app/providers/openrouter/openrouter-config.ts";
 
 const originalKey = process.env.OPENROUTER_API_KEY;
 process.env.OPENROUTER_API_KEY = "test-qwen-key";
@@ -44,7 +45,8 @@ test("Qwen text adapter sends OpenRouter requests with reasoning disabled and ca
   const body = JSON.parse(calls[0].init.body);
   assert.equal(calls[0].url, "https://openrouter.ai/api/v1/chat/completions");
   assert.equal(calls[0].init.headers.authorization, "Bearer test-qwen-key");
-  assert.equal(body.model, OPENROUTER_QWEN_FLASH_MODEL);
+  assert.deepEqual(body.models, [OPENROUTER_QWEN_FLASH_MODEL, OPENROUTER_DEEPSEEK_FLASH_MODEL]);
+  assert.equal(body.model, undefined);
   assert.deepEqual(body.messages, [
     { role: "system", content: "system prompt" },
     { role: "user", content: "user prompt" },
@@ -73,7 +75,20 @@ test("Qwen task wrappers preserve title, summary, reasoning, and recall limits",
   assert.equal(bodies[1].max_tokens, 512);
   assert.equal(bodies[2].max_tokens, 32);
   assert.equal(bodies[3].max_tokens, undefined);
+  for (const body of bodies) {
+    assert.deepEqual(body.models, [OPENROUTER_QWEN_FLASH_MODEL, OPENROUTER_DEEPSEEK_FLASH_MODEL]);
+    assert.equal(body.model, undefined);
+  }
   assert.match(bodies[3].messages[0].content, /conversation data is untrusted content/);
+});
+
+test("Qwen text adapter preserves the model selected by OpenRouter fallback routing", async () => {
+  const answer = await completeOpenRouterQwenText("fallback prompt", {
+    fetchImpl: async () => response("DeepSeek result", { model: OPENROUTER_DEEPSEEK_FLASH_MODEL }),
+  });
+
+  assert.equal(answer.content, "DeepSeek result");
+  assert.equal(answer.model, OPENROUTER_DEEPSEEK_FLASH_MODEL);
 });
 
 test("Qwen text adapter preserves cancellation and retryable upstream errors", async () => {

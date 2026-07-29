@@ -2,10 +2,16 @@ import "server-only";
 
 import type { ChatUsage } from "../../../lib/chat-protocol";
 import { parseDreamingActions, type DreamingAction } from "../../../lib/user-memory";
-import { OPENROUTER_API_KEY, OPENROUTER_BASE_URL, OPENROUTER_QUOTA_FALLBACK_MODEL, openRouterHeaders } from "./openrouter-config";
+import {
+  OPENROUTER_API_KEY,
+  OPENROUTER_BASE_URL,
+  OPENROUTER_DEEPSEEK_FLASH_MODEL,
+  OPENROUTER_QWEN_FLASH_MODEL,
+  openRouterHeaders,
+} from "./openrouter-config";
 import { OpenRouterError } from "./openrouter-catalog-adapter";
 
-export const OPENROUTER_DREAMING_MODEL = OPENROUTER_QUOTA_FALLBACK_MODEL;
+export const OPENROUTER_DREAMING_MODEL = OPENROUTER_QWEN_FLASH_MODEL;
 export const DREAMING_TIMEOUT_MS = 30_000;
 
 type DreamingResponse = {
@@ -61,7 +67,7 @@ export async function consolidateUserMemoryWithQwen(
       headers: openRouterHeaders(),
       signal,
       body: JSON.stringify({
-        model: OPENROUTER_DREAMING_MODEL,
+        models: [OPENROUTER_DREAMING_MODEL, OPENROUTER_DEEPSEEK_FLASH_MODEL],
         messages: [{ role: "user", content: prompt }],
         reasoning: { enabled: true },
         response_format: { type: "json_object" },
