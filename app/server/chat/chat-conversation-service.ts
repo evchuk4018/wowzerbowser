@@ -8,6 +8,7 @@ import {
 import {
   chatConversationExists,
   deleteChatConversationRecord,
+  listChatConversations,
 } from "./chat-history-store";
 import { deleteConversationWorkspace } from "../modal/modal-conversation-cleanup";
 import { deleteChatImagesForConversation } from "./chat-image-store";
@@ -26,4 +27,19 @@ export async function deleteChatConversation(ownerId: string, conversationId: st
   await deleteChatConversationRecord(ownerId, conversationId);
   await deleteChatModelPreference(ownerId, conversationId);
   await deleteChatJobsForConversation(ownerId, conversationId);
+}
+
+/**
+ * Remove persisted conversations that never received a message. These rows
+ * can be left behind when preparing an upload fails before chat submission.
+ * Use the coordinated deletion path so provider-owned resources are cleaned
+ * up along with the database row.
+ */
+export async function cleanupEmptyChatConversations(ownerId: string): Promise<void> {
+  const summaries = await listChatConversations(ownerId);
+  await Promise.all(
+    summaries
+      .filter((conversation) => !conversation.hasMessages)
+      .map((conversation) => deleteChatConversation(ownerId, conversation.id)),
+  );
 }

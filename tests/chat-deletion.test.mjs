@@ -20,6 +20,10 @@ test("deletion exposes an authenticated idempotent API and coordinated cleanup",
   assert.match(route, /idPattern\.test\(conversationId\)/);
   assert.match(route, /deleteChatConversation\(owner\.id, conversationId\)/);
   assert.match(service, /chatConversationExists/);
+  assert.match(service, /export async function cleanupEmptyChatConversations/);
+  assert.match(service, /listChatConversations\(ownerId\)/);
+  assert.match(service, /filter\(\(conversation\) => !conversation\.hasMessages\)/);
+  assert.match(service, /deleteChatConversation\(ownerId, conversation\.id\)/);
   assert.match(service, /cancelChatJobsForConversation/);
   assert.match(service, /deleteConversationWorkspace/);
   assert.match(service, /deleteChatConversationRecord/);
@@ -32,6 +36,17 @@ test("deletion exposes an authenticated idempotent API and coordinated cleanup",
   assert.match(modal, /sandbox\.terminate\(\)/);
   assert.match(modal, /client\.volumes\.delete/);
   assert.match(modal, /allowMissing: true/);
+});
+
+test("chat bootstrap cleans up empty persisted conversations before loading", async () => {
+  const [bootstrap, service] = await Promise.all([
+    source("app/server/chat/chat-bootstrap-service.ts"),
+    source("app/server/chat/chat-conversation-service.ts"),
+  ]);
+
+  assert.match(bootstrap, /import \{ cleanupEmptyChatConversations \} from "\.\/chat-conversation-service"/);
+  assert.match(bootstrap, /await cleanupEmptyChatConversations\(owner\.id\);[\s\S]*?const \[summaries/);
+  assert.match(service, /Use the coordinated deletion path/);
 });
 
 test("desktop and mobile history controls share the confirmation flow", async () => {

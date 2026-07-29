@@ -16,6 +16,7 @@ import {
 } from "./chat-history-store";
 import { listChatModelPreferences } from "./chat-model-preference-store";
 import { getChatUserPreferences } from "./chat-user-preferences-store";
+import { cleanupEmptyChatConversations } from "./chat-conversation-service";
 
 async function readUserPreferences(ownerId: string) {
   try {
@@ -42,6 +43,7 @@ export async function buildChatBootstrap(
   owner: AuthUser,
   requestedConversationId?: string,
 ): Promise<ChatBootstrapPayload> {
+  await cleanupEmptyChatConversations(owner.id);
   const requestedSelection = resolveChatBootstrapSelection([], requestedConversationId);
   const [summaries, userPreferences, modelPreferences, requestedConversation] = await Promise.all([
     listChatConversations(owner.id),
