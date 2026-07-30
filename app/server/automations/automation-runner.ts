@@ -50,9 +50,11 @@ export async function runClaimedAutomation(run: ClaimedRun): Promise<void> {
       if (event.type === "reasoning") reasoning += event.delta;
       if (event.type === "error") generationError = event.message;
     }, async ({ round, usage, estimatedUsage, provider, model, exactCostUsd, pricing }) => {
+      const recordedUsage = usage ?? estimatedUsage;
+      if (!recordedUsage) return;
       await recordUsage({
         ownerId: run.owner_id, provider, model, requestKind: "automation", requestId: run.id, round,
-        usage: usage ?? estimatedUsage, source: usage ? "exact" : "estimated", exactCostUsd,
+        usage: recordedUsage, source: usage ? "exact" : "estimated", exactCostUsd,
         pricingSnapshot: pricing ? { provider, model, label: model, inputUsdPerMillion: pricing.inputUsdPerMillion ?? 0, cachedInputUsdPerMillion: pricing.cachedInputUsdPerMillion, outputUsdPerMillion: pricing.outputUsdPerMillion ?? 0 } : null,
         unpriced: exactCostUsd === undefined,
       });

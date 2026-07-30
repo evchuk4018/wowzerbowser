@@ -139,6 +139,8 @@ export async function runChatJob(
       controller.signal,
       (event: ChatStreamEvent) => eventCoalescer.enqueue(event),
       async ({ round, usage: providerUsage, estimatedUsage, provider, model, exactCostUsd, pricing }) => {
+        const recordedUsage = providerUsage ?? estimatedUsage;
+        if (!recordedUsage) return;
         await recordUsage({
           ownerId,
           provider,
@@ -146,7 +148,7 @@ export async function runChatJob(
           requestKind: "chat",
           requestId: jobId,
           round,
-          usage: providerUsage ?? estimatedUsage,
+          usage: recordedUsage,
           source: providerUsage ? "exact" : "estimated",
           exactCostUsd,
           pricingSnapshot: pricing ? {

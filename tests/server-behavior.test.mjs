@@ -467,6 +467,7 @@ test("chat orchestration completes after more than six sequential tool calls", a
   const originalFetch = globalThis.fetch;
   const originalDeepSeekKey = process.env.DEEPSEEK_API_KEY;
   const events = [];
+  const roundUsages = [];
   let providerRounds = 0;
   const sse = (payload) => `data: ${JSON.stringify(payload)}\n\n`;
 
@@ -502,6 +503,7 @@ test("chat orchestration completes after more than six sequential tool calls", a
       "owner-1",
       new AbortController().signal,
       async (event) => events.push(event),
+      async (usage) => roundUsages.push(usage),
     );
   } finally {
     globalThis.fetch = originalFetch;
@@ -516,6 +518,10 @@ test("chat orchestration completes after more than six sequential tool calls", a
   assert.deepEqual(events.filter(({ type }) => type === "error"), []);
   assert.equal(events.find(({ type }) => type === "content")?.delta, "All seven tool calls completed.");
   assert.equal(events.at(-1)?.type, "done");
+  assert.equal(roundUsages.length, 8);
+  assert.equal(roundUsages.slice(0, 7).every(({ usage, estimatedUsage }) => usage?.promptTokens === 1 && estimatedUsage === undefined), true);
+  assert.equal(roundUsages[7].usage, null);
+  assert.ok(roundUsages[7].estimatedUsage);
 });
 
 test("chat protocol accepts extended tool traces", () => {

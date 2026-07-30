@@ -39,10 +39,14 @@ export function calculateUsageCost(usage: ChatUsage, pricing: UsagePricing | nul
 }
 
 export function estimateUsageFromText(input: string, output: string): ChatUsage {
+  return estimateUsageFromCharacterCounts(input.length, output.length);
+}
+
+export function estimateUsageFromCharacterCounts(inputCharacters: number, outputCharacters: number): ChatUsage {
   // Provider tokenizers are not interchangeable. This intentionally simple
   // fallback is marked as estimated everywhere it is persisted.
-  const promptTokens = Math.max(1, Math.ceil(input.length / 4));
-  const completionTokens = output.length ? Math.max(1, Math.ceil(output.length / 4)) : 0;
+  const promptTokens = Math.max(1, Math.ceil(Math.max(0, inputCharacters) / 4));
+  const completionTokens = outputCharacters > 0 ? Math.max(1, Math.ceil(outputCharacters / 4)) : 0;
   return {
     promptTokens,
     completionTokens,

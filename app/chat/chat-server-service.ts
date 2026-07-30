@@ -2,7 +2,6 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import type { ChatAssistantRound, ChatModelPricing, ChatRequest, ChatStreamEvent, ChatToolCall, ChatToolResult, ChatUsage } from "../../lib/chat-protocol";
-import { estimateUsageFromText } from "../../lib/usage-pricing";
 import { chatProviderAdapter } from "../server/chat/chat-provider-registry";
 import { authorizeAutomationModel, authorizeChatModel } from "../server/chat/chat-model-catalog-service";
 import { availableChatTools, executePythonTool } from "../server/agent/python-tool";
@@ -70,13 +69,14 @@ import { listConnectorCatalog } from "../server/connectors/connector-service";
 import { connectorToolsToModelTools, executeConnectorTool, executeSearchConnectorTools, SEARCH_CONNECTOR_TOOLS_DEFINITION, SEARCH_CONNECTOR_TOOLS_NAME } from "../server/connectors/connector-tool-router";
 import type { ConnectorTool } from "../../lib/connector-protocol";
 import { executeToolBatch, planToolBatches, toolExecutionMetadata } from "../server/agent/tool-execution-policy";
+import { ChatUsageEstimator } from "./chat-usage-estimator";
 
 const MAX_RESPONSE_MS = 240_000;
 
 export type ChatRoundUsage = {
   round: number;
   usage: ChatUsage | null;
-  estimatedUsage: ChatUsage;
+  estimatedUsage?: ChatUsage;
   provider: "deepseek" | "openrouter";
   model: string;
   exactCostUsd?: number;
@@ -305,6 +305,7 @@ export async function generateChatResponse(
         onUsage: persistSummaryUsage,
       });
       const replayRounds: ChatAssistantRound[] = [];
+      let usageEstimator: ChatUsageEstimator | null = null;
       const roundUsages: Array<ReturnType<typeof latestNonNullUsage>> = [];
       let executor: ModalPythonExecutor | null = null;
       const recalledContexts = new Map<string, string>();
@@ -312,6 +313,7 @@ export async function generateChatResponse(
       let automationToolsUnlocked = automationKeywordUnlock;
       let calendarToolsUnlocked = calendarKeywordUnlock;
       let activeResearchRun: ResearchRun | null = null;
+      let connectorModelTools: ReturnType<typeof connectorToolsToModelTools> = [];
       const sourceCatalog = new Map<string, ChatSource>();
 
       try {
@@ -321,7 +323,7 @@ export async function generateChatResponse(
           const dynamicPdfTools = selected("documents")
             ? availablePdfTools(allowedPdfIds.size > 0).filter((tool) => !baseToolDefinitions.some((base) => base.function.name === tool.function.name))
             : [];
-          const dynamicConnectorTools = selected("connectors") ? connectorToolsToModelTools(discoveredConnectorTools) : [];
+          const dynamicConnectorTools = selected("connectors") ? connectorModelTools : [];
           const toolDefinitions = [...baseToolDefinitions, ...automationDefinitions, ...calendarDefinitions, ...dynamicPdfTools, ...dynamicConnectorTools];
           await enqueue({ type: "round", round });
           const systemInstructions = [
@@ -383,21 +385,24 @@ export async function generateChatResponse(
               }
             }
           } finally {
-            if (providerAccepted) {
-              await persistUsage?.({
+            if (providerAccepted && persistUsage) {
+              const providerUsage = roundUsages[roundUsageIndex];
+              const estimatedUsage = providerUsage
+                ? undefined
+                : (usageEstimator ??= new ChatUsageEstimator({
+                  messages: chatRequest.messages,
+                  systemPrompt: chatRequest.systemPrompt,
+                  userPresence: chatRequest.userPresence,
+                })).estimate({
+                  replayRounds,
+                  systemInstructions,
+                  tools: toolDefinitions,
+                  output: `${reasoningParts.join("")} ${contentParts.join("")} ${calls.map((call) => call.arguments).join(" ")}`,
+                });
+              await persistUsage({
                 round,
-                usage: roundUsages[roundUsageIndex],
-                estimatedUsage: estimateUsageFromText(
-                  JSON.stringify({
-                    messages: chatRequest.messages,
-                    systemPrompt: chatRequest.systemPrompt,
-                    userPresence: chatRequest.userPresence,
-                    replayRounds,
-                    systemInstructions,
-                    tools: toolDefinitions,
-                  }),
-                  `${reasoningParts.join("")} ${contentParts.join("")} ${calls.map((call) => call.arguments).join(" ")}`,
-                ),
+                usage: providerUsage,
+                ...(estimatedUsage ? { estimatedUsage } : {}),
                 provider: chatRequest.model.provider,
                 model: actualModel,
                 ...(exactCostUsd === undefined ? {} : { exactCostUsd }),
@@ -521,6 +526,7 @@ export async function generateChatResponse(
             if (call.name === SEARCH_CONNECTOR_TOOLS_NAME && connectorDiscoveryAvailable) {
               const discovered = await executeSearchConnectorTools(call, ownerId);
               discoveredConnectorTools = discovered.tools;
+              connectorModelTools = connectorToolsToModelTools(discovered.tools);
               return discovered.result;
             }
             if (call.name.startsWith("connector__") && connectorDiscoveryAvailable) {
