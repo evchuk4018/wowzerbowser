@@ -74,12 +74,17 @@ test("paginates durable replay before honoring a terminal status", async () => {
     },
   ];
   let poll = 0;
+  let resumeCalls = 0;
   globalThis.fetch = async (url) => {
     if (url === "/api/chat") {
       return new Response(`data: ${JSON.stringify({
         type: "submission",
         submission: { jobId: "job-1", status: "completed", resumed: true },
       })}\n\n`, { status: 200 });
+    }
+    if (url.endsWith("/resume")) {
+      resumeCalls += 1;
+      return Response.json({ accepted: true }, { status: 202 });
     }
     return Response.json(snapshots[poll++]);
   };
@@ -98,6 +103,7 @@ test("paginates durable replay before honoring a terminal status", async () => {
     );
     assert.equal(received.at(-1).type, "done");
     assert.equal(poll, 2);
+    assert.equal(resumeCalls, 2);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -106,12 +112,17 @@ test("paginates durable replay before honoring a terminal status", async () => {
 test("normalizes a failed durable fallback with no persisted error event", async () => {
   const originalFetch = globalThis.fetch;
   let poll = 0;
+  let resumeCalls = 0;
   globalThis.fetch = async (url) => {
     if (url === "/api/chat") {
       return new Response(`data: ${JSON.stringify({
         type: "submission",
         submission: { jobId: "job-1", status: "running", resumed: true },
       })}\n\n`, { status: 200 });
+    }
+    if (url.endsWith("/resume")) {
+      resumeCalls += 1;
+      return Response.json({ accepted: true }, { status: 202 });
     }
     poll += 1;
     return Response.json({
@@ -140,6 +151,7 @@ test("normalizes a failed durable fallback with no persisted error event", async
     assert.deepEqual(received.map(({ type }) => type), ["error", "done"]);
     assert.equal(received[0].message, "database failed");
     assert.equal(poll, 1);
+    assert.equal(resumeCalls, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }

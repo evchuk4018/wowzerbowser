@@ -259,7 +259,7 @@ test("server image authorization uses upload rows and claim-token retries", asyn
   assert.match(history, /const activeHistory = activeMessages\.slice\(0, currentIndex \+ 1\)/);
   assert.match(history, /activeMessages\[currentIndex\]\.jobId !== jobId/);
   assert.match(history, /requestUsers\.length !== activeHistory\.length/);
-  assert.match(orchestration, /await getAuthoritativeChatImageIdsForRequest/);
+  assert.match(orchestration, /getAuthoritativeChatImageIdsForRequest/);
   assert.doesNotMatch(orchestration, /imageIdsFromValidatedRequestHistory/);
 });
 

@@ -159,9 +159,7 @@ async function executeDiscordMessage(ownerId: string, message: DiscordInboundMes
     jobId: created.jobId,
     status: "running",
   });
-  const terminal = await runChatJob(ownerId, conversationId, created.jobId, {
-    ...(created.request ? { claimedRequest: created.request } : {}),
-  });
+  const terminal = await runChatJob(ownerId, conversationId, created.jobId);
   const persisted = await getChatJob(ownerId, conversationId, created.jobId);
   const completed = terminal ?? persisted;
   if (!completed || completed.status !== "completed") {

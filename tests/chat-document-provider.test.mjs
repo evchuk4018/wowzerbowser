@@ -1,12 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { estimatePdfTokens, pdfContext, ChatDocumentError } from "../lib/chat-document.ts";
+import { estimatePdfTokens, pdfContext, ChatDocumentError, createInlineDocumentPageLoader } from "../lib/chat-document.ts";
 import { parsePdfWithOpenRouter } from "../app/providers/openrouter/openrouter-document-adapter.ts";
 import { OPENROUTER_QUOTA_FALLBACK_MODEL } from "../app/providers/openrouter/openrouter-config.ts";
 import { DOCUMENT_INGESTION_STAGES, DocumentIngestionTiming } from "../app/server/chat/document-ingestion-timing.ts";
 
 test("PDF token estimate is conservative and small PDFs inline every page",()=>{ assert.equal(estimatePdfTokens("12345"),2); const doc={id:"p",name:"a.pdf",contentType:"application/pdf",size:10,pageCount:2,tokenEstimate:2}; assert.equal(pdfContext(doc,[{pageNumber:1,text:"one"},{pageNumber:2,text:"two"}]).includes("[PDF page 2]\ntwo"),true); });
 test("large PDFs contain metadata and no partial text",()=>{ const doc={id:"p",name:"large.pdf",contentType:"application/pdf",size:10,pageCount:50,tokenEstimate:40000}; const value=pdfContext(doc,[{pageNumber:1,text:"SECRET"}]); assert.match(value,/id=p.*pages=50.*40000/s); assert.doesNotMatch(value,/SECRET/); });
+test("inline page loader skips large documents and deduplicates small document reads", async () => {
+ const calls=[];
+ const loader=createInlineDocumentPageLoader(async (document) => { calls.push(document.id); return [{pageNumber:1,text:document.name}]; });
+ const small={id:"small",name:"small.pdf",contentType:"application/pdf",size:10,pageCount:1,tokenEstimate:10};
+ const large={id:"large",name:"large.pdf",contentType:"application/pdf",size:10,pageCount:41,tokenEstimate:10};
+ const [first,second,skipped]=await Promise.all([loader(small),loader(small),loader(large)]);
+ assert.deepEqual(first,second);
+ assert.deepEqual(skipped,[]);
+ assert.deepEqual(calls,["small"]);
+});
 
 test("external PDF parsing sends the signed URL to the free parser and records no request contents",async()=>{
  const originalFetch=globalThis.fetch;

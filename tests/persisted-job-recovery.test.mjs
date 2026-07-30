@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   findPersistedJobCandidates,
   recoverPersistedJob,
-} from "../app/chat/use-persisted-job-recovery.ts";
+} from "../app/chat/chat-job-recovery.ts";
 
 const message = (id, status, jobId) => ({ id, role: "assistant", content: "", status, ...(jobId ? { jobId } : {}) });
 
@@ -72,7 +72,8 @@ test("retries when a token is temporarily unavailable", async () => {
     },
     dispatch: (action) => actions.push(action),
     onConversationStreamingChange: (_id, streaming) => changes.push(streaming),
-    pollIntervalMs: 0,
+    resumeJob: async () => undefined,
+    waitForRetry: async () => true,
     fetchJob: async () => completedSnapshot,
   });
   assert.equal(tokenReads, 2);
@@ -90,7 +91,8 @@ test("retries a transient job snapshot failure instead of leaving streaming stuc
     getAccessToken: async () => "token",
     dispatch: () => undefined,
     onConversationStreamingChange: (_id, streaming) => changes.push(streaming),
-    pollIntervalMs: 0,
+    resumeJob: async () => undefined,
+    waitForRetry: async () => true,
     fetchJob: async () => {
       fetches += 1;
       if (fetches === 1) throw new Error("temporary outage");

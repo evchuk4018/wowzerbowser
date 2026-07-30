@@ -2,6 +2,7 @@ import "server-only";
 import { CHAT_DOCUMENT_BUCKET, DOCX_CONTENT_TYPE, ChatDocumentError, PDF_PAGE_EXTRACTION_METHODS, type ChatDocumentAttachment, type ChatDocumentPage, type ChatDocumentPageFailure } from "../../../lib/chat-document";
 import { getServerClient } from "../../auth/supabase-server-adapter";
 import { DOCUMENT_INGESTION_STAGES, type DocumentIngestionTiming } from "./document-ingestion-timing";
+import { withChatPersistenceRetry } from "./chat-persistence-retry";
 
 export const CHAT_DOCUMENT_DOWNLOAD_URL_EXPIRATION_SECONDS = 60;
 
@@ -65,18 +66,17 @@ export async function createSignedDocumentDownloadUrl(
 
 export async function registerDocument(input: { ownerId: string; conversationId: string; userMessageId: string | null; jobId: string | null; document: ChatDocumentAttachment; pages: ChatDocumentPage[]; timing?: DocumentIngestionTiming }) {
   const register = async () => {
-    const db = getServerClient();
-    const { error: conversationError } = await db.from("chat_conversations").upsert({
-      owner_id: input.ownerId,
-      conversation_id: input.conversationId,
-      title: "New conversation",
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "owner_id,conversation_id", ignoreDuplicates: true });
-    if (conversationError) throw conversationError;
-    const { error } = await db.from("chat_documents").insert({ owner_id: input.ownerId, conversation_id: input.conversationId, document_id: input.document.id, user_message_id: input.userMessageId, job_id: input.jobId, storage_path: documentStoragePath(input.ownerId, input.conversationId, input.document.id, input.document.contentType), filename: input.document.name, content_type: input.document.contentType, size: input.document.size, page_count: input.document.pageCount, token_estimate: input.document.tokenEstimate, has_images: input.document.hasImages, image_count: input.document.imageCount, analyzed_image_count: input.document.analyzedImageCount, image_analyses: input.document.imageAnalyses, project_id: input.document.projectId ?? null, revision_id: input.document.revisionId ?? null, parent_revision_id: input.document.parentRevisionId ?? null, origin: input.document.origin ?? null, editable: input.document.editable ?? false, source_completeness: input.document.sourceCompleteness ?? null, status: "complete" });
-    if (error) throw error;
-    const { error: pageError } = await db.from("chat_document_pages").insert(input.pages.map((page) => ({ owner_id: input.ownerId, conversation_id: input.conversationId, document_id: input.document.id, page_number: page.pageNumber, text: page.text, extraction_method: page.extractionMethod, failure: page.failure ?? null })));
-    if (pageError) throw pageError;
+    await withChatPersistenceRetry(async () => {
+      const { error } = await getServerClient().rpc("register_chat_document", {
+        p_owner_id: input.ownerId,
+        p_conversation_id: input.conversationId,
+        p_document: input.document,
+        p_user_message_id: input.userMessageId,
+        p_job_id: input.jobId,
+        p_pages: input.pages,
+      });
+      if (error) throw error;
+    });
   };
   if (input.timing) await input.timing.measure(DOCUMENT_INGESTION_STAGES.DATABASE_REGISTRATION, register);
   else await register();

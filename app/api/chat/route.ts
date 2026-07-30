@@ -70,27 +70,24 @@ export async function POST(request: Request) {
       { highWaterMark: 64 },
     );
 
-    const execution = submission.resumed
-      ? Promise.resolve()
-      : runChatJob(user.id, chatRequest.conversationId, submission.jobId, {
-          ...(submission.request ? { claimedRequest: submission.request } : {}),
-          onEvent: (event) => send({ type: "event", event }),
-        })
-          .then((terminal) => {
-            if (terminal) send({ type: "terminal", terminal });
-          })
-          .catch((error: unknown) => {
-            send({
-              type: "terminal",
-              terminal: {
-                jobId: submission.jobId,
-                status: "failed",
-                error: error instanceof Error ? error.message : "Generation failed.",
-                usage: null,
-                finalOutput: "",
-              },
-            });
-          });
+    const execution = runChatJob(user.id, chatRequest.conversationId, submission.jobId, {
+      onEvent: (event) => send({ type: "event", event }),
+    })
+      .then((terminal) => {
+        if (terminal) send({ type: "terminal", terminal });
+      })
+      .catch((error: unknown) => {
+        send({
+          type: "terminal",
+          terminal: {
+            jobId: submission.jobId,
+            status: "failed",
+            error: error instanceof Error ? error.message : "Generation failed.",
+            usage: null,
+            finalOutput: "",
+          },
+        });
+      });
     const completion = execution.finally(() => {
       if (!deliveryOpen || !streamController) return;
       deliveryOpen = false;

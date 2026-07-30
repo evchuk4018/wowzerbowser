@@ -1,13 +1,22 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 import type { ChatJobResumeResponse, ChatJobStatus, ChatRequest, ChatStreamEvent, ChatUsage } from "../../../lib/chat-protocol";
 import { getServerClient } from "../../auth/supabase-server-adapter";
 import { createAsyncBatchWriter, type AsyncBatchWriter } from "./chat-event-writer";
-import { ensureChatSubmission, finalizeChatJobMessage } from "./chat-history-store";
+import { authoritativeAttachmentsForSubmission } from "./chat-history-store";
+import { CHAT_JOB_LEASE_MS, CHAT_JOB_MAX_ATTEMPTS } from "./chat-job-lease";
+import { withChatPersistenceRetry } from "./chat-persistence-retry";
 
 const table = () => getServerClient();
 const CHAT_EVENT_BATCH_SIZE = 32;
 const CHAT_EVENT_FLUSH_INTERVAL_MS = 100;
 const CHAT_EVENT_PAGE_SIZE = 1000;
+
+async function runRpc(name: string, args: Record<string, unknown>) {
+  const result = await table().rpc(name, args);
+  if (result.error) throw result.error;
+  return result;
+}
 
 export type PersistedChatJobEvent = {
   eventIndex: number;
@@ -15,82 +24,103 @@ export type PersistedChatJobEvent = {
 };
 
 export async function createOrGetChatJob(ownerId: string, request: ChatRequest) {
-  const conversationId = request.conversationId!;
-  const jobId = request.jobId!;
-  const idempotencyKey = request.idempotencyKey!;
-  if (!(request.messages.at(-1)?.attachments?.length)) {
-    const { data, error } = await table().rpc("submit_and_claim_chat_job", {
-      p_owner_id: ownerId,
-      p_request: request,
-    });
-    if (error) throw error;
-    return data as { jobId: string; status: ChatJobStatus; resumed: boolean; request: ChatRequest };
+  const requestedAttachments = request.messages.at(-1)?.attachments?.length
+    ? await authoritativeAttachmentsForSubmission(ownerId, request)
+    : [];
+  if (requestedAttachments.length !== new Set(request.messages.at(-1)?.attachments?.map((attachment) => attachment.id) ?? []).size) {
+    throw new Error("Chat image metadata is invalid.");
   }
-  await ensureChatSubmission(ownerId, request);
-  const row = { owner_id: ownerId, conversation_id: conversationId, job_id: jobId, idempotency_key: idempotencyKey, request, status: "queued" };
-  const { error } = await table().from("chat_jobs").insert(row);
-  if (!error) return { jobId, status: "queued" as ChatJobStatus, resumed: false, request: undefined };
-  if (error.code !== "23505") throw error;
-  const { data, error: readError } = await table().from("chat_jobs").select("job_id,status").eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("idempotency_key", idempotencyKey).single();
-  if (readError) throw readError;
-  return { jobId: data.job_id as string, status: data.status as ChatJobStatus, resumed: true, request: undefined };
+  const { data, error } = await withChatPersistenceRetry(() => runRpc("submit_and_claim_chat_job", {
+    p_owner_id: ownerId,
+    p_request: request,
+    p_attachments: requestedAttachments,
+  }));
+  if (error) throw error;
+  return data as { jobId: string; status: ChatJobStatus; resumed: boolean; request?: ChatRequest };
 }
 
 export async function claimChatJob(ownerId: string, conversationId: string, jobId: string) {
-  const now = new Date().toISOString();
-  const { data, error } = await table().from("chat_jobs").update({ status: "running", started_at: now, updated_at: now }).eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("job_id", jobId).eq("status", "queued").select("request").maybeSingle();
+  const workerToken = randomUUID();
+  const { data, error } = await withChatPersistenceRetry(() => runRpc("claim_chat_job", {
+    p_owner_id: ownerId,
+    p_conversation_id: conversationId,
+    p_job_id: jobId,
+    p_worker_token: workerToken,
+    p_lease_ms: CHAT_JOB_LEASE_MS,
+    p_max_attempts: CHAT_JOB_MAX_ATTEMPTS,
+  }));
   if (error) throw error;
-  return (data?.request as ChatRequest | undefined) ?? null;
+  const claim = data as { claimed?: boolean; status?: ChatJobStatus | "missing"; request?: ChatRequest; leaseToken?: string; error?: string } | null;
+  if (!claim?.claimed) return null;
+  return {
+    status: claim.status as ChatJobStatus,
+    request: claim.request as ChatRequest | undefined,
+    leaseToken: claim.leaseToken ?? workerToken,
+    error: claim.error ?? null,
+  };
+}
+
+export async function renewChatJob(ownerId: string, conversationId: string, jobId: string, leaseToken: string) {
+  const { data, error } = await withChatPersistenceRetry(() => runRpc("heartbeat_chat_job", {
+    p_owner_id: ownerId,
+    p_conversation_id: conversationId,
+    p_job_id: jobId,
+    p_worker_token: leaseToken,
+    p_lease_ms: CHAT_JOB_LEASE_MS,
+  }));
+  if (error) throw error;
+  return data as { active: boolean; status: ChatJobStatus | "missing"; cancelled?: boolean };
 }
 
 async function appendChatJobEvents(
   ownerId: string,
   conversationId: string,
   jobId: string,
+  leaseToken: string,
   events: readonly PersistedChatJobEvent[],
 ): Promise<void> {
   if (!events.length) return;
-  const client = table();
-  const { error } = await client.from("chat_job_events").insert(
-    events.map(({ eventIndex, event }) => ({
-      owner_id: ownerId,
-      conversation_id: conversationId,
-      job_id: jobId,
-      event_index: eventIndex,
-      event,
-    })),
-  );
-  // A deleted conversation removes its job row while a worker may still be
-  // between cancellation polls. Treat the resulting foreign-key failure as
-  // a dropped event; the next cancellation poll stops the worker.
-  if (error) {
-    if (error.code === "23503") return;
-    throw error;
-  }
+  await withChatPersistenceRetry(async () => {
+    const { error } = await table().rpc("append_chat_job_events", {
+      p_owner_id: ownerId,
+      p_conversation_id: conversationId,
+      p_job_id: jobId,
+      p_worker_token: leaseToken,
+      p_events: events.map(({ eventIndex, event }) => ({
+        eventId: `${jobId}:${eventIndex}`,
+        eventIndex,
+        event,
+      })),
+    });
+    if (error) throw error;
+  });
 }
 
 export function createChatJobEventWriter(
   ownerId: string,
   conversationId: string,
   jobId: string,
+  leaseToken: string,
 ): AsyncBatchWriter<PersistedChatJobEvent> {
   return createAsyncBatchWriter(
-    (events) => appendChatJobEvents(ownerId, conversationId, jobId, events),
+    (events) => appendChatJobEvents(ownerId, conversationId, jobId, leaseToken, events),
     { batchSize: CHAT_EVENT_BATCH_SIZE, flushIntervalMs: CHAT_EVENT_FLUSH_INTERVAL_MS },
   );
 }
 
-export async function finishChatJob(ownerId: string, conversationId: string, jobId: string, status: ChatJobStatus, values: { error?: string | null; usage?: ChatUsage | null; finalOutput?: string | null } = {}) {
-  const now = new Date().toISOString();
-  const { error } = await table().from("chat_jobs").update({ status, error: values.error ?? null, usage: values.usage ?? null, final_output: values.finalOutput ?? null, completed_at: now, updated_at: now }).eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("job_id", jobId);
+export async function finishChatJob(ownerId: string, conversationId: string, jobId: string, leaseToken: string, status: ChatJobStatus, values: { error?: string | null; usage?: ChatUsage | null; finalOutput?: string | null } = {}) {
+  const { data, error } = await withChatPersistenceRetry(() => runRpc("complete_chat_job_and_finalize_message", {
+    p_owner_id: ownerId,
+    p_conversation_id: conversationId,
+    p_job_id: jobId,
+    p_worker_token: leaseToken,
+    p_status: status,
+    p_error: values.error ?? null,
+    p_usage: values.usage ?? null,
+    p_final_output: values.finalOutput ?? null,
+  }));
   if (error) throw error;
-  await finalizeChatJobMessage(
-    ownerId,
-    conversationId,
-    jobId,
-    status === "completed" ? "complete" : status === "cancelled" ? "cancelled" : "error",
-    values,
-  );
+  return Boolean((data as { applied?: boolean } | null)?.applied);
 }
 
 export async function getChatJob(ownerId: string, conversationId: string, jobId: string, after = 0): Promise<ChatJobResumeResponse | null> {
@@ -114,25 +144,25 @@ export async function getChatJob(ownerId: string, conversationId: string, jobId:
 }
 
 export async function cancelChatJob(ownerId: string, conversationId: string, jobId: string) {
-  const now = new Date().toISOString();
-  const { data, error } = await table().from("chat_jobs").update({ status: "cancelled", completed_at: now, updated_at: now }).eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("job_id", jobId).in("status", ["queued", "running"]).select("job_id").maybeSingle();
+  const { data, error } = await withChatPersistenceRetry(() => runRpc("cancel_chat_job_and_finalize_message", {
+    p_owner_id: ownerId,
+    p_conversation_id: conversationId,
+    p_job_id: jobId,
+  }));
   if (error) throw error;
-  if (data) await finalizeChatJobMessage(ownerId, conversationId, jobId, "cancelled");
-  return Boolean(data);
+  return Boolean((data as { applied?: boolean } | null)?.applied);
 }
 
 export async function cancelChatJobsForConversation(ownerId: string, conversationId: string): Promise<void> {
-  const now = new Date().toISOString();
   const { data, error } = await table()
     .from("chat_jobs")
-    .update({ status: "cancelled", completed_at: now, updated_at: now })
+    .select("job_id")
     .eq("owner_id", ownerId)
     .eq("conversation_id", conversationId)
-    .in("status", ["queued", "running"])
-    .select("job_id");
+    .in("status", ["queued", "running", "awaiting_approval"]);
   if (error) throw error;
   await Promise.all(
-    (data ?? []).map((row) => finalizeChatJobMessage(ownerId, conversationId, row.job_id as string, "cancelled")),
+    (data ?? []).map((row) => cancelChatJob(ownerId, conversationId, row.job_id as string)),
   );
 }
 
@@ -143,9 +173,4 @@ export async function deleteChatJobsForConversation(ownerId: string, conversatio
     .eq("owner_id", ownerId)
     .eq("conversation_id", conversationId);
   if (error) throw error;
-}
-
-export async function isChatJobCancelled(ownerId: string, conversationId: string, jobId: string) {
-  const { data } = await table().from("chat_jobs").select("status").eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("job_id", jobId).maybeSingle();
-  return !data || data.status === "cancelled";
 }

@@ -5,6 +5,28 @@ import { createApproval, getApproval, readApprovalStatus, resolveApproval, setPe
 import { redactConnectorValue } from "./connector-redaction";
 import { getServerClient } from "../../auth/supabase-server-adapter";
 
+const APPROVAL_RETRY_INITIAL_MS = 300;
+const APPROVAL_RETRY_MAX_MS = 1_500;
+
+function waitForApprovalRetry(signal: AbortSignal | undefined, attempt: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve(false);
+      return;
+    }
+    const ceiling = Math.min(APPROVAL_RETRY_MAX_MS, APPROVAL_RETRY_INITIAL_MS * (2 ** attempt));
+    const delay = Math.round(ceiling * (0.8 + Math.random() * 0.4));
+    const timer = setTimeout(() => finish(true), delay);
+    const onAbort = () => finish(false);
+    const finish = (continueWaiting: boolean) => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(continueWaiting);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 export async function requestConnectorApproval(values: {
   ownerId: string; jobId?: string; conversationId?: string; connectorId: string; connectionId: string;
   connectorName: string; accountLabel: string | null; toolName: string; description: string; access: "read" | "write" | "destructive"; arguments: Record<string, unknown>;
@@ -24,13 +46,11 @@ export async function resolveConnectorApproval(ownerId: string, approvalId: stri
 }
 
 export async function waitForConnectorApproval(ownerId: string, approvalId: string, signal?: AbortSignal): Promise<ConnectorApprovalDecision> {
+  let retryAttempt = 0;
   while (!signal?.aborted) {
     const status = await readApprovalStatus(ownerId, approvalId);
     if (status === "allow_once" || status === "always_allow" || status === "deny") return status;
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(resolve, 750);
-      signal?.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
-    });
+    if (!(await waitForApprovalRetry(signal, retryAttempt++))) break;
   }
   throw new Error("Connector approval was cancelled.");
 }

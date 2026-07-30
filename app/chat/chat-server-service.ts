@@ -23,7 +23,7 @@ import { availablePdfEditTools } from "../server/agent/pdf-edit-tool-manifest";
 import { executePdfEditTool } from "../server/agent/pdf-edit-tool";
 import { PDF_EDIT_TOOL_INSTRUCTIONS } from "../server/agent/pdf-edit-tool-instructions";
 import { ingestDocx, ingestPdf } from "../server/chat/chat-document-service";
-import { DOCX_CONTENT_TYPE, documentContext } from "../../lib/chat-document";
+import { DOCX_CONTENT_TYPE, createInlineDocumentPageLoader, documentContext } from "../../lib/chat-document";
 import { IncrementalCitationFilter, parseCitationMarkup, validCitationSources, type ChatSource } from "../../lib/chat-citations";
 import { PHASE_BREAK_INSTRUCTIONS } from "../server/agent/phase-break-instructions";
 import { executePhaseBreak, PHASE_BREAK_TOOL_DEFINITION, PHASE_BREAK_TOOL_NAME } from "../server/agent/phase-break-tool";
@@ -106,17 +106,84 @@ export async function generateChatResponse(
     chatRequest = { ...chatRequest, model: { provider: "deepseek", model: chatRequest.model } };
   }
   const selectedMetadata = await (automationExecution ? authorizeAutomationModel(ownerId, chatRequest.model) : authorizeChatModel(ownerId, chatRequest.model));
-  const consolidatedMemory = automationExecution ? "" : formatConsolidatedPrompt(
-    await getConsolidatedPrompt(ownerId).catch(() => ""),
-  );
   const providerAdapter = chatProviderAdapter(chatRequest.model.provider);
   providerAdapter.assertConfigured();
   const responseDeadlineAt = Date.now() + MAX_RESPONSE_MS;
   const responseId = chatRequest.jobId;
   const conversationId = stableConversationId(chatRequest);
-  const currentTodos = automationExecution ? { revision: 0, items: [] } : await getTodoList(ownerId, conversationId).catch(() => ({ revision: 0, items: [] }));
   const latestPreviousAssistant = [...chatRequest.messages].reverse().find((message) => message.role === "assistant")?.content;
-  const planner = automationExecution ? { list: null, plannedThisTurn: false } : await planTodos({
+  const pythonTools = availableChatTools();
+  const webTools = availableWebTools();
+  const requestedPdfIds = [...new Set(chatRequest.messages.flatMap((message) => message.documents?.map((item) => item.id) ?? []))];
+  const [
+    consolidatedMemory,
+    currentTodos,
+    customTools,
+    skills,
+    allowedImageIds,
+    authorizedDocuments,
+    connectorCatalog,
+  ] = await Promise.all([
+    automationExecution ? Promise.resolve("") : getConsolidatedPrompt(ownerId).catch(() => "").then(formatConsolidatedPrompt),
+    automationExecution ? Promise.resolve({ revision: 0, items: [] }) : getTodoList(ownerId, conversationId).catch(() => ({ revision: 0, items: [] })),
+    isModalConfigured()
+      ? listEnabledExecutableTools(ownerId).catch((error) => {
+        console.warn({ event: "custom-tools-unavailable", ownerId, failure: error instanceof Error ? error.name : "UnknownError" });
+        return [];
+      })
+      : Promise.resolve([]),
+    automationExecution ? Promise.resolve([]) : listOwnerSkills(ownerId).catch((error) => {
+      console.warn({ event: "skills-unavailable", ownerId, failure: error instanceof Error ? error.name : "UnknownError" });
+      return builtinSkillFallbacks();
+    }),
+    getAuthoritativeChatImageIdsForRequest(ownerId, chatRequest),
+    Promise.all(requestedPdfIds.map(async (pdfId) => [pdfId, await getAuthorizedDocument(ownerId, conversationId, pdfId)] as const)),
+    !automationExecution ? listConnectorCatalog(ownerId).catch((error) => {
+      console.warn({ event: "connectors-unavailable", ownerId, failure: error instanceof Error ? error.name : "UnknownError" });
+      return [];
+    }) : Promise.resolve([]),
+  ]);
+  const customToolsByName = new Map(customTools.map((tool) => [tool.name, tool]));
+  const chatMemoryTools = automationExecution ? [] : chatMemoryToolDefinitions();
+  const userMemoryTools = automationExecution ? [] : userMemoryToolDefinitions();
+  const skillsById = new Map(skills.map((skill) => [skill.id, skill]));
+  const allowedPdfIds = new Set<string>();
+  const authoritativePdfs = new Map<string, NonNullable<Awaited<ReturnType<typeof getAuthorizedDocument>>>>();
+  for (const [pdfId, document] of authorizedDocuments) {
+    if (document) { allowedPdfIds.add(pdfId); authoritativePdfs.set(pdfId, document); }
+  }
+  const imageTools = availableImageTools(allowedImageIds.length > 0);
+  const allPdfEditTools = availablePdfEditTools([...authoritativePdfs.values()].some((document) => document.contentType === "application/pdf"));
+  const allPdfReadTools = availablePdfTools(allowedPdfIds.size > 0);
+  const phaseTools = chatRequest.thinking && !automationExecution ? [PHASE_BREAK_TOOL_DEFINITION] : [];
+  const latestMessage = chatRequest.messages.at(-1);
+  const latestUserMessage = [...chatRequest.messages].reverse().find((message) => message.role === "user");
+  const automationKeywordUnlock = !automationExecution && chatRequest.messages.some(
+    (message) => message.role === "user" && messageUnlocksAutomationTools(message.content),
+  );
+  const calendarKeywordUnlock = !automationExecution && messageUnlocksCalendarTools(latestUserMessage?.content ?? "");
+  const connectorDiscoveryAvailable = connectorCatalog.some((connector) => connector.installed && connector.connections.some((connection) => connection.status === "connected"));
+  const potentialDeepResearchTools = automationExecution ? [] : availableDeepResearchTools(true);
+  const potentialTodoTools = automationExecution ? [] : TODO_TOOL_DEFINITIONS;
+  const toolGroups: FocusedToolGroup[] = [
+    ...(pythonTools.length ? [{ id: "python", summary: "Run Python for computation, data processing, or generated files.", keywords: ["python", "calculate", "compute", "chart", "spreadsheet", "generate file"], fallback: true }] : []),
+    ...(imageTools.length ? [{ id: "image", summary: "Inspect an attached image.", keywords: ["image", "photo", "picture", "screenshot"], required: Boolean(latestMessage?.attachments?.length) }] : []),
+    ...(webTools.length ? [{ id: "web", summary: "Search the web, fetch pages, and check current time, date, or deployment location.", keywords: ["current", "latest", "today", "web", "search", "url", "time", "date", "location", "news"], fallback: true }] : []),
+    ...(potentialDeepResearchTools.length ? [{ id: "research", summary: "Run substantial multi-source research and inspect its evidence.", keywords: ["research", "sources", "investigate", "compare evidence"], fallback: true }] : []),
+    ...(allPdfReadTools.length ? [{ id: "documents", summary: "Search and read authorized PDF or DOCX documents.", keywords: ["document", "pdf", "docx", "page", "attached"], required: Boolean(latestMessage?.documents?.length), fallback: true }] : []),
+    ...(allPdfEditTools.length ? [{ id: "document-edit", summary: "Inspect or edit an authorized PDF and compare revisions.", keywords: ["edit pdf", "modify pdf", "change document", "revision", "compare pdf"], fallback: true }] : []),
+    ...(phaseTools.length ? [{ id: "phase", summary: "Start a new reasoning phase.", keywords: [], required: true }] : []),
+    ...(chatMemoryTools.length ? [{ id: "chat-memory", summary: "Search or recall another saved conversation.", keywords: ["previous chat", "past conversation", "another conversation", "chat history"], fallback: true }] : []),
+    ...(userMemoryTools.length ? [{ id: "user-memory", summary: "Browse or maintain durable facts in the private user profile.", keywords: ["remember", "memory", "profile", "forget"], fallback: true }] : []),
+    ...(skills.length ? [{ id: "skills", summary: "Load task-specific saved skill instructions.", keywords: skills.flatMap(({ name, summary }) => [name, summary]), fallback: true }] : []),
+    ...(automationKeywordUnlock ? [{ id: "automations", summary: "Create and manage recurring automations.", keywords: ["automation", "recurring", "schedule", "daily", "weekly"], required: true }] : []),
+    ...(calendarKeywordUnlock ? [{ id: "calendar", summary: "Read and manage the connected primary Google Calendar.", keywords: ["calendar", "calender", "caldner", "calnder"], required: true }] : []),
+    ...(connectorDiscoveryAvailable ? [{ id: "connectors", summary: `Discover actions in connected services: ${connectorCatalog.filter((item) => item.installed).map((item) => item.name).join(", ")}.`, keywords: ["gmail", "email", "drive", "file", "notion", "page", "slack", "message", "connected service", "connector", "mcp"], fallback: true }] : []),
+    ...customTools.map((tool) => ({ id: `custom:${tool.name}`, summary: tool.description, keywords: [tool.name, tool.description], fallback: true })),
+    ...(potentialTodoTools.length ? [{ id: "todos", summary: "Update the visible task todo list.", keywords: ["todo", "plan", "steps", "tasks"], required: true }] : []),
+    ...(automationExecution ? [{ id: "automation-result", summary: "Complete the current automation run.", keywords: [], required: true }] : []),
+  ];
+  const plannerPromise = automationExecution ? Promise.resolve({ list: null, plannedThisTurn: false }) : planTodos({
     ownerId,
     conversationId,
     userMessage: chatRequest.messages.at(-1)?.content ?? "",
@@ -140,67 +207,8 @@ export async function generateChatResponse(
       }).catch(() => undefined);
     },
   });
-  const pythonTools = availableChatTools();
-  const webTools = availableWebTools();
-  const deepResearchTools = availableDeepResearchTools(!automationExecution && planner.plannedThisTurn && Boolean(planner.list?.items.length));
-  const customTools = isModalConfigured()
-    ? await listEnabledExecutableTools(ownerId).catch((error) => {
-        console.warn({ event: "custom-tools-unavailable", ownerId, failure: error instanceof Error ? error.name : "UnknownError" });
-        return [];
-      })
-    : [];
-  const customToolsByName = new Map(customTools.map((tool) => [tool.name, tool]));
-  const chatMemoryTools = automationExecution ? [] : chatMemoryToolDefinitions();
-  const userMemoryTools = automationExecution ? [] : userMemoryToolDefinitions();
-  const skills = automationExecution ? [] : await listOwnerSkills(ownerId).catch((error) => {
-    console.warn({ event: "skills-unavailable", ownerId, failure: error instanceof Error ? error.name : "UnknownError" });
-    return builtinSkillFallbacks();
-  });
-  const skillsById = new Map(skills.map((skill) => [skill.id, skill]));
-  const allowedImageIds = await getAuthoritativeChatImageIdsForRequest(ownerId, chatRequest);
-  const requestedPdfIds = [...new Set(chatRequest.messages.flatMap((message) => message.documents?.map((item) => item.id) ?? []))];
-  const allowedPdfIds = new Set<string>();
-  const authoritativePdfs = new Map<string, NonNullable<Awaited<ReturnType<typeof getAuthorizedDocument>>>>();
-  for (const pdfId of requestedPdfIds) {
-    const document = await getAuthorizedDocument(ownerId, conversationId, pdfId);
-    if (document) { allowedPdfIds.add(pdfId); authoritativePdfs.set(pdfId, document); }
-  }
-  const imageTools = availableImageTools(allowedImageIds.length > 0);
-  const allPdfEditTools = availablePdfEditTools([...authoritativePdfs.values()].some((document) => document.contentType === "application/pdf"));
-  const allPdfReadTools = availablePdfTools(allowedPdfIds.size > 0);
-  const phaseTools = chatRequest.thinking && !automationExecution ? [PHASE_BREAK_TOOL_DEFINITION] : [];
-  const latestMessage = chatRequest.messages.at(-1);
-  const latestUserMessage = [...chatRequest.messages].reverse().find((message) => message.role === "user");
-  const automationKeywordUnlock = !automationExecution && chatRequest.messages.some(
-    (message) => message.role === "user" && messageUnlocksAutomationTools(message.content),
-  );
-  const calendarKeywordUnlock = !automationExecution && messageUnlocksCalendarTools(latestUserMessage?.content ?? "");
-  const connectorCatalog = !automationExecution ? await listConnectorCatalog(ownerId).catch((error) => {
-    console.warn({ event: "connectors-unavailable", ownerId, failure: error instanceof Error ? error.name : "UnknownError" });
-    return [];
-  }) : [];
-  const connectorDiscoveryAvailable = connectorCatalog.some((connector) => connector.installed && connector.connections.some((connection) => connection.status === "connected"));
-  const toolGroups: FocusedToolGroup[] = [
-    ...(pythonTools.length ? [{ id: "python", summary: "Run Python for computation, data processing, or generated files.", keywords: ["python", "calculate", "compute", "chart", "spreadsheet", "generate file"], fallback: true }] : []),
-    ...(imageTools.length ? [{ id: "image", summary: "Inspect an attached image.", keywords: ["image", "photo", "picture", "screenshot"], required: Boolean(latestMessage?.attachments?.length) }] : []),
-    ...(webTools.length ? [{ id: "web", summary: "Search the web, fetch pages, and check current time, date, or deployment location.", keywords: ["current", "latest", "today", "web", "search", "url", "time", "date", "location", "news"], fallback: true }] : []),
-    ...(deepResearchTools.length ? [{ id: "research", summary: "Run substantial multi-source research and inspect its evidence.", keywords: ["research", "sources", "investigate", "compare evidence"], fallback: true }] : []),
-    ...(allPdfReadTools.length ? [{ id: "documents", summary: "Search and read authorized PDF or DOCX documents.", keywords: ["document", "pdf", "docx", "page", "attached"], required: Boolean(latestMessage?.documents?.length), fallback: true }] : []),
-    ...(allPdfEditTools.length ? [{ id: "document-edit", summary: "Inspect or edit an authorized PDF and compare revisions.", keywords: ["edit pdf", "modify pdf", "change document", "revision", "compare pdf"], fallback: true }] : []),
-    ...(phaseTools.length ? [{ id: "phase", summary: "Start a new reasoning phase.", keywords: [], required: true }] : []),
-    ...(chatMemoryTools.length ? [{ id: "chat-memory", summary: "Search or recall another saved conversation.", keywords: ["previous chat", "past conversation", "another conversation", "chat history"], fallback: true }] : []),
-    ...(userMemoryTools.length ? [{ id: "user-memory", summary: "Browse or maintain durable facts in the private user profile.", keywords: ["remember", "memory", "profile", "forget"], fallback: true }] : []),
-    ...(skills.length ? [{ id: "skills", summary: "Load task-specific saved skill instructions.", keywords: skills.flatMap(({ name, summary }) => [name, summary]), fallback: true }] : []),
-    ...(automationKeywordUnlock ? [{ id: "automations", summary: "Create and manage recurring automations.", keywords: ["automation", "recurring", "schedule", "daily", "weekly"], required: true }] : []),
-    ...(calendarKeywordUnlock ? [{ id: "calendar", summary: "Read and manage the connected primary Google Calendar.", keywords: ["calendar", "calender", "caldner", "calnder"], required: true }] : []),
-    ...(connectorDiscoveryAvailable ? [{ id: "connectors", summary: `Discover actions in connected services: ${connectorCatalog.filter((item) => item.installed).map((item) => item.name).join(", ")}.`, keywords: ["gmail", "email", "drive", "file", "notion", "page", "slack", "message", "connected service", "connector", "mcp"], fallback: true }] : []),
-    ...customTools.map((tool) => ({ id: `custom:${tool.name}`, summary: tool.description, keywords: [tool.name, tool.description], fallback: true })),
-    ...(!automationExecution && (planner.plannedThisTurn || Boolean(planner.list?.items.length)) ? [{ id: "todos", summary: "Update the visible task todo list.", keywords: ["todo", "plan", "steps", "tasks"], required: true }] : []),
-    ...(automationExecution ? [{ id: "automation-result", summary: "Complete the current automation run.", keywords: [], required: true }] : []),
-  ];
-  let focusedPlan: FocusedContextPlan | null = null;
-  if (!automationExecution && chatRequest.contextMode === "focused") {
-    focusedPlan = await compileFocusedContext({
+  const focusedPlanPromise: Promise<FocusedContextPlan | null> = !automationExecution && chatRequest.contextMode === "focused"
+    ? compileFocusedContext({
       messages: chatRequest.messages,
       toolGroups,
       signal,
@@ -220,7 +228,10 @@ export async function generateChatResponse(
           jobId: responseId,
         }).catch(() => undefined);
       },
-    });
+    })
+    : Promise.resolve(null);
+  const [planner, focusedPlan] = await Promise.all([plannerPromise, focusedPlanPromise]);
+  if (focusedPlan) {
     console.info({
       event: "focused-context-compiled",
       ownerId,
@@ -237,6 +248,9 @@ export async function generateChatResponse(
     });
     chatRequest = { ...chatRequest, messages: focusedPlan.messages };
   }
+  const deepResearchTools = !automationExecution && planner.plannedThisTurn && Boolean(planner.list?.items.length)
+    ? potentialDeepResearchTools
+    : [];
   const selected = (group: string) => !focusedPlan || focusedPlan.selectedToolGroups.has(group);
   const activePythonTools = selected("python") ? pythonTools : [];
   const activeImageTools = selected("image") ? imageTools : [];
@@ -251,13 +265,17 @@ export async function generateChatResponse(
   let discoveredConnectorTools: ConnectorTool[] = [];
   const customDefinitions = customToolDefinitions(activeCustomTools);
   const skillTools = selected("skills") && !automationExecution ? SKILL_TOOL_DEFINITIONS : [];
-  const todoTools = selected("todos") && !automationExecution ? TODO_TOOL_DEFINITIONS : [];
+  const todoTools = selected("todos") && !automationExecution && (planner.plannedThisTurn || Boolean(planner.list?.items.length)) ? TODO_TOOL_DEFINITIONS : [];
   const automationResultTools = selected("automation-result") && automationExecution ? [COMPLETE_AUTOMATION_RUN_TOOL_DEFINITION] : [];
   const contextTools = focusedPlan?.searchEntries.length ? [SEARCH_CURRENT_CHAT_TOOL_DEFINITION] : [];
+  const pagesForInlineDocument = createInlineDocumentPageLoader((document) => getDocumentPages(ownerId, conversationId, document.id));
   const contextualMessages = await Promise.all(chatRequest.messages.map(async (message) => {
     const documents = (message.documents ?? []).filter((item) => allowedPdfIds.has(item.id));
     if (!documents.length) return message;
-    const contexts = await Promise.all(documents.map(async ({ id }) => documentContext(authoritativePdfs.get(id)!, await getDocumentPages(ownerId, conversationId, id))));
+    const contexts = await Promise.all(documents.map(async ({ id }) => {
+      const document = authoritativePdfs.get(id)!;
+      return documentContext(document, await pagesForInlineDocument(document));
+    }));
     return { ...message, content: `${message.content}\n\n${contexts.join("\n\n")}` };
   }));
   chatRequest = { ...chatRequest, messages: contextualMessages };

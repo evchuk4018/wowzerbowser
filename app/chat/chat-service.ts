@@ -12,8 +12,7 @@ import {
 } from "../../lib/chat-bootstrap";
 import { readChatLiveStream } from "./read-chat-live-stream";
 import { chatTerminalEvents } from "./chat-terminal-events";
-
-const LIVE_CHAT_POLL_INTERVAL_MS = 100;
+import { waitForChatRetry } from "./chat-retry-backoff";
 
 async function readError(response: Response): Promise<string> {
   const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
@@ -113,6 +112,14 @@ export async function cancelChatJob(conversationId: string, jobId: string, acces
   if (!response.ok) throw new Error(await readError(response));
 }
 
+export async function resumeChatJob(conversationId: string, jobId: string, accessToken: string): Promise<void> {
+  const response = await fetch(`/api/chat/jobs/${encodeURIComponent(conversationId)}/${encodeURIComponent(jobId)}/resume`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) throw new Error(await readError(response));
+}
+
 export async function* streamChatResponse(
   request: ChatRequest,
   accessToken: string,
@@ -158,13 +165,22 @@ export async function* streamChatResponse(
   }
   if (streamCompleted || signal?.aborted) return;
 
+  let retryAttempt = 0;
+  const retrySignal = signal ?? new AbortController().signal;
   while (!signal?.aborted) {
+    try {
+      await resumeChatJob(request.conversationId!, activeJobId, accessToken);
+    } catch {
+      if (signal?.aborted) throw signal.reason;
+      if (!(await waitForChatRetry(retrySignal, retryAttempt++))) return;
+      continue;
+    }
     let snapshot: ChatJobResumeResponse;
     try {
       snapshot = await fetchChatJob(request.conversationId!, activeJobId, sequence, accessToken, signal);
     } catch (error) {
       if (signal?.aborted) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      if (!(await waitForChatRetry(retrySignal, retryAttempt++))) return;
       continue; // transient network loss: replay resumes strictly after sequence
     }
     for (const event of snapshot.events) {
@@ -190,10 +206,7 @@ export async function* streamChatResponse(
       }
       return;
     }
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(resolve, LIVE_CHAT_POLL_INTERVAL_MS);
-      signal?.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
-    });
+    if (!(await waitForChatRetry(retrySignal, retryAttempt++))) return;
   }
 }
 

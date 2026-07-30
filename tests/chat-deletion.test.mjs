@@ -32,7 +32,7 @@ test("deletion exposes an authenticated idempotent API and coordinated cleanup",
   assert.match(history, /from\("chat_conversations"\)[\s\S]*?\.delete\(\)/);
   assert.match(preferences, /from\("chat_model_preferences"\)[\s\S]*?\.delete\(\)/);
   assert.match(jobs, /from\("chat_jobs"\)[\s\S]*?\.delete\(\)/);
-  assert.match(jobs, /return !data \|\| data\.status === "cancelled"/);
+  assert.match(jobs, /cancel_chat_job_and_finalize_message/);
   assert.match(modal, /sandbox\.terminate\(\)/);
   assert.match(modal, /client\.volumes\.delete/);
   assert.match(modal, /allowMissing: true/);

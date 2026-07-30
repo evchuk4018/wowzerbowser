@@ -221,7 +221,7 @@ function requestImageIds(request: ChatRequest): string[] {
   return [...new Set(lastMessage?.attachments?.map((attachment) => attachment.id) ?? [])];
 }
 
-async function authoritativeAttachmentsForSubmission(
+export async function authoritativeAttachmentsForSubmission(
   ownerId: string,
   request: ChatRequest,
 ): Promise<ChatImageAttachment[]> {

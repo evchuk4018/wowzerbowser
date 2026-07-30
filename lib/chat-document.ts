@@ -82,8 +82,27 @@ export function estimatePdfTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
+export function shouldInlineDocument(document: Pick<ChatDocumentAttachment, "pageCount" | "tokenEstimate">): boolean {
+  return document.pageCount <= MAX_INLINE_PDF_PAGES && document.tokenEstimate <= MAX_INLINE_PDF_TOKENS;
+}
+
+/** Cache inline-page reads for the lifetime of one request. Large documents never invoke the loader. */
+export function createInlineDocumentPageLoader<T>(
+  load: (document: ChatDocumentAttachment) => Promise<readonly T[]>,
+): (document: ChatDocumentAttachment) => Promise<readonly T[]> {
+  const pagesByDocument = new Map<string, Promise<readonly T[]>>();
+  return (document) => {
+    if (!shouldInlineDocument(document)) return Promise.resolve([]);
+    const cached = pagesByDocument.get(document.id);
+    if (cached) return cached;
+    const pages = load(document);
+    pagesByDocument.set(document.id, pages);
+    return pages;
+  };
+}
+
 export function pdfContext(document: ChatDocumentAttachment, pages: readonly ChatDocumentPage[]): string {
-  if (document.pageCount <= MAX_INLINE_PDF_PAGES && document.tokenEstimate <= MAX_INLINE_PDF_TOKENS) {
+  if (shouldInlineDocument(document)) {
     return [`[Attached PDF: ${document.name} (${document.id})]`, ...pages.map((page) =>
       `[PDF page ${page.pageNumber}]\n${page.text}`),].join("\n\n");
   }
@@ -96,7 +115,7 @@ export function pdfContext(document: ChatDocumentAttachment, pages: readonly Cha
 export function documentContext(document: ChatDocumentAttachment, pages: readonly ChatDocumentPage[]): string {
   if (document.contentType === "application/pdf") return pdfContext(document, pages);
   const imageMetadata = `Embedded images: ${document.hasImages ? "yes" : "no"}; count=${document.imageCount}; analyzed=${document.analyzedImageCount}.`;
-  if (document.tokenEstimate <= MAX_INLINE_PDF_TOKENS) {
+  if (shouldInlineDocument(document)) {
     const analyses = document.imageAnalyses.map((image) => `[Embedded image ${image.imageNumber} analysis]\nVisible text: ${image.visibleText ?? "none"}\nMain visuals: ${image.mainVisuals ?? "none"}`);
     return [`[Attached DOCX: ${document.name} (${document.id})]`, imageMetadata, ...pages.map((page) => `[DOCX logical page ${page.pageNumber}]\n${page.text}`), ...analyses].join("\n\n");
   }

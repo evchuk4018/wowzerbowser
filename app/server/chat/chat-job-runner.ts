@@ -7,12 +7,12 @@ import type {
 } from "../../../lib/chat-protocol";
 import { generateChatResponse } from "../../chat/chat-server-service";
 import { recordUsage } from "../usage/usage-store";
-import { claimChatJob, createChatJobEventWriter, finishChatJob, isChatJobCancelled } from "./chat-job-store";
+import { claimChatJob, createChatJobEventWriter, finishChatJob, renewChatJob } from "./chat-job-store";
+import { CHAT_JOB_HEARTBEAT_MS } from "./chat-job-lease";
 import type { ChatCitation, ChatSource } from "../../../lib/chat-citations";
 
 export type RunChatJobOptions = {
   onEvent?: (event: SequencedChatStreamEvent) => void;
-  claimedRequest?: import("../../../lib/chat-protocol").ChatRequest;
 };
 
 /** Runs from Next's server-owned `after` lifecycle, never from the request signal. */
@@ -22,11 +22,42 @@ export async function runChatJob(
   jobId: string,
   options: RunChatJobOptions = {},
 ): Promise<ChatJobTerminalResponse | null> {
-  const request = options.claimedRequest ?? await claimChatJob(ownerId, conversationId, jobId);
-  if (!request) return null; // another route instance already claimed this idempotent job
+  const claim = await claimChatJob(ownerId, conversationId, jobId);
+  if (!claim) return null; // another route instance owns the active lease
+  if (claim.status === "failed") {
+    return {
+      jobId,
+      status: "failed",
+      error: claim.error ?? "The chat worker stopped before the job completed.",
+      usage: null,
+      finalOutput: "",
+    };
+  }
+  const request = claim.request;
+  if (!request) return null;
   const controller = new AbortController();
-  const poll = setInterval(() => void isChatJobCancelled(ownerId, conversationId, jobId).then((cancelled) => cancelled && controller.abort()), 750);
-  const eventWriter = createChatJobEventWriter(ownerId, conversationId, jobId);
+  const leaseToken = claim.leaseToken;
+  let cancellationObserved = false;
+  let heartbeatInFlight: Promise<void> | null = null;
+  const heartbeat = setInterval(() => {
+    if (heartbeatInFlight || controller.signal.aborted) return;
+    heartbeatInFlight = renewChatJob(ownerId, conversationId, jobId, leaseToken)
+      .then((state) => {
+        if (state.cancelled) {
+          cancellationObserved = true;
+          controller.abort();
+        } else if (!state.active) {
+          controller.abort();
+        }
+      })
+      .catch(() => {
+        controller.abort();
+      })
+      .finally(() => {
+        heartbeatInFlight = null;
+      });
+  }, CHAT_JOB_HEARTBEAT_MS);
+  const eventWriter = createChatJobEventWriter(ownerId, conversationId, jobId, leaseToken);
   let output = "";
   let usage: ChatUsage | null = null;
   let generationError: string | null = null;
@@ -133,20 +164,20 @@ export async function runChatJob(
     await eventWriter.drain();
     if (!controller.signal.aborted) {
       const status = generationError ? "failed" : "completed";
-      await finishChatJob(ownerId, conversationId, jobId, status, { error: generationError, usage, finalOutput: output });
-      return terminalResponse(status, generationError);
+      const applied = await finishChatJob(ownerId, conversationId, jobId, leaseToken, status, { error: generationError, usage, finalOutput: output });
+      return applied ? terminalResponse(status, generationError) : null;
     }
-    return terminalResponse("cancelled", null);
+    return cancellationObserved ? terminalResponse("cancelled", null) : null;
   } catch (error) {
     await eventWriter.drain().catch(() => undefined);
     const message = error instanceof Error ? error.message : "Generation failed.";
-    if (!controller.signal.aborted) {
-      await finishChatJob(ownerId, conversationId, jobId, "failed", { error: message, usage, finalOutput: output });
-      return terminalResponse("failed", message);
+    if (controller.signal.aborted) {
+      return cancellationObserved ? terminalResponse("cancelled", null) : null;
     }
-    return terminalResponse("cancelled", null);
+    const applied = await finishChatJob(ownerId, conversationId, jobId, leaseToken, "failed", { error: message, usage, finalOutput: output });
+    return applied ? terminalResponse("failed", message) : null;
   } finally {
     await eventWriter.drain().catch(() => undefined);
-    clearInterval(poll);
+    clearInterval(heartbeat);
   }
 }
