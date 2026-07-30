@@ -80,10 +80,12 @@ function GeneralSettings({
   draft,
   systemPrompt,
   onChange,
+  onFocusedContextChange,
 }: {
   draft: ChatSettings;
   systemPrompt: string;
   onChange: (userPresence: string) => void;
+  onFocusedContextChange: (enabled: boolean) => void;
 }) {
   return (
     <>
@@ -94,6 +96,17 @@ function GeneralSettings({
       <label className="settings-field">
         <span>System prompt</span>
         <textarea value={systemPrompt} readOnly aria-readonly="true" rows={7} />
+      </label>
+      <label className="settings-field settings-toggle-field">
+        <span>Focused context</span>
+        <span>
+          <input
+            type="checkbox"
+            checked={draft.focusedContextEnabled}
+            onChange={(event) => onFocusedContextChange(event.target.checked)}
+          />
+          {" "}Send only relevant history and tool capabilities. Older context remains searchable on demand.
+        </span>
       </label>
       <label className="settings-field">
         <span>User presence</span>
@@ -408,6 +421,7 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage, getAccessT
                 draft={draft}
                 systemPrompt={settings.systemPrompt}
                 onChange={(userPresence) => setDraft((current) => ({ ...current, userPresence }))}
+                onFocusedContextChange={(focusedContextEnabled) => setDraft((current) => ({ ...current, focusedContextEnabled }))}
               />
             ) : activeSection === "usage" ? (
               <UsageSettings loadUsage={loadUsage} />
@@ -444,6 +458,7 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage, getAccessT
                   userPresence: draft.userPresence.trim(),
                   visionModel: draft.visionModel,
                   automationModel: draft.automationModel,
+                  focusedContextEnabled: draft.focusedContextEnabled,
                 })}
               >
                 Save

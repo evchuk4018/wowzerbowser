@@ -77,7 +77,7 @@ test("canonical prompt contains operational response behavior and stays user-ind
 test("system instruction assembly imports response style last after tool instructions", async () => {
   const service = await readFile(new URL("../app/chat/chat-server-service.ts", import.meta.url), "utf8");
   assert.match(service, /import \{ RESPONSE_STYLE_INSTRUCTIONS \} from "\.\.\/server\/agent\/response-style-instructions"/);
-  assert.match(service, /USER_MEMORY_TOOL_INSTRUCTIONS,\s*RESPONSE_STYLE_INSTRUCTIONS,/);
+  assert.match(service, /USER_MEMORY_TOOL_INSTRUCTIONS\] : \[\]\),[\s\S]*?RESPONSE_STYLE_INSTRUCTIONS,/);
   assert.equal((service.match(/RESPONSE_STYLE_INSTRUCTIONS/g) ?? []).length, 2);
 });
 

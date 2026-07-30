@@ -20,6 +20,7 @@ export const USAGE_REQUEST_KINDS = [
   "todo_planner",
   "deep_research",
   "automation",
+  "context_router",
 ] as const;
 export type UsageRequestKind = (typeof USAGE_REQUEST_KINDS)[number];
 

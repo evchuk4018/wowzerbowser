@@ -248,6 +248,7 @@ export type ChatRequest = {
   model: ChatModelRef;
   thinking: boolean;
   reasoningEffort: ChatReasoningEffort;
+  contextMode: "full" | "focused";
   /** Stable client-generated id used to persist the execution volume. */
   conversationId?: string;
   /** Client-generated response identifier and idempotency key. */
@@ -848,6 +849,10 @@ export function parseChatRequest(value: unknown): ChatRequest {
   if (typeof value.thinking !== "boolean") {
     throw new ChatRequestValidationError("thinking must be a boolean.");
   }
+  const contextMode = value.contextMode === undefined ? "full" : value.contextMode;
+  if (contextMode !== "full" && contextMode !== "focused") {
+    throw new ChatRequestValidationError("contextMode is invalid.");
+  }
 
   if (!CHAT_REASONING_EFFORTS.includes(value.reasoningEffort as ChatReasoningEffort)) {
     throw new ChatRequestValidationError("reasoningEffort is invalid.");
@@ -904,6 +909,7 @@ export function parseChatRequest(value: unknown): ChatRequest {
     model,
     thinking: value.thinking,
     reasoningEffort: value.reasoningEffort as ChatReasoningEffort,
+    contextMode,
     conversationId,
     jobId,
     idempotencyKey,

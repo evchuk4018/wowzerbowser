@@ -169,6 +169,7 @@ export function ChatWorkspace({
           userPresence: bootstrap.userPreferences.userPresence,
           visionModel: bootstrap.userPreferences.visionModel ?? null,
           automationModel: bootstrap.userPreferences.automationModel ?? DEFAULT_CHAT_SETTINGS.automationModel,
+          focusedContextEnabled: bootstrap.userPreferences.focusedContextEnabled ?? false,
         });
         setBootstrapModelPreferences(modelPreferencesRecord(bootstrap.modelPreferences));
         setBootstrapComplete(true);

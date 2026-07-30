@@ -259,6 +259,24 @@
   color: var(--quiet);
 }
 
+.settings-toggle-field > span:last-child {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: var(--muted);
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.settings-toggle-field input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  margin: 1px 0 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
 .settings-actions {
   display: flex;
   justify-content: flex-end;

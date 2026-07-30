@@ -470,7 +470,13 @@ export async function loadSettings(accessToken: string): Promise<ChatSettings> {
   try {
     const value = await fetchChatUserPreferences(accessToken);
     const parsed = parseChatUserPreferences(value) ?? DEFAULT_CHAT_USER_PREFERENCES;
-    return { ...DEFAULT_CHAT_SETTINGS, userPresence: parsed.userPresence, visionModel: parsed.visionModel ?? null, automationModel: parsed.automationModel ?? DEFAULT_CHAT_SETTINGS.automationModel };
+    return {
+      ...DEFAULT_CHAT_SETTINGS,
+      userPresence: parsed.userPresence,
+      visionModel: parsed.visionModel ?? null,
+      automationModel: parsed.automationModel ?? DEFAULT_CHAT_SETTINGS.automationModel,
+      focusedContextEnabled: parsed.focusedContextEnabled ?? false,
+    };
   } catch {
     return { ...DEFAULT_CHAT_SETTINGS };
   }
@@ -482,7 +488,12 @@ export async function saveSettings(settings: ChatSettings, accessToken: string):
     ? settings.userPresence.trim().slice(0, 12_000)
     : "";
   try {
-    await saveChatUserPreferences({ userPresence, visionModel: settings?.visionModel ?? null, automationModel: settings?.automationModel }, accessToken);
+    await saveChatUserPreferences({
+      userPresence,
+      visionModel: settings?.visionModel ?? null,
+      automationModel: settings?.automationModel,
+      focusedContextEnabled: settings?.focusedContextEnabled ?? false,
+    }, accessToken);
   } catch {
     // Saving preferences is intentionally nonfatal, matching the existing UI policy.
   }

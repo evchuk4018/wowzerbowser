@@ -49,6 +49,7 @@ export async function runClaimedAutomation(run: ClaimedRun): Promise<void> {
       model: preferences.automationModel!,
       thinking: false,
       reasoningEffort: "medium",
+      contextMode: "full",
       conversationId: `automation-${automation.id}`,
       jobId,
     }, run.owner_id, AbortSignal.timeout(240_000), async (event: ChatStreamEvent) => {

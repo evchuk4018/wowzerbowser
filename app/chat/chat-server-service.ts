@@ -51,6 +51,13 @@ import { availableDeepResearchTools } from "../server/agent/deep-research-tool-m
 import { executeDeepResearchTool } from "../server/agent/deep-research-tool";
 import { deepResearchInstructionsFor } from "../server/agent/deep-research-tool-instructions";
 import type { ResearchRun } from "../server/research/research-types";
+import { compileFocusedContext, type FocusedContextPlan, type FocusedToolGroup } from "../server/chat/focused-context";
+import {
+  CURRENT_CHAT_CONTEXT_TOOL_INSTRUCTIONS,
+  SEARCH_CURRENT_CHAT_TOOL_DEFINITION,
+  SEARCH_CURRENT_CHAT_TOOL_NAME,
+} from "../server/agent/current-chat-context-tool-manifest";
+import { executeCurrentChatContextTool } from "../server/agent/current-chat-context-tool";
 
 const MAX_RESPONSE_MS = 240_000;
 
@@ -129,7 +136,6 @@ export async function generateChatResponse(
       })
     : [];
   const customToolsByName = new Map(customTools.map((tool) => [tool.name, tool]));
-  const customDefinitions = customToolDefinitions(customTools);
   const chatMemoryTools = automationExecution ? [] : chatMemoryToolDefinitions();
   const userMemoryTools = automationExecution ? [] : userMemoryToolDefinitions();
   const skills = automationExecution ? [] : await listOwnerSkills(ownerId).catch((error) => {
@@ -145,6 +151,81 @@ export async function generateChatResponse(
     const document = await getAuthorizedDocument(ownerId, conversationId, pdfId);
     if (document) { allowedPdfIds.add(pdfId); authoritativePdfs.set(pdfId, document); }
   }
+  const imageTools = availableImageTools(allowedImageIds.length > 0);
+  const allPdfEditTools = availablePdfEditTools([...authoritativePdfs.values()].some((document) => document.contentType === "application/pdf"));
+  const allPdfReadTools = availablePdfTools(allowedPdfIds.size > 0);
+  const phaseTools = chatRequest.thinking && !automationExecution ? [PHASE_BREAK_TOOL_DEFINITION] : [];
+  const latestMessage = chatRequest.messages.at(-1);
+  const toolGroups: FocusedToolGroup[] = [
+    ...(pythonTools.length ? [{ id: "python", summary: "Run Python for computation, data processing, or generated files.", keywords: ["python", "calculate", "compute", "chart", "spreadsheet", "generate file"], fallback: true }] : []),
+    ...(imageTools.length ? [{ id: "image", summary: "Inspect an attached image.", keywords: ["image", "photo", "picture", "screenshot"], required: Boolean(latestMessage?.attachments?.length) }] : []),
+    ...(webTools.length ? [{ id: "web", summary: "Search the web, fetch pages, and check current time, date, or deployment location.", keywords: ["current", "latest", "today", "web", "search", "url", "time", "date", "location", "news"], fallback: true }] : []),
+    ...(deepResearchTools.length ? [{ id: "research", summary: "Run substantial multi-source research and inspect its evidence.", keywords: ["research", "sources", "investigate", "compare evidence"], fallback: true }] : []),
+    ...(allPdfReadTools.length ? [{ id: "documents", summary: "Search and read authorized PDF or DOCX documents.", keywords: ["document", "pdf", "docx", "page", "attached"], required: Boolean(latestMessage?.documents?.length), fallback: true }] : []),
+    ...(allPdfEditTools.length ? [{ id: "document-edit", summary: "Inspect or edit an authorized PDF and compare revisions.", keywords: ["edit pdf", "modify pdf", "change document", "revision", "compare pdf"], fallback: true }] : []),
+    ...(phaseTools.length ? [{ id: "phase", summary: "Start a new reasoning phase.", keywords: [], required: true }] : []),
+    ...(chatMemoryTools.length ? [{ id: "chat-memory", summary: "Search or recall another saved conversation.", keywords: ["previous chat", "past conversation", "another conversation", "chat history"], fallback: true }] : []),
+    ...(userMemoryTools.length ? [{ id: "user-memory", summary: "Browse or maintain durable facts in the private user profile.", keywords: ["remember", "memory", "profile", "forget"], fallback: true }] : []),
+    ...(skills.length ? [{ id: "skills", summary: "Load task-specific saved skill instructions.", keywords: skills.flatMap(({ name, summary }) => [name, summary]), fallback: true }] : []),
+    ...customTools.map((tool) => ({ id: `custom:${tool.name}`, summary: tool.description, keywords: [tool.name, tool.description], fallback: true })),
+    ...(!automationExecution && (planner.plannedThisTurn || Boolean(planner.list?.items.length)) ? [{ id: "todos", summary: "Update the visible task todo list.", keywords: ["todo", "plan", "steps", "tasks"], required: true }] : []),
+    ...(automationExecution ? [{ id: "automation-result", summary: "Complete the current automation run.", keywords: [], required: true }] : []),
+  ];
+  let focusedPlan: FocusedContextPlan | null = null;
+  if (!automationExecution && chatRequest.contextMode === "focused") {
+    focusedPlan = await compileFocusedContext({
+      messages: chatRequest.messages,
+      toolGroups,
+      signal,
+      onRouterUsage: async ({ model, usage, estimated, exactCostUsd }) => {
+        await recordUsage({
+          ownerId,
+          provider: "openrouter",
+          model,
+          requestKind: "context_router",
+          requestId: responseId ?? `context-${conversationId}`,
+          round: 0,
+          usage,
+          source: estimated ? "estimated" : "exact",
+          exactCostUsd,
+          unpriced: exactCostUsd === undefined,
+          conversationId,
+          jobId: responseId,
+        }).catch(() => undefined);
+      },
+    });
+    console.info({
+      event: "focused-context-compiled",
+      ownerId,
+      conversationId,
+      beforeCharacters: focusedPlan.beforeCharacters,
+      afterCharacters: focusedPlan.afterCharacters,
+      selectedTurnCount: focusedPlan.selectedTurnIds.length,
+      omittedTurnCount: focusedPlan.omittedTurnCount,
+      selectedToolGroups: [...focusedPlan.selectedToolGroups],
+      routerUsed: focusedPlan.routerUsed,
+      routerFallback: focusedPlan.routerFallback,
+      selectionReasons: focusedPlan.selectionReasons,
+      durationMs: focusedPlan.durationMs,
+    });
+    chatRequest = { ...chatRequest, messages: focusedPlan.messages };
+  }
+  const selected = (group: string) => !focusedPlan || focusedPlan.selectedToolGroups.has(group);
+  const activePythonTools = selected("python") ? pythonTools : [];
+  const activeImageTools = selected("image") ? imageTools : [];
+  const activeWebTools = selected("web") ? webTools : [];
+  const activeDeepResearchTools = selected("research") ? deepResearchTools : [];
+  const activePdfReadTools = selected("documents") ? allPdfReadTools : [];
+  const pdfEditTools = selected("document-edit") ? allPdfEditTools : [];
+  const activePhaseTools = selected("phase") ? phaseTools : [];
+  const activeChatMemoryTools = selected("chat-memory") ? chatMemoryTools : [];
+  const activeUserMemoryTools = selected("user-memory") ? userMemoryTools : [];
+  const activeCustomTools = customTools.filter((tool) => selected(`custom:${tool.name}`));
+  const customDefinitions = customToolDefinitions(activeCustomTools);
+  const skillTools = selected("skills") && !automationExecution ? SKILL_TOOL_DEFINITIONS : [];
+  const todoTools = selected("todos") && !automationExecution ? TODO_TOOL_DEFINITIONS : [];
+  const automationResultTools = selected("automation-result") && automationExecution ? [COMPLETE_AUTOMATION_RUN_TOOL_DEFINITION] : [];
+  const contextTools = focusedPlan?.searchEntries.length ? [SEARCH_CURRENT_CHAT_TOOL_DEFINITION] : [];
   const contextualMessages = await Promise.all(chatRequest.messages.map(async (message) => {
     const documents = (message.documents ?? []).filter((item) => allowedPdfIds.has(item.id));
     if (!documents.length) return message;
@@ -152,12 +233,9 @@ export async function generateChatResponse(
     return { ...message, content: `${message.content}\n\n${contexts.join("\n\n")}` };
   }));
   chatRequest = { ...chatRequest, messages: contextualMessages };
-  const imageTools = availableImageTools(allowedImageIds.length > 0);
-  const pdfEditTools = availablePdfEditTools([...authoritativePdfs.values()].some((document) => document.contentType === "application/pdf"));
   const allowedProjectIds = new Set([...authoritativePdfs.values()].map((document) => document.projectId).filter((projectId): projectId is string => Boolean(projectId)));
-  const phaseTools = chatRequest.thinking && !automationExecution ? [PHASE_BREAK_TOOL_DEFINITION] : [];
-  const baseToolDefinitions = [...pythonTools, ...imageTools, ...webTools, ...deepResearchTools, ...pdfEditTools, ...phaseTools, ...customDefinitions, ...chatMemoryTools, ...userMemoryTools, ...(automationExecution ? [] : SKILL_TOOL_DEFINITIONS), ...(automationExecution ? [] : TODO_TOOL_DEFINITIONS), ...(automationExecution ? [COMPLETE_AUTOMATION_RUN_TOOL_DEFINITION] : [])];
-  const imageToolAdvertised = imageTools.some((tool) => tool.function.name === INSPECT_IMAGE_TOOL_NAME);
+  const baseToolDefinitions = [...activePythonTools, ...activeImageTools, ...activeWebTools, ...activeDeepResearchTools, ...pdfEditTools, ...activePhaseTools, ...customDefinitions, ...activeChatMemoryTools, ...activeUserMemoryTools, ...skillTools, ...todoTools, ...automationResultTools, ...contextTools];
+  const imageToolAdvertised = activeImageTools.some((tool) => tool.function.name === INSPECT_IMAGE_TOOL_NAME);
 
   const enqueue = async (event: ChatStreamEvent) => {
     if (!signal.aborted) await persistEvent(event);
@@ -169,7 +247,7 @@ export async function generateChatResponse(
         thinking: chatRequest.thinking,
         reasoningEffort: chatRequest.reasoningEffort,
         responseId,
-        ...(baseToolDefinitions.length || allowedPdfIds.size ? { tools: [...baseToolDefinitions.map((tool) => tool.function.name), ...availablePdfTools(allowedPdfIds.size > 0).map((tool) => tool.function.name)] } : {}),
+        ...(baseToolDefinitions.length || activePdfReadTools.length ? { tools: [...baseToolDefinitions.map((tool) => tool.function.name), ...activePdfReadTools.map((tool) => tool.function.name)] } : {}),
       });
 
       const deadline = AbortSignal.timeout(Math.max(0, responseDeadlineAt - Date.now()));
@@ -191,17 +269,21 @@ export async function generateChatResponse(
       try {
         for (let round = 1; ; round += 1) {
           const automationDefinitions = !automationExecution && automationToolsUnlocked ? AUTOMATION_TOOL_DEFINITIONS : [];
-          const toolDefinitions = [...baseToolDefinitions, ...automationDefinitions, ...availablePdfTools(allowedPdfIds.size > 0)];
+          const dynamicPdfTools = selected("documents")
+            ? availablePdfTools(allowedPdfIds.size > 0).filter((tool) => !baseToolDefinitions.some((base) => base.function.name === tool.function.name))
+            : [];
+          const toolDefinitions = [...baseToolDefinitions, ...automationDefinitions, ...dynamicPdfTools];
           await enqueue({ type: "round", round });
           const systemInstructions = [
-            ...runPythonInstructionsFor(Boolean(pythonTools.length)),
-            ...webToolInstructionsFor(Boolean(webTools.length)),
-            ...deepResearchInstructionsFor(Boolean(deepResearchTools.length)),
+            ...runPythonInstructionsFor(Boolean(activePythonTools.length)),
+            ...webToolInstructionsFor(Boolean(activeWebTools.length)),
+            ...deepResearchInstructionsFor(Boolean(activeDeepResearchTools.length)),
             ...(pdfEditTools.length ? PDF_EDIT_TOOL_INSTRUCTIONS : []),
-            ...(phaseTools.length ? [PHASE_BREAK_INSTRUCTIONS] : []),
-            ...customToolInstructions(customTools),
-            skillCatalogInstructions(skills),
-            USER_MEMORY_TOOL_INSTRUCTIONS,
+            ...(activePhaseTools.length ? [PHASE_BREAK_INSTRUCTIONS] : []),
+            ...customToolInstructions(activeCustomTools),
+            ...(skillTools.length ? [skillCatalogInstructions(skills)] : []),
+            ...(activeUserMemoryTools.length ? [USER_MEMORY_TOOL_INSTRUCTIONS] : []),
+            ...(contextTools.length ? [CURRENT_CHAT_CONTEXT_TOOL_INSTRUCTIONS] : []),
             RESPONSE_STYLE_INSTRUCTIONS,
           ];
           const reasoningParts: string[] = [];
@@ -285,7 +367,7 @@ export async function generateChatResponse(
             break;
           }
           for (const [callIndex, call] of calls.entries()) {
-            if (call.name === PHASE_BREAK_TOOL_NAME) {
+            if (call.name === PHASE_BREAK_TOOL_NAME && activePhaseTools.length) {
               currentPhase += 1;
               await titleCoordinator.breakPhase(currentPhase);
               const phaseBreak = executePhaseBreak(call, currentPhase);
@@ -301,7 +383,7 @@ export async function generateChatResponse(
             }
             await enqueue({ type: "tool_call", call });
             let result: ChatToolResult;
-            if (call.name === "run_python") {
+            if (call.name === "run_python" && activePythonTools.length) {
               if (!isModalConfigured()) throw new Error("Python execution is not configured.");
               if (!executor) executor = new ModalPythonExecutor(ownerId, conversationId, responseDeadlineAt);
               result = await executePythonTool(call, executor, ownerId, conversationId, async (artifact, bytes) => {
@@ -318,9 +400,9 @@ export async function generateChatResponse(
                 signal: roundSignal,
                 responseDeadlineAt,
               });
-            } else if (webTools.some((tool) => tool.function.name === call.name)) {
+            } else if (activeWebTools.some((tool) => tool.function.name === call.name)) {
               result = await executeWebTool(call);
-            } else if (deepResearchTools.some((tool) => tool.function.name === call.name)) {
+            } else if (activeDeepResearchTools.some((tool) => tool.function.name === call.name)) {
               const executed = await executeDeepResearchTool(call, {
                 ownerId,
                 conversationId,
@@ -330,9 +412,9 @@ export async function generateChatResponse(
               });
               activeResearchRun = executed.activeRun;
               result = executed.result;
-            } else if (customToolsByName.has(call.name)) {
+            } else if (activeCustomTools.some((tool) => tool.name === call.name) && customToolsByName.has(call.name)) {
               result = await executeCustomToolCall(call, customToolsByName.get(call.name)!);
-            } else if (chatMemoryTools.some((tool) => tool.function.name === call.name)) {
+            } else if (activeChatMemoryTools.some((tool) => tool.function.name === call.name)) {
               result = await executeChatMemoryTool(call, {
                 ownerId,
                 signal: roundSignal,
@@ -354,13 +436,13 @@ export async function generateChatResponse(
                   });
                 },
               });
-            } else if (userMemoryTools.some((tool) => tool.function.name === call.name)) {
+            } else if (activeUserMemoryTools.some((tool) => tool.function.name === call.name)) {
               result = await executeUserMemoryTool(call, {
                 ownerId,
                 conversationId,
                 jobId: responseId ?? `chat-${conversationId}`,
               });
-            } else if (call.name === READ_SKILL_TOOL_NAME) {
+            } else if (call.name === READ_SKILL_TOOL_NAME && skillTools.length) {
               result = executeReadSkillTool(call, skillsById);
               if (result.ok) {
                 try {
@@ -374,7 +456,7 @@ export async function generateChatResponse(
               const completed = executeCompleteAutomationRun(call);
               result = completed.result;
               if (completed.value) executionOptions.onAutomationResult?.(completed.value);
-            } else if (TODO_TOOL_DEFINITIONS.some((tool) => tool.function.name === call.name)) {
+            } else if (todoTools.some((tool) => tool.function.name === call.name)) {
               result = await executeTodoTool(call, {
                 ownerId,
                 conversationId,
@@ -385,8 +467,10 @@ export async function generateChatResponse(
               if (!executor && call.name !== "inspect_pdf_editability" && call.name !== "compare_document_revisions") executor = new ModalPythonExecutor(ownerId, conversationId, responseDeadlineAt);
               result = await executePdfEditTool(call, { ownerId, conversationId, allowedPdfIds, allowedImageIds: new Set(allowedImageIds), allowedProjectIds, executor: executor ?? undefined, jobId: responseId });
               for (const artifact of result.artifacts ?? []) if (artifact.contentType === "application/pdf") allowedPdfIds.add(artifact.id);
-            } else if (availablePdfTools(allowedPdfIds.size > 0).some((tool) => tool.function.name === call.name)) {
+            } else if (selected("documents") && availablePdfTools(allowedPdfIds.size > 0).some((tool) => tool.function.name === call.name)) {
               result = await executePdfTool(call, { ownerId, conversationId, allowedPdfIds });
+            } else if (call.name === SEARCH_CURRENT_CHAT_TOOL_NAME && focusedPlan) {
+              result = executeCurrentChatContextTool(call, focusedPlan.searchEntries);
             } else {
               result = {
                 id: call.id,

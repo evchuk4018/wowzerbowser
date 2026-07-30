@@ -173,6 +173,7 @@ export function buildChatGenerationRequest(input: {
     model: input.model,
     thinking: input.thinking,
     reasoningEffort: input.reasoningEffort,
+    contextMode: input.settings.focusedContextEnabled ? "focused" : "full",
     conversationId: input.conversation.id,
     jobId: input.jobId,
     idempotencyKey: input.jobId,
