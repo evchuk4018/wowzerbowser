@@ -6,11 +6,15 @@
 
 .composer-wrap--expanded {
   position: fixed;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 300px;
   z-index: 40;
   display: grid;
-  width: 100%;
-  place-items: center;
+  width: auto;
+  align-items: end;
+  justify-items: center;
   background: rgba(0, 0, 0, .68);
   padding: 24px;
 }
@@ -27,8 +31,11 @@
 
 .chat-active .composer-wrap--expanded {
   position: fixed;
-  inset: 0;
-  width: 100%;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 300px;
+  width: auto;
   margin: 0;
 }
 
@@ -47,7 +54,7 @@
 .composer--expanded {
   display: flex;
   flex-direction: column;
-  width: min(100%, 980px);
+  width: min(100%, 860px);
   height: min(560px, 60dvh);
   min-height: 0;
   max-height: calc(100dvh - 48px);
