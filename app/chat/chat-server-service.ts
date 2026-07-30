@@ -69,6 +69,7 @@ import { formatConsolidatedPrompt } from "../server/memory/dreaming-prompt";
 import { listConnectorCatalog } from "../server/connectors/connector-service";
 import { connectorToolsToModelTools, executeConnectorTool, executeSearchConnectorTools, SEARCH_CONNECTOR_TOOLS_DEFINITION, SEARCH_CONNECTOR_TOOLS_NAME } from "../server/connectors/connector-tool-router";
 import type { ConnectorTool } from "../../lib/connector-protocol";
+import { executeToolBatch, planToolBatches, toolExecutionMetadata } from "../server/agent/tool-execution-policy";
 
 const MAX_RESPONSE_MS = 240_000;
 
@@ -416,43 +417,28 @@ export async function generateChatResponse(
             await enqueue({ type: "error", message: "Tool execution is not configured." });
             break;
           }
-          for (const [callIndex, call] of calls.entries()) {
-            if (call.name === PHASE_BREAK_TOOL_NAME && activePhaseTools.length) {
-              currentPhase += 1;
-              await titleCoordinator.breakPhase(currentPhase);
-              const phaseBreak = executePhaseBreak(call, currentPhase);
-              call.result = phaseBreak.result;
-              await enqueue({
-                type: "phase_break",
-                phase: currentPhase,
-                ...(phaseBreak.update ? { update: phaseBreak.update } : {}),
-                call,
-                result: phaseBreak.result,
-              });
-              continue;
-            }
-            await enqueue({ type: "tool_call", call });
-            let result: ChatToolResult;
+          const executeToolCall = async (call: ChatToolCall, callIndex: number): Promise<ChatToolResult> => {
             if (call.name === "run_python" && activePythonTools.length) {
               if (!isModalConfigured()) throw new Error("Python execution is not configured.");
               if (!executor) executor = new ModalPythonExecutor(ownerId, conversationId, responseDeadlineAt);
-              result = await executePythonTool(call, executor, ownerId, conversationId, async (artifact, bytes) => {
+              return executePythonTool(call, executor, ownerId, conversationId, async (artifact, bytes) => {
                 const pdfId = artifact.id;
                 if (artifact.contentType === DOCX_CONTENT_TYPE) await ingestDocx({ ownerId, conversationId, documentId: pdfId, filename: artifact.name, bytes, jobId: responseId, signal: roundSignal, projectId: artifact.projectId, revisionId: artifact.revisionId, parentRevisionId: artifact.parentRevisionId, origin: artifact.origin, editable: artifact.editable, sourceCompleteness: artifact.sourceCompleteness });
                 else await ingestPdf({ ownerId, conversationId, pdfId, filename: artifact.name, bytes, jobId: responseId, projectId: artifact.projectId, revisionId: artifact.revisionId, parentRevisionId: artifact.parentRevisionId, origin: artifact.origin, editable: artifact.editable, sourceCompleteness: artifact.sourceCompleteness });
                 allowedPdfIds.add(pdfId);
               });
-            } else if (call.name === INSPECT_IMAGE_TOOL_NAME && imageToolAdvertised) {
-              result = await executeInspectImageTool(call, {
+            }
+            if (call.name === INSPECT_IMAGE_TOOL_NAME && imageToolAdvertised) {
+              return executeInspectImageTool(call, {
                 ownerId,
                 conversationId,
                 allowedImageIds,
                 signal: roundSignal,
                 responseDeadlineAt,
               });
-            } else if (activeWebTools.some((tool) => tool.function.name === call.name)) {
-              result = await executeWebTool(call);
-            } else if (activeDeepResearchTools.some((tool) => tool.function.name === call.name)) {
+            }
+            if (activeWebTools.some((tool) => tool.function.name === call.name)) return executeWebTool(call, roundSignal);
+            if (activeDeepResearchTools.some((tool) => tool.function.name === call.name)) {
               const executed = await executeDeepResearchTool(call, {
                 ownerId,
                 conversationId,
@@ -461,11 +447,13 @@ export async function generateChatResponse(
                 activeRun: activeResearchRun,
               });
               activeResearchRun = executed.activeRun;
-              result = executed.result;
-            } else if (activeCustomTools.some((tool) => tool.name === call.name) && customToolsByName.has(call.name)) {
-              result = await executeCustomToolCall(call, customToolsByName.get(call.name)!);
-            } else if (activeChatMemoryTools.some((tool) => tool.function.name === call.name)) {
-              result = await executeChatMemoryTool(call, {
+              return executed.result;
+            }
+            if (activeCustomTools.some((tool) => tool.name === call.name) && customToolsByName.has(call.name)) {
+              return executeCustomToolCall(call, customToolsByName.get(call.name)!);
+            }
+            if (activeChatMemoryTools.some((tool) => tool.function.name === call.name)) {
+              return executeChatMemoryTool(call, {
                 ownerId,
                 signal: roundSignal,
                 contextCache: recalledContexts,
@@ -486,14 +474,16 @@ export async function generateChatResponse(
                   });
                 },
               });
-            } else if (activeUserMemoryTools.some((tool) => tool.function.name === call.name)) {
-              result = await executeUserMemoryTool(call, {
+            }
+            if (activeUserMemoryTools.some((tool) => tool.function.name === call.name)) {
+              return executeUserMemoryTool(call, {
                 ownerId,
                 conversationId,
                 jobId: responseId ?? `chat-${conversationId}`,
               });
-            } else if (call.name === READ_SKILL_TOOL_NAME && skillTools.length) {
-              result = executeReadSkillTool(call, skillsById);
+            }
+            if (call.name === READ_SKILL_TOOL_NAME && skillTools.length) {
+              const result = executeReadSkillTool(call, skillsById);
               if (result.ok) {
                 try {
                   const skillId = (JSON.parse(call.arguments) as { skillId?: unknown }).skillId;
@@ -501,50 +491,63 @@ export async function generateChatResponse(
                   if (typeof skillId === "string" && skillsById.get(skillId)?.builtinKey === CALENDAR_SKILL_KEY) calendarToolsUnlocked = true;
                 } catch {}
               }
-            } else if (automationDefinitions.some((tool) => tool.function.name === call.name)) {
-              result = await executeAutomationTool(call, ownerId);
-            } else if (calendarDefinitions.some((tool) => tool.function.name === call.name)) {
-              result = await executeCalendarTool(call, ownerId);
-            } else if (automationExecution && call.name === COMPLETE_AUTOMATION_RUN_TOOL_NAME) {
+              return result;
+            }
+            if (automationDefinitions.some((tool) => tool.function.name === call.name)) return executeAutomationTool(call, ownerId);
+            if (calendarDefinitions.some((tool) => tool.function.name === call.name)) return executeCalendarTool(call, ownerId);
+            if (automationExecution && call.name === COMPLETE_AUTOMATION_RUN_TOOL_NAME) {
               const completed = executeCompleteAutomationRun(call);
-              result = completed.result;
               if (completed.value) executionOptions.onAutomationResult?.(completed.value);
-            } else if (todoTools.some((tool) => tool.function.name === call.name)) {
-              result = await executeTodoTool(call, {
+              return completed.result;
+            }
+            if (todoTools.some((tool) => tool.function.name === call.name)) {
+              return executeTodoTool(call, {
                 ownerId,
                 conversationId,
                 onUpdate: async (todos) => enqueue({ type: "todo_update", todos }),
               });
-            } else if (pdfEditTools.some((tool) => tool.function.name === call.name)) {
+            }
+            if (pdfEditTools.some((tool) => tool.function.name === call.name)) {
               if (!isModalConfigured() && call.name !== "inspect_pdf_editability" && call.name !== "compare_document_revisions") throw new Error("PDF editing is not configured.");
               if (!executor && call.name !== "inspect_pdf_editability" && call.name !== "compare_document_revisions") executor = new ModalPythonExecutor(ownerId, conversationId, responseDeadlineAt);
-              result = await executePdfEditTool(call, { ownerId, conversationId, allowedPdfIds, allowedImageIds: new Set(allowedImageIds), allowedProjectIds, executor: executor ?? undefined, jobId: responseId });
+              const result = await executePdfEditTool(call, { ownerId, conversationId, allowedPdfIds, allowedImageIds: new Set(allowedImageIds), allowedProjectIds, executor: executor ?? undefined, jobId: responseId });
               for (const artifact of result.artifacts ?? []) if (artifact.contentType === "application/pdf") allowedPdfIds.add(artifact.id);
-            } else if (selected("documents") && availablePdfTools(allowedPdfIds.size > 0).some((tool) => tool.function.name === call.name)) {
-              result = await executePdfTool(call, { ownerId, conversationId, allowedPdfIds });
-            } else if (call.name === SEARCH_CURRENT_CHAT_TOOL_NAME && focusedPlan) {
-              result = executeCurrentChatContextTool(call, focusedPlan.searchEntries);
-            } else if (call.name === SEARCH_CONNECTOR_TOOLS_NAME && connectorDiscoveryAvailable) {
+              return result;
+            }
+            if (selected("documents") && availablePdfTools(allowedPdfIds.size > 0).some((tool) => tool.function.name === call.name)) {
+              return executePdfTool(call, { ownerId, conversationId, allowedPdfIds });
+            }
+            if (call.name === SEARCH_CURRENT_CHAT_TOOL_NAME && focusedPlan) return executeCurrentChatContextTool(call, focusedPlan.searchEntries);
+            if (call.name === SEARCH_CONNECTOR_TOOLS_NAME && connectorDiscoveryAvailable) {
               const discovered = await executeSearchConnectorTools(call, ownerId);
               discoveredConnectorTools = discovered.tools;
-              result = discovered.result;
-            } else if (call.name.startsWith("connector__") && connectorDiscoveryAvailable) {
-              result = await executeConnectorTool(call, {
+              return discovered.result;
+            }
+            if (call.name.startsWith("connector__") && connectorDiscoveryAvailable) {
+              return executeConnectorTool(call, {
                 ownerId,
                 conversationId,
                 jobId: responseId,
                 signal: roundSignal,
                 onApproval: async (approval) => enqueue({ type: "connector_approval", approval }),
               });
-            } else {
-              result = {
-                id: call.id,
-                name: call.name,
-                ok: false,
-                stdout: "",
-                stderr: `Unknown tool: ${call.name}`,
-              };
             }
+            return {
+              id: call.id,
+              name: call.name,
+              ok: false,
+              stdout: "",
+              stderr: `Unknown tool: ${call.name}`,
+            };
+          };
+
+          const indexedCalls = calls.map((call, index) => ({ call, index }));
+          const batches = planToolBatches(indexedCalls, ({ call }) =>
+            call.name === PHASE_BREAK_TOOL_NAME && activePhaseTools.length
+              ? "serial"
+              : toolExecutionMetadata(call.name, discoveredConnectorTools).executionPolicy,
+          );
+          const emitToolResult = async (call: ChatToolCall, result: ChatToolResult): Promise<void> => {
             call.result = result;
             const web = result.web;
             const sources = web?.kind === "search" ? web.results : web?.kind === "page" ? [web.source] : [];
@@ -558,6 +561,43 @@ export async function generateChatResponse(
             for (const source of researchSources) sourceCatalog.set(source.id, source);
             await enqueue({ type: "tool_result", result });
             for (const artifact of result.artifacts ?? []) await enqueue({ type: "artifact", artifact });
+          };
+
+          for (const batch of batches) {
+            const first = batch[0];
+            if (batch.length === 1 && first.call.name === PHASE_BREAK_TOOL_NAME && activePhaseTools.length) {
+              currentPhase += 1;
+              await titleCoordinator.breakPhase(currentPhase);
+              const phaseBreak = executePhaseBreak(first.call, currentPhase);
+              first.call.result = phaseBreak.result;
+              await enqueue({
+                type: "phase_break",
+                phase: currentPhase,
+                ...(phaseBreak.update ? { update: phaseBreak.update } : {}),
+                call: first.call,
+                result: phaseBreak.result,
+              });
+              continue;
+            }
+            for (const { call } of batch) await enqueue({ type: "tool_call", call });
+            const settled = await executeToolBatch(
+              batch,
+              ({ call, index }) => executeToolCall(call, index),
+              roundSignal,
+            );
+            if (roundSignal.aborted) throw roundSignal.reason ?? new Error("The tool batch was cancelled.");
+            for (const [{ call }, outcome] of batch.map((item, index) => [item, settled[index]] as const)) {
+              const result = outcome.status === "fulfilled"
+                ? outcome.value
+                : {
+                    id: call.id,
+                    name: call.name,
+                    ok: false,
+                    stdout: "",
+                    stderr: outcome.reason instanceof Error ? outcome.reason.message : "Tool execution failed.",
+                  };
+              await emitToolResult(call, result);
+            }
           }
           replayRounds.push({
             content: contentParts.join(""),
@@ -574,7 +614,7 @@ export async function generateChatResponse(
       } finally {
         if (signal.aborted) titleCoordinator.cancel();
         else await titleCoordinator.finish();
-        await executor?.close().catch(() => undefined);
+        await (executor as ModalPythonExecutor | null)?.close().catch(() => undefined);
         if (!signal.aborted) {
           await enqueue({ type: "done", usage: sumRoundUsage(roundUsages) });
         }

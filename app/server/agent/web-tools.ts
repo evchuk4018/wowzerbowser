@@ -77,9 +77,13 @@ function dateParts(formatter: Intl.DateTimeFormat, now: Date) {
   if (!year || !month || !day) throw new Error("The server could not format the current date.");
   return { year, month, day, hour: get("hour"), minute: get("minute"), second: get("second") };
 }
-async function providerFetch(url: string, init: RequestInit) { return fetch(url, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) }); }
+async function providerFetch(url: string, init: RequestInit, signal?: AbortSignal) {
+  const timeout = AbortSignal.timeout(TIMEOUT_MS);
+  const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  return fetch(url, { ...init, signal: requestSignal });
+}
 
-export async function executeWebTool(call: ChatToolCall): Promise<ChatToolResult> {
+export async function executeWebTool(call: ChatToolCall, signal?: AbortSignal): Promise<ChatToolResult> {
   const startedAt = Date.now();
   try {
     const input = parse(call);
@@ -107,7 +111,7 @@ export async function executeWebTool(call: ChatToolCall): Promise<ChatToolResult
       requireOnly(input, ["query", "q", "count"], call.name);
       const query = searchQuery(input); const count = Math.max(1, Math.min(MAX_RESULTS, Number(input.count) || MAX_RESULTS));
       if (!query) throw new Error("web_search requires a query.");
-      const response = await withProviderKeys(configuredKeys("brave"), (key) => providerFetch(`https://api.search.brave.com/res/v1/web/search?${new URLSearchParams({ q: query, count: String(count), text_decorations: "false" })}`, { headers: { Accept: "application/json", "X-Subscription-Token": key } }));
+      const response = await withProviderKeys(configuredKeys("brave"), (key) => providerFetch(`https://api.search.brave.com/res/v1/web/search?${new URLSearchParams({ q: query, count: String(count), text_decorations: "false" })}`, { headers: { Accept: "application/json", "X-Subscription-Token": key } }, signal));
       if (!response.ok) throw response;
       const body = await response.json() as { web?: { results?: Array<{ title?: unknown; url?: unknown; description?: unknown }> } };
       const results = (body.web?.results ?? []).slice(0, count).map((item) => sourceForUrl({ title: text(item.title, 300), url: text(item.url, 2_000), snippet: text(item.description, MAX_SNIPPET) })).filter((item) => item.url);
@@ -116,7 +120,7 @@ export async function executeWebTool(call: ChatToolCall): Promise<ChatToolResult
     if (call.name === FETCH_PAGE_TOOL_NAME) {
       requireOnly(input, ["url"], call.name);
       const url = text(input.url, 2_000); if (!/^https?:\/\//i.test(url)) throw new Error("fetch_page requires an http(s) URL.");
-      const response = await withProviderKeys(configuredKeys("exa"), (key) => providerFetch("https://api.exa.ai/contents", { method: "POST", headers: { "content-type": "application/json", "x-api-key": key }, body: JSON.stringify({ urls: [url], text: { maxCharacters: MAX_MARKDOWN } }) }));
+      const response = await withProviderKeys(configuredKeys("exa"), (key) => providerFetch("https://api.exa.ai/contents", { method: "POST", headers: { "content-type": "application/json", "x-api-key": key }, body: JSON.stringify({ urls: [url], text: { maxCharacters: MAX_MARKDOWN } }) }, signal));
       if (!response.ok) throw response;
       const body = await response.json() as { results?: Array<{ text?: unknown; title?: unknown; publishedDate?: unknown }> };
       const markdown = text(body.results?.[0]?.text, MAX_MARKDOWN);
