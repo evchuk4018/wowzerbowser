@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { parseAutomationMutation } from "../lib/automation-protocol.ts";
 import { nextAutomationRun } from "../app/server/automations/automation-schedule.ts";
+import { messageUnlocksAutomationTools } from "../app/server/agent/automation-tool-manifest.ts";
 
 const source = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -25,13 +26,22 @@ test("persistence and dispatcher are owner scoped and leased", async () => {
   assert.match(route, /AUTOMATION_DISPATCH_SECRET/);
 });
 
-test("tool schemas unlock only after the matching built-in skill is read", async () => {
+test("explicit automation requests expose tools while the matching skill remains available", async () => {
   const [service, skill, settings] = await Promise.all([source("app/chat/chat-server-service.ts"), source("app/server/skills/builtin-skills.ts"), source("app/settings/settings-modal.tsx")]);
   assert.match(service, /automationToolsUnlocked \? AUTOMATION_TOOL_DEFINITIONS : \[\]/);
+  assert.match(service, /automationToolsUnlocked = automationKeywordUnlock/);
+  assert.match(service, /message\.role === "user" && messageUnlocksAutomationTools\(message\.content\)/);
   assert.match(service, /builtinKey === AUTOMATION_SKILL_KEY/);
   assert.match(skill, /key: "manage-automations"/);
+  assert.match(skill, /Use create_automation to create the requested schedule/);
   assert.match(settings, /id: "automations", label: "Automations"/);
   assert.doesNotMatch(settings, /id: "storage"/);
+});
+
+test("automation intent detection covers recurring reports without matching ordinary news requests", () => {
+  assert.equal(messageUnlocksAutomationTools("Create an automation that runs every day at 12:30"), true);
+  assert.equal(messageUnlocksAutomationTools("Schedule a weekly project rundown"), true);
+  assert.equal(messageUnlocksAutomationTools("Give me today's news"), false);
 });
 
 test("live checks suppress false results and pause after a match", async () => {

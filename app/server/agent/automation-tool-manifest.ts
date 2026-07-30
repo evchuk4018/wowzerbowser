@@ -6,6 +6,10 @@ export const AUTOMATION_TOOL_NAMES = {
   update: "update_automation", delete: "delete_automation",
 } as const;
 
+export function messageUnlocksAutomationTools(value: string): boolean {
+  return /\b(automation|automations|automate|recurring|schedule[ds]?|every\s+(?:day|weekday|week|month|\d+\s+minutes?)|daily|weekly|pause|resume)\b/i.test(value);
+}
+
 const schedule = {
   oneOf: [
     { type: "object", additionalProperties: false, required: ["kind", "everyMinutes"], properties: { kind: { const: "interval" }, everyMinutes: { type: "integer", minimum: 15, maximum: 43200 } } },

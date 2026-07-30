@@ -44,7 +44,7 @@ import { skillCatalogInstructions } from "../server/agent/skill-instructions";
 import { executeReadSkillTool } from "../server/agent/skill-tool";
 import { READ_SKILL_TOOL_NAME, SKILL_TOOL_DEFINITIONS } from "../server/agent/skill-tool-manifest";
 import { builtinSkillFallbacks } from "../server/skills/builtin-skills";
-import { AUTOMATION_SKILL_KEY, AUTOMATION_TOOL_DEFINITIONS } from "../server/agent/automation-tool-manifest";
+import { AUTOMATION_SKILL_KEY, AUTOMATION_TOOL_DEFINITIONS, messageUnlocksAutomationTools } from "../server/agent/automation-tool-manifest";
 import { executeAutomationTool } from "../server/agent/automation-tool";
 import { COMPLETE_AUTOMATION_RUN_TOOL_DEFINITION, COMPLETE_AUTOMATION_RUN_TOOL_NAME, executeCompleteAutomationRun, type AutomationRunResult } from "../server/agent/automation-run-result-tool";
 import { availableDeepResearchTools } from "../server/agent/deep-research-tool-manifest";
@@ -163,6 +163,9 @@ export async function generateChatResponse(
   const phaseTools = chatRequest.thinking && !automationExecution ? [PHASE_BREAK_TOOL_DEFINITION] : [];
   const latestMessage = chatRequest.messages.at(-1);
   const latestUserMessage = [...chatRequest.messages].reverse().find((message) => message.role === "user");
+  const automationKeywordUnlock = !automationExecution && chatRequest.messages.some(
+    (message) => message.role === "user" && messageUnlocksAutomationTools(message.content),
+  );
   const calendarKeywordUnlock = !automationExecution && messageUnlocksCalendarTools(latestUserMessage?.content ?? "");
   const toolGroups: FocusedToolGroup[] = [
     ...(pythonTools.length ? [{ id: "python", summary: "Run Python for computation, data processing, or generated files.", keywords: ["python", "calculate", "compute", "chart", "spreadsheet", "generate file"], fallback: true }] : []),
@@ -175,6 +178,7 @@ export async function generateChatResponse(
     ...(chatMemoryTools.length ? [{ id: "chat-memory", summary: "Search or recall another saved conversation.", keywords: ["previous chat", "past conversation", "another conversation", "chat history"], fallback: true }] : []),
     ...(userMemoryTools.length ? [{ id: "user-memory", summary: "Browse or maintain durable facts in the private user profile.", keywords: ["remember", "memory", "profile", "forget"], fallback: true }] : []),
     ...(skills.length ? [{ id: "skills", summary: "Load task-specific saved skill instructions.", keywords: skills.flatMap(({ name, summary }) => [name, summary]), fallback: true }] : []),
+    ...(automationKeywordUnlock ? [{ id: "automations", summary: "Create and manage recurring automations.", keywords: ["automation", "recurring", "schedule", "daily", "weekly"], required: true }] : []),
     ...(calendarKeywordUnlock ? [{ id: "calendar", summary: "Read and manage the connected primary Google Calendar.", keywords: ["calendar", "calender", "caldner", "calnder"], required: true }] : []),
     ...customTools.map((tool) => ({ id: `custom:${tool.name}`, summary: tool.description, keywords: [tool.name, tool.description], fallback: true })),
     ...(!automationExecution && (planner.plannedThisTurn || Boolean(planner.list?.items.length)) ? [{ id: "todos", summary: "Update the visible task todo list.", keywords: ["todo", "plan", "steps", "tasks"], required: true }] : []),
@@ -271,7 +275,7 @@ export async function generateChatResponse(
       let executor: ModalPythonExecutor | null = null;
       const recalledContexts = new Map<string, string>();
       let currentPhase = 1;
-      let automationToolsUnlocked = false;
+      let automationToolsUnlocked = automationKeywordUnlock;
       let calendarToolsUnlocked = calendarKeywordUnlock;
       let activeResearchRun: ResearchRun | null = null;
       const sourceCatalog = new Map<string, ChatSource>();
