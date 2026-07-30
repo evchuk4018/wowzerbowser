@@ -10,6 +10,7 @@
     "test:reasoning-titles": "tsx --conditions=react-server --test tests/reasoning-title-service.test.mjs",
     "test:todos": "tsx --conditions=react-server --test tests/todo-tool.test.mjs",
     "test:automations": "tsx --conditions=react-server --test tests/automations.test.mjs",
+    "test:calendar": "tsx --conditions=react-server --test tests/google-calendar.test.mjs",
     "test:deep-research": "tsx --conditions=react-server --test tests/deep-research.test.mjs",
     "pretest": "npm run test:deep-research",
     "build": "next build",

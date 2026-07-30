@@ -58,6 +58,12 @@ import {
   SEARCH_CURRENT_CHAT_TOOL_NAME,
 } from "../server/agent/current-chat-context-tool-manifest";
 import { executeCurrentChatContextTool } from "../server/agent/current-chat-context-tool";
+import {
+  CALENDAR_SKILL_KEY,
+  CALENDAR_TOOL_DEFINITIONS,
+  messageUnlocksCalendarTools,
+} from "../server/agent/calendar-tool-manifest";
+import { executeCalendarTool } from "../server/agent/calendar-tool";
 
 const MAX_RESPONSE_MS = 240_000;
 
@@ -156,6 +162,8 @@ export async function generateChatResponse(
   const allPdfReadTools = availablePdfTools(allowedPdfIds.size > 0);
   const phaseTools = chatRequest.thinking && !automationExecution ? [PHASE_BREAK_TOOL_DEFINITION] : [];
   const latestMessage = chatRequest.messages.at(-1);
+  const latestUserMessage = [...chatRequest.messages].reverse().find((message) => message.role === "user");
+  const calendarKeywordUnlock = !automationExecution && messageUnlocksCalendarTools(latestUserMessage?.content ?? "");
   const toolGroups: FocusedToolGroup[] = [
     ...(pythonTools.length ? [{ id: "python", summary: "Run Python for computation, data processing, or generated files.", keywords: ["python", "calculate", "compute", "chart", "spreadsheet", "generate file"], fallback: true }] : []),
     ...(imageTools.length ? [{ id: "image", summary: "Inspect an attached image.", keywords: ["image", "photo", "picture", "screenshot"], required: Boolean(latestMessage?.attachments?.length) }] : []),
@@ -167,6 +175,7 @@ export async function generateChatResponse(
     ...(chatMemoryTools.length ? [{ id: "chat-memory", summary: "Search or recall another saved conversation.", keywords: ["previous chat", "past conversation", "another conversation", "chat history"], fallback: true }] : []),
     ...(userMemoryTools.length ? [{ id: "user-memory", summary: "Browse or maintain durable facts in the private user profile.", keywords: ["remember", "memory", "profile", "forget"], fallback: true }] : []),
     ...(skills.length ? [{ id: "skills", summary: "Load task-specific saved skill instructions.", keywords: skills.flatMap(({ name, summary }) => [name, summary]), fallback: true }] : []),
+    ...(calendarKeywordUnlock ? [{ id: "calendar", summary: "Read and manage the connected primary Google Calendar.", keywords: ["calendar", "calender", "caldner", "calnder"], required: true }] : []),
     ...customTools.map((tool) => ({ id: `custom:${tool.name}`, summary: tool.description, keywords: [tool.name, tool.description], fallback: true })),
     ...(!automationExecution && (planner.plannedThisTurn || Boolean(planner.list?.items.length)) ? [{ id: "todos", summary: "Update the visible task todo list.", keywords: ["todo", "plan", "steps", "tasks"], required: true }] : []),
     ...(automationExecution ? [{ id: "automation-result", summary: "Complete the current automation run.", keywords: [], required: true }] : []),
@@ -263,16 +272,18 @@ export async function generateChatResponse(
       const recalledContexts = new Map<string, string>();
       let currentPhase = 1;
       let automationToolsUnlocked = false;
+      let calendarToolsUnlocked = calendarKeywordUnlock;
       let activeResearchRun: ResearchRun | null = null;
       const sourceCatalog = new Map<string, ChatSource>();
 
       try {
         for (let round = 1; ; round += 1) {
           const automationDefinitions = !automationExecution && automationToolsUnlocked ? AUTOMATION_TOOL_DEFINITIONS : [];
+          const calendarDefinitions = !automationExecution && calendarToolsUnlocked ? CALENDAR_TOOL_DEFINITIONS : [];
           const dynamicPdfTools = selected("documents")
             ? availablePdfTools(allowedPdfIds.size > 0).filter((tool) => !baseToolDefinitions.some((base) => base.function.name === tool.function.name))
             : [];
-          const toolDefinitions = [...baseToolDefinitions, ...automationDefinitions, ...dynamicPdfTools];
+          const toolDefinitions = [...baseToolDefinitions, ...automationDefinitions, ...calendarDefinitions, ...dynamicPdfTools];
           await enqueue({ type: "round", round });
           const systemInstructions = [
             ...runPythonInstructionsFor(Boolean(activePythonTools.length)),
@@ -448,10 +459,13 @@ export async function generateChatResponse(
                 try {
                   const skillId = (JSON.parse(call.arguments) as { skillId?: unknown }).skillId;
                   if (typeof skillId === "string" && skillsById.get(skillId)?.builtinKey === AUTOMATION_SKILL_KEY) automationToolsUnlocked = true;
+                  if (typeof skillId === "string" && skillsById.get(skillId)?.builtinKey === CALENDAR_SKILL_KEY) calendarToolsUnlocked = true;
                 } catch {}
               }
             } else if (automationDefinitions.some((tool) => tool.function.name === call.name)) {
               result = await executeAutomationTool(call, ownerId);
+            } else if (calendarDefinitions.some((tool) => tool.function.name === call.name)) {
+              result = await executeCalendarTool(call, ownerId);
             } else if (automationExecution && call.name === COMPLETE_AUTOMATION_RUN_TOOL_NAME) {
               const completed = executeCompleteAutomationRun(call);
               result = completed.result;

@@ -12,6 +12,19 @@ export type BuiltinSkillDefinition = {
 
 export const BUILTIN_SKILLS: readonly BuiltinSkillDefinition[] = Object.freeze([
   {
+    key: "manage-google-calendar",
+    version: 1,
+    name: "Manage Google Calendar",
+    summary: "Read, create, edit, and delete events in the connected primary Google Calendar.",
+    instructions: `<skill>
+Use this skill when the user asks to view or manage Google Calendar events.
+
+The calendar tools operate only on the connected account's primary calendar. Use list_calendar_events for a time range and get_calendar_event for one exact event. Before editing or deleting, first list or get the event so its identity and current details are established. Delete only when the user explicitly asks to delete that event.
+
+For timed events, use RFC 3339 dateTime values and include an IANA timeZone when it clarifies the user's intended local time. For all-day events, use date values; the end date is exclusive. Ask for missing dates, times, or timezone details when they materially affect the event. After a mutation, confirm the event title and effective date/time.
+</skill>`,
+  },
+  {
     key: "manage-automations",
     version: 1,
     name: "Manage recurring automations",

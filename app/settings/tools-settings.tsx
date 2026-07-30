@@ -5,6 +5,12 @@ import type { CustomToolDefinition, CustomToolMutation, CustomToolSummary, Custo
 import {
   createCustomTool, deleteCustomTool, fetchCustomTool, fetchCustomTools, testCustomTool, updateCustomTool,
 } from "./custom-tools-service";
+import {
+  disconnectGoogleCalendarConnection,
+  fetchGoogleCalendarConnection,
+  startGoogleCalendarConnection,
+} from "./google-calendar-service";
+import type { GoogleCalendarConnection } from "../../lib/google-calendar-protocol";
 
 const DEFAULT_SCHEMA = '{\n  "type": "object",\n  "properties": {},\n  "additionalProperties": false\n}';
 const DEFAULT_SOURCE = 'import json, sys\n\narguments = json.load(sys.stdin)\nprint(json.dumps({"ok": True}))';
@@ -31,6 +37,8 @@ export function ToolsSettings({ getAccessToken }: { getAccessToken: () => Promis
   const [error, setError] = useState("");
   const [sample, setSample] = useState("{}");
   const [testResult, setTestResult] = useState<CustomToolTestResult | null>(null);
+  const [calendar, setCalendar] = useState<GoogleCalendarConnection | null>(null);
+  const [calendarBusy, setCalendarBusy] = useState(false);
 
   const token = useCallback(async () => {
     const value = await getAccessToken();
@@ -43,8 +51,12 @@ export function ToolsSettings({ getAccessToken }: { getAccessToken: () => Promis
     let active = true;
     void (async () => {
       try {
-        const values = await fetchCustomTools(await token());
-        if (active) setTools(values);
+        const accessToken = await token();
+        const [values, connection] = await Promise.all([
+          fetchCustomTools(accessToken),
+          fetchGoogleCalendarConnection(accessToken),
+        ]);
+        if (active) { setTools(values); setCalendar(connection); }
       } catch (reason) {
         if (active) setError(reason instanceof Error ? reason.message : "Tools could not be loaded.");
       } finally {
@@ -53,6 +65,26 @@ export function ToolsSettings({ getAccessToken }: { getAccessToken: () => Promis
     })();
     return () => { active = false; };
   }, [token]);
+
+  async function connectCalendar() {
+    setCalendarBusy(true); setError("");
+    try { window.location.assign(await startGoogleCalendarConnection(await token())); }
+    catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Google Calendar connection could not start.");
+      setCalendarBusy(false);
+    }
+  }
+
+  async function disconnectCalendar() {
+    if (!window.confirm("Disconnect Google Calendar? Calendar events will not be changed.")) return;
+    setCalendarBusy(true); setError("");
+    try {
+      await disconnectGoogleCalendarConnection(await token());
+      setCalendar({ connected: false, connectedAt: null, updatedAt: null });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Google Calendar could not be disconnected.");
+    } finally { setCalendarBusy(false); }
+  }
 
   async function edit(id: string) {
     setError(""); setTestResult(null); setStatus("loading");
@@ -109,6 +141,22 @@ export function ToolsSettings({ getAccessToken }: { getAccessToken: () => Promis
       </div>
       {error && <p className="settings-status settings-error" role="alert">{error}</p>}
       {status === "loading" && <p className="settings-status" role="status">Loading tools...</p>}
+      {calendar && (
+        <div className="tool-list-item google-calendar-connection">
+          <span>
+            <strong>Google Calendar</strong>
+            <small>{calendar.connected ? "Connected to your primary calendar." : "Connect to read and manage events when requested."}</small>
+          </span>
+          <button
+            type="button"
+            className={calendar.connected ? "settings-cancel" : "settings-save"}
+            disabled={calendarBusy}
+            onClick={() => void (calendar.connected ? disconnectCalendar() : connectCalendar())}
+          >
+            {calendarBusy ? "Working..." : calendar.connected ? "Disconnect" : "Connect"}
+          </button>
+        </div>
+      )}
       <div className="tools-list">
         {tools.map((tool) => (
           <button type="button" className="tool-list-item" key={tool.id} onClick={() => void edit(tool.id)}>

@@ -84,6 +84,38 @@ hook instead. Password account creation uses Supabase browser signup and
 requires email confirmation to be disabled in the Supabase Auth settings so the
 new account receives a session immediately without email verification.
 
+## Google Calendar
+
+The built-in calendar tools use per-user Google OAuth and operate on the
+connected account's primary calendar.
+
+1. In Google Cloud, create or select a project and enable the **Google Calendar API**.
+2. Open **Google Auth Platform**, configure Branding, Audience, and Data Access.
+   For an External app in testing, add the app owner as a test user.
+3. Create an OAuth 2.0 client with application type **Web application**.
+4. Add the applicable authorized redirect URIs:
+   - `http://localhost:3000/api/integrations/google-calendar/callback`
+   - `https://YOUR_DOMAIN/api/integrations/google-calendar/callback`
+5. Configure:
+
+   ```dotenv
+   GOOGLE_OAUTH_CLIENT_ID=your-web-client-id
+   GOOGLE_OAUTH_CLIENT_SECRET=your-web-client-secret
+   GOOGLE_OAUTH_STATE_SECRET=at-least-32-random-characters
+   GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEY=base64-or-hex-encoded-32-byte-key
+   ```
+
+   Generate the encryption key with
+   `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
+   `NEXT_PUBLIC_SITE_URL` must exactly match the origin used in the registered
+   callback URI.
+6. Apply the Supabase migrations, deploy or restart the app, then open
+   **Settings → Tools → Google Calendar → Connect** and approve access.
+
+The OAuth request uses offline access and the narrow
+`https://www.googleapis.com/auth/calendar.events` scope. Refresh tokens are
+encrypted at rest and are never sent to the browser or model.
+
 ## Python tool
 
 The assistant can run Python in isolated Modal Sandboxes when
