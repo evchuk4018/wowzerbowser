@@ -1,61 +1,50 @@
-# PDF generation failure handoff
+# Recurring automation structured-result failure handoff
 
-## What is failing
+## Current production state
 
-The Python runtime can generate PDFs. The captured transcript proves this with a
-successful ReportLab write to `/tmp/story.pdf` (`PDF size: 1354 bytes`). The
-same kind of write appears to fail when the PDF is placed in the conversation
-workspace.
+The Supabase/Vercel automation infrastructure is configured and reaches the
+application successfully:
 
-The failure happens after Python execution:
+- Supabase Vault contains `automation_app_url` and
+  `automation_dispatch_secret`.
+- `automation_app_url` is `https://wowzerbowser.vercel.app`.
+- The active `dispatch-recurring-automations` Cron job runs every five minutes
+  and calls `/api/internal/automations/dispatch`.
+- Vercel Production contains `AUTOMATION_DISPATCH_SECRET` and
+  `OPENROUTER_API_KEY`.
+- The first production dispatch at `2026-07-30 16:45:00 UTC` authenticated,
+  claimed the due automation, and created an `automation_runs` row. This proves
+  the Vercel and Vault dispatch secrets agree.
 
-1. `ModalPythonExecutor.run()` snapshots `/workspace`, runs Python, and
-   auto-discovers new or changed files.
-2. `executePythonTool()` treats every discovered PDF/DOCX as an editable
-   document and calls `registerGeneratedDocumentProvenance()`.
-3. Provenance registration creates a document project/revision and depends on
-   the document-project Supabase schema and storage flow.
-4. Any error in that secondary registration used to escape the artifact loop.
-   The outer catch then returned a failed `run_python` result, discarding the
-   successful process output and downloadable PDF.
-5. `/tmp` seemed to “fix” generation only because it is outside `/workspace`
-   and therefore bypasses artifact discovery and provenance registration. It
-   cannot be requested as an artifact because artifact paths must be safe,
-   workspace-relative paths.
+Supabase `pg_net` recorded a five-second HTTP timeout, but the Vercel request
+continued and completed the automation attempt about 24 seconds later. The
+timeout did not cause the run failure.
 
-This explains why text writes worked, why a minimal `/tmp` PDF worked, and why
-workspace PDF attempts produced a generic Python failure despite ReportLab
-being installed.
+## Reproduced failure
 
-## Generation-path fix in this change
+The first production run completed with `status = 'failed'` and:
 
-PDF/DOCX provenance enrichment is now best-effort. When registration succeeds,
-the artifact remains editable and source-backed. When it fails, the original
-workspace file is returned as a signed, owner-scoped, non-editable downloadable
-artifact. The Python exit code, stdout, and stderr remain authoritative.
+```text
+Unexpected token 'B', "Based on m"... is not valid JSON
+```
 
-The server emits a bounded `generated-document-provenance-fallback` warning
-containing identifiers, artifact MIME type, and error class only. It does not
-log exception messages, storage paths, credentials, or generated content.
+The automation remains active, has `consecutive_failures = 1`, and was
+rescheduled for `2026-07-31 16:45:00 UTC`.
 
-The model guidance now explicitly says to write downloadable outputs to a
-relative workspace path and include that exact path in `artifacts`.
+## Likely code path
 
-## Work intentionally left for the edit-path agent
+`app/server/automations/automation-runner.ts` asks the model to call
+`complete_automation_run` and captures that call through
+`onAutomationResult`. If the model does not make a valid tool call,
+`structuredAnswer` remains null and the runner falls back to
+`parseAnswer(content)`.
 
-This change does not modify PDF inspection, source rerendering, object editing,
-overlay/raster editing, revision comparison, or edit-route behavior. The edit
-agent can independently repair or extend those paths.
+`parseAnswer()` unconditionally runs `JSON.parse()` on the assistant content.
+The production model returned ordinary prose beginning with `"Based on m..."`
+instead of JSON, so the fallback threw and marked the run failed.
 
-The fallback artifact deliberately has `editable: false` and no project or
-revision IDs. It should remain downloadable through the existing authenticated
-artifact route, but edit tools should not treat it as source-backed.
-
-## Infrastructure follow-up
-
-Deploy and verify the document-project migrations (especially
-`supabase/migrations/20260727190000_document_projects.sql` and
-`supabase/migrations/20260727220000_pdf_edit_revisions.sql`) plus the required
-Supabase storage configuration. Healthy infrastructure will continue producing
-editable generated PDFs; the fallback prevents infrastructure drift from
-blocking basic file creation.
+Investigate why the configured automation model did not call
+`complete_automation_run`, and make the fallback robust to ordinary prose or
+retry structured completion explicitly. Preserve the existing behavior that a
+report is always treated as matched, while live checks depend on the structured
+`matched` value. Add coverage for a model returning prose without a tool call.
