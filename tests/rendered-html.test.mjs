@@ -848,3 +848,17 @@ test("renders web activities inside thought-process disclosures", async () => {
   assert.match(`${stream}\n${history}`, /kind: call\.name === "run_python" \? "python" : "web"/);
   assert.match(styles, /\.web-nested/);
 });
+
+test("renders explicit phase breaks as visible reasoning boundaries", async () => {
+  const [activity, styles] = await Promise.all([
+    readFile(new URL("../app/chat/assistant-activity.tsx", import.meta.url), "utf8"),
+    readStyles(),
+  ]);
+  assert.match(activity, /className="reasoning-phase"/);
+  assert.match(activity, /className="message-bubble phase-progress-update"/);
+  assert.match(activity, /Progress update/);
+  assert.match(activity, /aria-label="Progress update"/);
+  assert.match(styles, /\.reasoning-phase/);
+  assert.match(styles, /\.phase-progress-update/);
+  assert.match(styles, /\.phase-progress-update-label/);
+});

@@ -293,9 +293,14 @@ export function AssistantActivityTimeline({
             status: "complete" as const,
           };
           return (
-            <div key={`phase-${phase}`}>
+            <div className="reasoning-phase" data-phase={phase} key={`phase-${phase}`}>
               <ReasoningCard activity={reasoning} phaseActivities={group.activities} />
-              {group.phaseBreak?.update && <div className="message-bubble phase-progress-update">{group.phaseBreak.update}</div>}
+              {group.phaseBreak?.update && (
+                <div className="message-bubble phase-progress-update" role="status" aria-label="Progress update">
+                  <span className="phase-progress-update-label">Progress update</span>
+                  <span>{group.phaseBreak.update}</span>
+                </div>
+              )}
             </div>
           );
         })}
