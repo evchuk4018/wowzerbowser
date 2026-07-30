@@ -9,6 +9,7 @@ export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   userPresence: "",
   visionModel: null,
   automationModel: DEFAULT_AUTOMATION_MODEL,
+  automationThinking: false,
   focusedContextEnabled: false,
 };
 

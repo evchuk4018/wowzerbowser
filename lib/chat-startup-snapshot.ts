@@ -29,6 +29,7 @@ export type ChatStartupSnapshotV1 = {
   userPresence: string;
   visionModel: ChatModelRef | null;
   automationModel: ChatModelRef;
+  automationThinking: boolean;
   modelPreferences: Array<ChatModelPreference & { conversationId: string }>;
   originalTurnCount: number;
 };
@@ -43,6 +44,7 @@ export type ChatStartupSnapshotInput = {
   userPresence: string;
   visionModel?: ChatModelRef | null;
   automationModel?: ChatModelRef;
+  automationThinking?: boolean;
   modelPreferences: readonly (ChatModelPreference & { conversationId: string })[];
 };
 
@@ -324,6 +326,7 @@ export function parseChatStartupSnapshot(value: unknown, expectedUserId: string)
   const userPresence = isRecord(value) && typeof value.userPresence === "string" ? value.userPresence : null;
   const visionModel = isRecord(value) && (value.visionModel === null || value.visionModel === undefined || isChatModelRef(value.visionModel)) ? (value.visionModel ?? null) as ChatModelRef | null : null;
   const automationModel = isRecord(value) && isChatModelRef(value.automationModel) ? value.automationModel : DEFAULT_AUTOMATION_MODEL;
+  const automationThinking = isRecord(value) && typeof value.automationThinking === "boolean" ? value.automationThinking : false;
   const originalTurnCount = isRecord(value) && typeof value.originalTurnCount === "number"
     ? value.originalTurnCount
     : null;
@@ -365,6 +368,7 @@ export function parseChatStartupSnapshot(value: unknown, expectedUserId: string)
     userPresence,
     visionModel,
     automationModel,
+    automationThinking,
     modelPreferences: modelPreferences as Array<ChatModelPreference & { conversationId: string }>,
     originalTurnCount,
   };
@@ -393,6 +397,7 @@ export function createChatStartupSnapshot(input: ChatStartupSnapshotInput): Chat
     userPresence: input.userPresence,
     visionModel: input.visionModel ?? null,
     automationModel: input.automationModel ?? DEFAULT_AUTOMATION_MODEL,
+    automationThinking: input.automationThinking ?? false,
     modelPreferences: input.modelPreferences.flatMap(({ conversationId, ...preference }) => {
       const parsed = parseChatModelPreference(preference);
       return parsed ? [{ conversationId, ...parsed }] : [];

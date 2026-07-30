@@ -475,6 +475,7 @@ export async function loadSettings(accessToken: string): Promise<ChatSettings> {
       userPresence: parsed.userPresence,
       visionModel: parsed.visionModel ?? null,
       automationModel: parsed.automationModel ?? DEFAULT_CHAT_SETTINGS.automationModel,
+      automationThinking: parsed.automationThinking ?? false,
       focusedContextEnabled: parsed.focusedContextEnabled ?? false,
     };
   } catch {
@@ -492,6 +493,7 @@ export async function saveSettings(settings: ChatSettings, accessToken: string):
       userPresence,
       visionModel: settings?.visionModel ?? null,
       automationModel: settings?.automationModel,
+      automationThinking: settings?.automationThinking ?? false,
       focusedContextEnabled: settings?.focusedContextEnabled ?? false,
     }, accessToken);
   } catch {

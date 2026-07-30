@@ -9,7 +9,7 @@ import { getServerClient } from "../../auth/supabase-server-adapter";
 export async function getChatUserPreferences(ownerId: string): Promise<ChatUserPreferences> {
   const { data, error } = await getServerClient()
     .from("chat_user_preferences")
-    .select("user_presence,vision_model,automation_model,focused_context_enabled")
+    .select("user_presence,vision_model,automation_model,automation_thinking,focused_context_enabled")
     .eq("owner_id", ownerId)
     .maybeSingle();
   if (error) throw error;
@@ -17,6 +17,7 @@ export async function getChatUserPreferences(ownerId: string): Promise<ChatUserP
     userPresence: data.user_presence,
     visionModel: data.vision_model ?? null,
     automationModel: data.automation_model ?? DEFAULT_CHAT_USER_PREFERENCES.automationModel,
+    automationThinking: data.automation_thinking ?? DEFAULT_CHAT_USER_PREFERENCES.automationThinking,
     focusedContextEnabled: data.focused_context_enabled ?? false,
   } : DEFAULT_CHAT_USER_PREFERENCES;
 }
@@ -27,6 +28,7 @@ export async function saveChatUserPreferences(ownerId: string, preferences: Chat
     user_presence: preferences.userPresence,
     vision_model: preferences.visionModel,
     automation_model: preferences.automationModel ?? DEFAULT_CHAT_USER_PREFERENCES.automationModel,
+    automation_thinking: preferences.automationThinking ?? DEFAULT_CHAT_USER_PREFERENCES.automationThinking ?? false,
     focused_context_enabled: preferences.focusedContextEnabled ?? false,
     updated_at: new Date().toISOString(),
   });

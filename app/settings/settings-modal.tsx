@@ -442,6 +442,8 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage, getAccessT
                 onVisionModelChange={(visionModel) => setDraft((current) => ({ ...current, visionModel }))}
                 automationModel={draft.automationModel}
                 onAutomationModelChange={(automationModel) => setDraft((current) => ({ ...current, automationModel }))}
+                automationThinking={draft.automationThinking}
+                onAutomationThinkingChange={(automationThinking) => setDraft((current) => ({ ...current, automationThinking }))}
               />
             ) : (
               <PlaceholderSettings label={activeLabel} />
@@ -458,6 +460,7 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage, getAccessT
                   userPresence: draft.userPresence.trim(),
                   visionModel: draft.visionModel,
                   automationModel: draft.automationModel,
+                  automationThinking: draft.automationThinking,
                   focusedContextEnabled: draft.focusedContextEnabled,
                 })}
               >

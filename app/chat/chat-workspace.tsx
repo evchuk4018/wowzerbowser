@@ -169,6 +169,7 @@ export function ChatWorkspace({
           userPresence: bootstrap.userPreferences.userPresence,
           visionModel: bootstrap.userPreferences.visionModel ?? null,
           automationModel: bootstrap.userPreferences.automationModel ?? DEFAULT_CHAT_SETTINGS.automationModel,
+          automationThinking: bootstrap.userPreferences.automationThinking ?? false,
           focusedContextEnabled: bootstrap.userPreferences.focusedContextEnabled ?? false,
         });
         setBootstrapModelPreferences(modelPreferencesRecord(bootstrap.modelPreferences));
@@ -207,6 +208,7 @@ export function ChatWorkspace({
           activeConversation: initialConversation,
           activeConversationId: initialConversation.id,
           userPresence: bootstrap.userPreferences.userPresence,
+          automationThinking: bootstrap.userPreferences.automationThinking ?? false,
           modelPreferences: bootstrap.modelPreferences,
         });
       } catch (error) {
@@ -243,6 +245,7 @@ export function ChatWorkspace({
         userPresence: snapshot.userPresence,
         visionModel: snapshot.visionModel ?? null,
         automationModel: snapshot.automationModel ?? DEFAULT_CHAT_SETTINGS.automationModel,
+        automationThinking: snapshot.automationThinking ?? false,
       });
       setBootstrapModelPreferences(modelPreferencesRecord(snapshot.modelPreferences));
     }
@@ -587,6 +590,7 @@ export function ChatWorkspace({
       userPresence: source.settings.userPresence,
       visionModel: source.settings.visionModel,
       automationModel: source.settings.automationModel,
+      automationThinking: source.settings.automationThinking,
       modelPreferences: Object.entries(source.modelPreferences).map(([conversationId, preference]) => ({
         conversationId,
         ...preference,

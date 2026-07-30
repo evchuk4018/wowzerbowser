@@ -5,6 +5,7 @@ import { parseAutomationMutation } from "../lib/automation-protocol.ts";
 import { nextAutomationRun } from "../app/server/automations/automation-schedule.ts";
 import { messageUnlocksAutomationTools } from "../app/server/agent/automation-tool-manifest.ts";
 import { resolveAutomationAnswer } from "../app/server/automations/automation-answer.ts";
+import { parseChatUserPreferences } from "../lib/chat-user-preferences.ts";
 
 const source = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -75,6 +76,27 @@ test("automation answers prefer structured results and retain JSON compatibility
     resolveAutomationAnswer(null, '```json\n{"matched":false,"title":"Fenced title","message":"Fenced message"}\n```', "Fallback title"),
     { matched: false, title: "Fenced title", message: "Fenced message" },
   );
+});
+
+test("automation reasoning preference defaults off and preserves an explicit toggle", () => {
+  assert.equal(parseChatUserPreferences({ userPresence: "" }).automationThinking, false);
+  assert.equal(parseChatUserPreferences({ userPresence: "", automationThinking: true }).automationThinking, true);
+  assert.equal(parseChatUserPreferences({ userPresence: "", automationThinking: false }).automationThinking, false);
+  assert.equal(parseChatUserPreferences({ userPresence: "", automationThinking: "yes" }), null);
+});
+
+test("automation delivery gates persisted reasoning on the configured toggle", async () => {
+  const [runner, delivery, history] = await Promise.all([
+    source("app/server/automations/automation-runner.ts"),
+    source("app/server/automations/automation-delivery.ts"),
+    source("app/server/chat/chat-history-store.ts"),
+  ]);
+  assert.match(runner, /thinking: Boolean\(preferences\.automationThinking\)/);
+  assert.match(runner, /thinkingEnabled: preferences\.automationThinking/);
+  assert.match(runner, /preferences\.automationThinking && reasoning/);
+  assert.match(delivery, /thinkingEnabled\?: boolean/);
+  assert.match(history, /input\.thinkingEnabled !== undefined/);
+  assert.match(history, /input\.reasoning/);
 });
 
 test("ordinary automation prose becomes a safe non-matching fallback", () => {

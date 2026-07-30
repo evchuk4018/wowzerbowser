@@ -24,6 +24,7 @@ export async function runClaimedAutomation(run: ClaimedRun): Promise<void> {
     const preferences = await getChatUserPreferences(run.owner_id);
     const jobId = randomUUID();
     let content = "";
+    let reasoning = "";
     let generationError = "";
     let structuredAnswer: AutomationRunResult | null = null;
     await generateChatResponse({
@@ -39,13 +40,14 @@ export async function runClaimedAutomation(run: ClaimedRun): Promise<void> {
       userPresence: "",
       messages: [{ role: "user", content: automation.instructions }],
       model: preferences.automationModel!,
-      thinking: false,
+      thinking: Boolean(preferences.automationThinking),
       reasoningEffort: "medium",
       contextMode: "full",
       conversationId: `automation-${automation.id}`,
       jobId,
     }, run.owner_id, AbortSignal.timeout(240_000), async (event: ChatStreamEvent) => {
       if (event.type === "content") content += event.delta;
+      if (event.type === "reasoning") reasoning += event.delta;
       if (event.type === "error") generationError = event.message;
     }, async ({ round, usage, estimatedUsage, provider, model, exactCostUsd, pricing }) => {
       await recordUsage({
@@ -64,6 +66,8 @@ export async function runClaimedAutomation(run: ClaimedRun): Promise<void> {
     }
     const { conversationId } = await chatAutomationDelivery.deliver({
       ownerId: run.owner_id, runId: run.id, title: answer.title || automation.name, prompt: automation.instructions, message: answer.message,
+      thinkingEnabled: preferences.automationThinking,
+      ...(preferences.automationThinking && reasoning ? { reasoning } : {}),
     });
     if (conversationId) {
       await queueDiscordAutomationDelivery({

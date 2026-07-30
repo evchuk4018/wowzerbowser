@@ -136,6 +136,8 @@ export async function createCompletedAutomationConversation(input: {
   title: string;
   prompt: string;
   output: string;
+  reasoning?: string;
+  thinkingEnabled?: boolean;
 }): Promise<string> {
   const conversationId = input.runId;
   const turnId = `${input.runId}:turn`;
@@ -145,7 +147,7 @@ export async function createCompletedAutomationConversation(input: {
   await insertIfAbsent("chat_turns", { owner_id: input.ownerId, conversation_id: conversationId, turn_id: turnId, position: 0, active_version: 0, created_at: now, updated_at: now });
   await insertIfAbsent("chat_message_versions", { owner_id: input.ownerId, conversation_id: conversationId, turn_id: turnId, version_id: versionId, version_index: 0, created_at: now });
   await insertIfAbsent("chat_messages", messageRow(input.ownerId, conversationId, turnId, versionId, { id: `${input.runId}:user`, role: "user", content: input.prompt }));
-  await insertIfAbsent("chat_messages", messageRow(input.ownerId, conversationId, turnId, versionId, { id: `${input.runId}:assistant`, role: "assistant", content: input.output, status: "complete" }));
+  await insertIfAbsent("chat_messages", messageRow(input.ownerId, conversationId, turnId, versionId, { id: `${input.runId}:assistant`, role: "assistant", content: input.output, ...(input.reasoning ? { reasoning: input.reasoning } : {}), ...(input.thinkingEnabled !== undefined ? { thinkingEnabled: input.thinkingEnabled } : {}), status: "complete" }));
   return conversationId;
 }
 
