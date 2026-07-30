@@ -137,3 +137,21 @@ export async function deleteDocument(input: {
   if (metadataError) throw metadataError;
   if (storageError) throw storageError;
 }
+
+/** Remove registered document objects before their conversation row cascades. */
+export async function deleteChatDocumentsForConversation(ownerId: string, conversationId: string): Promise<void> {
+  const db = getServerClient();
+  const { data, error } = await db
+    .from("chat_documents")
+    .select("storage_path")
+    .eq("owner_id", ownerId)
+    .eq("conversation_id", conversationId);
+  if (error) throw error;
+  const paths = (data ?? [])
+    .map((row) => row.storage_path)
+    .filter((path): path is string => typeof path === "string" && path.length > 0);
+  for (let offset = 0; offset < paths.length; offset += 100) {
+    const { error: storageError } = await db.storage.from(CHAT_DOCUMENT_BUCKET).remove(paths.slice(offset, offset + 100));
+    if (storageError) throw storageError;
+  }
+}

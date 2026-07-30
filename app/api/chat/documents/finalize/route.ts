@@ -1,13 +1,22 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { authorizeOwnerSession } from "../../../../auth/owner-auth-service";
 import { CHAT_DOCUMENT_BUCKET, ChatDocumentError, DOCUMENT_CONTENT_TYPES, MAX_PDF_BYTES } from "../../../../../lib/chat-document";
 import { getServerClient } from "../../../../auth/supabase-server-adapter";
 import { documentStoragePath } from "../../../../server/chat/chat-document-store";
 import { ingestDocx, ingestPdf } from "../../../../server/chat/chat-document-service";
+import { cleanupEmptyChatConversation } from "../../../../server/chat/chat-conversation-service";
 import { DOCUMENT_INGESTION_STAGES, DocumentIngestionTiming } from "../../../../server/chat/document-ingestion-timing";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
+
+function scheduleCleanup(task: () => Promise<unknown>): void {
+ try {
+  after(() => task().catch(() => undefined));
+ } catch {
+  // Route unit tests do not provide a Next request context.
+ }
+}
 
 function respond(body: unknown, init: ResponseInit, timing: DocumentIngestionTiming) {
  const response = NextResponse.json(body, init); const serverTiming = timing.serverTiming(); if (serverTiming) response.headers.set("Server-Timing", serverTiming); return response;
@@ -25,6 +34,7 @@ type FinalizeDependencies = {
  getServerClient: typeof getServerClient;
  ingestPdf: typeof ingestPdf;
  ingestDocx: typeof ingestDocx;
+ cleanupEmptyChatConversation: typeof cleanupEmptyChatConversation;
 };
 
 function publicFailureMessage(stage: string, status?: number) {
@@ -38,7 +48,7 @@ function publicFailureMessage(stage: string, status?: number) {
 }
 
 export function createFinalizeHandler(overrides: Partial<FinalizeDependencies> = {}) {
- const deps: FinalizeDependencies = { authorizeOwnerSession, getServerClient, ingestPdf, ingestDocx, ...overrides };
+ const deps: FinalizeDependencies = { authorizeOwnerSession, getServerClient, ingestPdf, ingestDocx, cleanupEmptyChatConversation, ...overrides };
  return async (request: Request) => {
  const auth=request.headers.get("authorization"); const owner=auth?.startsWith("Bearer ")?await deps.authorizeOwnerSession(auth.slice(7)):null; if(!owner)return NextResponse.json({error:"Unauthorized."},{status:401});
  const body=await request.json().catch(()=>null) as Record<string,unknown>|null; if(!body||typeof body.conversationId!=="string"||typeof body.documentId!=="string"||typeof body.userMessageId!=="string"||typeof body.jobId!=="string"||typeof body.filename!=="string"||!DOCUMENT_CONTENT_TYPES.includes(body.contentType as never))return NextResponse.json({error:"Invalid document metadata."},{status:400});
@@ -56,6 +66,7 @@ export function createFinalizeHandler(overrides: Partial<FinalizeDependencies> =
   logTiming(timing);
   return respond({document}, {}, timing);
  } catch(error){
+  scheduleCleanup(() => deps.cleanupEmptyChatConversation(owner.id, body.conversationId as string));
   if (timing.failedStage) requestSpan.end(); else requestSpan.fail();
   logTiming(timing);
   const failedStage = latestFailedStage(timing) ?? DOCUMENT_INGESTION_STAGES.FINALIZE_REQUEST;

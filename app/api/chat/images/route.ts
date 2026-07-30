@@ -10,11 +10,20 @@ import {
 } from "../../../../lib/chat-image";
 import { analyzeAndStoreChatImages, type ChatImageUpload } from "../../../server/chat/chat-image-service";
 import { cleanupExpiredChatImageUploads } from "../../../server/chat/chat-image-store";
+import { cleanupEmptyChatConversation } from "../../../server/chat/chat-conversation-service";
 
 export const runtime = "nodejs";
 export const maxDuration = 180;
 
 const MULTIPART_CONTENT_TYPE = /^multipart\/form-data(?:\s*;|$)/i;
+
+function scheduleCleanup(task: () => Promise<unknown>): void {
+  try {
+    after(() => task().catch(() => undefined));
+  } catch {
+    // Route unit tests do not provide a Next request context.
+  }
+}
 
 export function validateMultipartContentType(value: string | null): string {
   if (!value || !MULTIPART_CONTENT_TYPE.test(value)) {
@@ -106,6 +115,7 @@ export function createChatImageUploadHandler(dependencies = {
   authorizeOwnerSession,
   analyzeAndStoreChatImages,
   cleanupExpiredChatImageUploads,
+  cleanupEmptyChatConversation,
 }) {
   return async function POST(request: Request) {
     const authorization = request.headers.get("authorization");
@@ -113,16 +123,19 @@ export function createChatImageUploadHandler(dependencies = {
       ? await dependencies.authorizeOwnerSession(authorization.slice(7))
       : null;
     if (!owner) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    let conversationId: string | null = null;
     try {
       const form = await parseBoundedMultipartForm(request);
-      const conversationId = form.get("conversationId");
+      const rawConversationId = form.get("conversationId");
       const userMessageId = form.get("userMessageId");
       const jobId = form.get("jobId");
       const ids = form.getAll("imageIds");
       const files = form.getAll("images");
-      if (!isValidChatImageId(conversationId) || !isValidChatImageId(userMessageId) || !isValidChatImageId(jobId)) {
+      if (!isValidChatImageId(rawConversationId) || !isValidChatImageId(userMessageId) || !isValidChatImageId(jobId)) {
         return NextResponse.json({ error: "Invalid image upload identifiers." }, { status: 400 });
       }
+      conversationId = rawConversationId;
+      const activeConversationId = rawConversationId;
       if (files.length < 1 || files.length !== ids.length || files.length > MAX_CHAT_IMAGES_PER_TURN) {
         return NextResponse.json({ error: `Attach between 1 and ${MAX_CHAT_IMAGES_PER_TURN} images.` }, { status: 400 });
       }
@@ -150,12 +163,16 @@ export function createChatImageUploadHandler(dependencies = {
           bytes,
         });
       }
-      const attachments = await dependencies.analyzeAndStoreChatImages(owner.id, conversationId, userMessageId, uploads, { jobId });
+      const attachments = await dependencies.analyzeAndStoreChatImages(owner.id, activeConversationId, userMessageId, uploads, { jobId });
       if (dependencies.cleanupExpiredChatImageUploads) {
-        after(() => dependencies.cleanupExpiredChatImageUploads?.(owner.id, conversationId)?.catch(() => undefined));
+        after(() => dependencies.cleanupExpiredChatImageUploads?.(owner.id, activeConversationId)?.catch(() => undefined));
       }
       return NextResponse.json({ attachments });
     } catch (error) {
+      if (conversationId) {
+        const failedConversationId = conversationId;
+        scheduleCleanup(() => dependencies.cleanupEmptyChatConversation?.(owner.id, failedConversationId) ?? Promise.resolve());
+      }
       if (error instanceof ChatImageError) {
         return NextResponse.json({ error: error.message }, { status: error.status });
       }

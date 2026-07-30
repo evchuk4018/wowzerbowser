@@ -57,6 +57,17 @@ export async function chatConversationExists(ownerId: string, conversationId: st
   return Boolean(data);
 }
 
+export async function chatConversationHasMessages(ownerId: string, conversationId: string): Promise<boolean> {
+  const { data, error } = await client()
+    .from("chat_messages")
+    .select("message_id")
+    .eq("owner_id", ownerId)
+    .eq("conversation_id", conversationId)
+    .limit(1);
+  if (error) throw error;
+  return Boolean(data?.length);
+}
+
 function arrayValue<T>(value: unknown): T[] {
   return Array.isArray(value) ? value as T[] : [];
 }

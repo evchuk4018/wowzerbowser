@@ -22,8 +22,8 @@ test("deletion exposes an authenticated idempotent API and coordinated cleanup",
   assert.match(service, /chatConversationExists/);
   assert.match(service, /export async function cleanupEmptyChatConversations/);
   assert.match(service, /listChatConversations\(ownerId\)/);
-  assert.match(service, /filter\(\(conversation\) => !conversation\.hasMessages\)/);
-  assert.match(service, /deleteChatConversation\(ownerId, conversation\.id\)/);
+  assert.match(service, /filter\(\(conversation\) => !conversation\.hasMessages/);
+  assert.match(service, /cleanupEmptyChatConversation\(ownerId, conversation\.id\)/);
   assert.match(service, /cancelChatJobsForConversation/);
   assert.match(service, /deleteConversationWorkspace/);
   assert.match(service, /deleteChatConversationRecord/);
@@ -38,15 +38,37 @@ test("deletion exposes an authenticated idempotent API and coordinated cleanup",
   assert.match(modal, /allowMissing: true/);
 });
 
-test("chat bootstrap cleans up empty persisted conversations before loading", async () => {
-  const [bootstrap, service] = await Promise.all([
+test("chat bootstrap loads the index without cleanup writes", async () => {
+  const [bootstrap, service, maintenance] = await Promise.all([
     source("app/server/chat/chat-bootstrap-service.ts"),
     source("app/server/chat/chat-conversation-service.ts"),
+    source("app/api/internal/chat/maintenance/route.ts"),
   ]);
 
-  assert.match(bootstrap, /import \{ cleanupEmptyChatConversations \} from "\.\/chat-conversation-service"/);
-  assert.match(bootstrap, /await cleanupEmptyChatConversations\(owner\.id\);[\s\S]*?const \[summaries/);
-  assert.match(service, /Use the coordinated deletion path/);
+  assert.doesNotMatch(bootstrap, /cleanup(?:Empty|Stale)ChatConversations/);
+  assert.match(bootstrap, /const \[summaries/);
+  assert.equal((bootstrap.match(/listChatConversations\(owner\.id\)/g) ?? []).length, 1);
+  assert.match(service, /export async function cleanupEmptyChatConversation/);
+  assert.match(service, /export async function cleanupStaleEmptyChatConversations/);
+  assert.match(service, /CHAT_EMPTY_CONVERSATION_CLEANUP_LIMIT/);
+  assert.match(service, /chatConversationHasMessages/);
+  assert.match(maintenance, /cleanupStaleEmptyChatConversations/);
+  assert.match(maintenance, /CHAT_MAINTENANCE_SECRET/);
+});
+
+test("attachment preparation failures clean up only message-free conversations at the source", async () => {
+  const [images, finalize, documents] = await Promise.all([
+    source("app/api/chat/images/route.ts"),
+    source("app/api/chat/documents/finalize/route.ts"),
+    source("app/api/chat/documents/delete/route.ts"),
+  ]);
+
+  assert.match(images, /cleanupEmptyChatConversation/);
+  assert.match(images, /scheduleCleanup\(\(\) => dependencies\.cleanupEmptyChatConversation/);
+  assert.match(finalize, /cleanupEmptyChatConversation/);
+  assert.match(finalize, /scheduleCleanup\(\(\) => deps\.cleanupEmptyChatConversation/);
+  assert.match(documents, /cleanupEmptyChatConversation/);
+  assert.match(documents, /scheduleCleanup\(\(\) => deps\.cleanupEmptyChatConversation/);
 });
 
 test("desktop and mobile history controls share the confirmation flow", async () => {

@@ -35,6 +35,29 @@ select cron.schedule(
 );
 ```
 
+Use the same Vault secret to schedule bounded cleanup of abandoned, message-free
+chat conversations. This maintenance route is separate from chat bootstrap and
+deletes at most 50 conversations older than 24 hours per run:
+
+```sql
+select cron.schedule(
+  'cleanup-stale-chat-conversations',
+  '17 * * * *',
+  $cron$
+  select net.http_post(
+    url := (select decrypted_secret from vault.decrypted_secrets where name = 'automation_app_url')
+      || '/api/internal/chat/maintenance',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer ' ||
+        (select decrypted_secret from vault.decrypted_secrets where name = 'automation_dispatch_secret')
+    ),
+    body := '{}'::jsonb
+  );
+  $cron$
+);
+```
+
 Automation runs default to `qwen/qwen3.7-flash`, require the OpenRouter key, and
 have a user-configurable model in Settings → Configurables.
 
