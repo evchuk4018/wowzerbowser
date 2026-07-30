@@ -17,6 +17,7 @@ export type ChatTranscriptProps = {
   transcriptRef: RefObject<HTMLDivElement | null>;
   onTranscriptScroll: (element: HTMLDivElement) => void;
   onSetOpenMessageActions: (turnId: string | null) => void;
+  onCloseMessageActions: () => void;
   onStartLongPress: (turnId: string, pointerType: string) => void;
   onCancelLongPress: () => void;
   onSelectVersion: (turnId: string, direction: -1 | 1) => void;
@@ -40,6 +41,7 @@ export function ChatTranscript({
   transcriptRef,
   onTranscriptScroll,
   onSetOpenMessageActions,
+  onCloseMessageActions,
   onStartLongPress,
   onCancelLongPress,
   onSelectVersion,
@@ -81,7 +83,7 @@ export function ChatTranscript({
           copiedMessageId={copiedMessageId}
           getAccessToken={getAccessToken}
           onOpenActions={onSetOpenMessageActions}
-          onCloseActions={() => onSetOpenMessageActions(null)}
+          onCloseActions={onCloseMessageActions}
           onStartLongPress={onStartLongPress}
           onCancelLongPress={onCancelLongPress}
           onSelectVersion={onSelectVersion}

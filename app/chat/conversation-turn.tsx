@@ -10,7 +10,7 @@ import { CallActivityIndicator } from "./call-activity-indicator";
 import type { ChatArtifact, ChatImageAttachment } from "../../lib/chat-protocol";
 import type { ChatDocumentAttachment } from "../../lib/chat-document";
 import { fetchChatImage } from "./chat-service";
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { loadChatImagePreview } from "./chat-image-preview-loader";
 import { ConnectorApprovalModal } from "../settings/connector-approval-modal";
 
@@ -115,7 +115,7 @@ export type ConversationTurnProps = {
 };
 
 /** Render one user prompt and its assistant response without owning state. */
-export function ConversationTurn({
+function ConversationTurnInner({
   conversationId,
   turn,
   actionsOpen,
@@ -201,6 +201,7 @@ export function ConversationTurn({
             sources={assistantMessage.sources}
             getAccessToken={getAccessToken}
             onOpenArtifact={onOpenArtifact}
+            streaming={assistantMessage.status === "streaming"}
           />
         ) : (
           <>
@@ -225,6 +226,7 @@ export function ConversationTurn({
                   sources={assistantMessage.sources}
                   artifacts={assistantMessage.artifacts}
                   onOpenArtifact={onOpenArtifact}
+                  streaming={assistantMessage.status === "streaming"}
                 />
               ) : !assistantMessage.thinkingEnabled && waitingByMessage[assistantMessage.id] ? (
                 <CallActivityIndicator />
@@ -297,3 +299,42 @@ export function ConversationTurn({
     </article>
   );
 }
+
+function sameVersionList(left: ConversationTurnType, right: ConversationTurnType): boolean {
+  if (left.versions.length !== right.versions.length) return false;
+  return left.versions.every((version, index) => version === right.versions[index]);
+}
+
+function sameThinkingTiming(left: ThinkingTiming | undefined, right: ThinkingTiming | undefined): boolean {
+  return left?.startedAt === right?.startedAt && left?.now === right?.now;
+}
+
+function areConversationTurnPropsEqual(previous: ConversationTurnProps, next: ConversationTurnProps): boolean {
+  if (
+    previous.conversationId !== next.conversationId
+    || previous.actionsOpen !== next.actionsOpen
+    || previous.isStreamingConversation !== next.isStreamingConversation
+    || previous.getAccessToken !== next.getAccessToken
+    || previous.onOpenArtifact !== next.onOpenArtifact
+    || previous.turn.id !== next.turn.id
+    || previous.turn.activeVersion !== next.turn.activeVersion
+    || !sameVersionList(previous.turn, next.turn)
+  ) return false;
+
+  const previousAssistant = previous.turn.versions[previous.turn.activeVersion]?.assistant;
+  const nextAssistant = next.turn.versions[next.turn.activeVersion]?.assistant;
+  if (!previousAssistant || !nextAssistant) return previousAssistant === nextAssistant;
+
+  return previous.waitingByMessage[previousAssistant.id] === next.waitingByMessage[nextAssistant.id]
+    && sameThinkingTiming(previous.thinkingByMessage[previousAssistant.id], next.thinkingByMessage[nextAssistant.id])
+    && (previous.copiedMessageId === previousAssistant.id) === (next.copiedMessageId === nextAssistant.id);
+}
+
+/**
+ * Stream updates replace only the active version object. Keeping completed
+ * turns memoized prevents those stable Markdown trees from being revisited.
+ * Action callbacks are intentionally omitted: their stateful inputs are
+ * represented by the compared props above, while the workspace handlers use
+ * stable refs/setters for the remaining actions.
+ */
+export const ConversationTurn = memo(ConversationTurnInner, areConversationTurnPropsEqual);

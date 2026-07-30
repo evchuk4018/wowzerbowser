@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import type {
   ChatArtifact,
 } from "../../lib/chat-protocol";
@@ -236,15 +236,7 @@ function ArtifactDownload({
   );
 }
 
-export function AssistantActivityTimeline({
-  activities,
-  content,
-  artifacts,
-  annotations,
-  sources,
-  getAccessToken,
-  onOpenArtifact,
-}: {
+type AssistantActivityTimelineProps = {
   activities: AssistantActivity[];
   content: string;
   artifacts: ChatArtifact[];
@@ -252,7 +244,19 @@ export function AssistantActivityTimeline({
   sources?: ChatSource[];
   getAccessToken: () => Promise<string | null>;
   onOpenArtifact: (artifact: ChatArtifact) => void;
-}) {
+  streaming?: boolean;
+};
+
+function AssistantActivityTimelineInner({
+  activities,
+  content,
+  artifacts,
+  annotations,
+  sources,
+  getAccessToken,
+  onOpenArtifact,
+  streaming = false,
+}: AssistantActivityTimelineProps) {
   const phases = activities.reduce<Map<number, { activities: AssistantActivity[]; phaseBreak?: PhaseBreakActivity }>>((grouped, activity) => {
     const phase = grouped.get(activity.phase) ?? { activities: [] };
     phase.activities.push(activity);
@@ -313,6 +317,7 @@ export function AssistantActivityTimeline({
             sources={sources}
             artifacts={artifacts}
             onOpenArtifact={onOpenArtifact}
+            streaming={streaming}
           />
         </div>
       )}
@@ -331,3 +336,5 @@ export function AssistantActivityTimeline({
     </>
   );
 }
+
+export const AssistantActivityTimeline = memo(AssistantActivityTimelineInner);

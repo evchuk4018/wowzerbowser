@@ -550,6 +550,7 @@ export function ChatWorkspace({
     }
   }, []);
 
+  const closeMessageActions = useCallback(() => setOpenMessageActions(null), []);
   const activeTurns = active ? getActiveConversationTurns(active) : [];
   const activeBranchKey = activeTurns
     .map((turn) => turn.versions[turn.activeVersion]?.id ?? turn.id)
@@ -919,6 +920,7 @@ export function ChatWorkspace({
             transcriptRef={transcriptRef}
             onTranscriptScroll={handleTranscriptScroll}
             onSetOpenMessageActions={setOpenMessageActions}
+            onCloseMessageActions={closeMessageActions}
             onStartLongPress={startLongPress}
             onCancelLongPress={cancelLongPress}
             onSelectVersion={selectVersion}

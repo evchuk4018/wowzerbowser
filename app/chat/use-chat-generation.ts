@@ -32,6 +32,10 @@ import {
   reduceChatStreamEvents,
 } from "./chat-stream-reducer";
 import {
+  isStructuralStreamEvent,
+  STREAM_RENDER_INTERVAL_MS,
+} from "./stream-render-scheduler";
+import {
   type ChatImageUploadContext,
   type PendingChatImage,
   type UploadedChatImage,
@@ -409,9 +413,9 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
 
     let streamState = createChatStreamState(assistantMessage);
     const pendingEvents: SequencedChatStreamEvent[] = [];
-    let streamFrame: number | null = null;
+    let streamTimer: number | null = null;
     const flushPendingEvents = () => {
-      streamFrame = null;
+      streamTimer = null;
       const events = pendingEvents.splice(0);
       if (!events.length) return;
       streamState = reduceChatStreamEvents(streamState, events, { thinkingStartedAt });
@@ -439,7 +443,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
       }
     };
     const flushPendingEventsNow = () => {
-      if (streamFrame !== null) cancelAnimationFrame(streamFrame);
+      if (streamTimer !== null) window.clearTimeout(streamTimer);
       flushPendingEvents();
     };
     try {
@@ -485,7 +489,11 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
           ?? 0;
         if (event.sequence <= lastPendingSequence) continue;
         pendingEvents.push(event);
-        if (streamFrame === null) streamFrame = requestAnimationFrame(flushPendingEvents);
+        if (isStructuralStreamEvent(event)) {
+          flushPendingEventsNow();
+        } else if (streamTimer === null) {
+          streamTimer = window.setTimeout(flushPendingEvents, STREAM_RENDER_INTERVAL_MS);
+        }
       }
       flushPendingEventsNow();
       if (shouldGenerateTitle && !controller.signal.aborted) {
@@ -495,8 +503,8 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
       }
     } catch (error: unknown) {
       if (controller.signal.aborted) {
-        if (streamFrame !== null) cancelAnimationFrame(streamFrame);
-        streamFrame = null;
+        if (streamTimer !== null) window.clearTimeout(streamTimer);
+        streamTimer = null;
         pendingEvents.length = 0;
       } else {
         flushPendingEventsNow();

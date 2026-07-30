@@ -7,11 +7,14 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import type { ChatCitation, ChatSource } from "../../lib/chat-citations";
 import type { ChatArtifact } from "../../lib/chat-protocol";
+import { splitMarkdownTail } from "./assistant-markdown";
 import { normalizeLatexDelimiters } from "./normalize-latex-delimiters";
 import { resolvePdfArtifact } from "./pdf-preview-layout";
 
 const TOKEN = "\uE000citation:";
 const TOKEN_END = "\uE001";
+const REMARK_PLUGINS = [remarkGfm, remarkMath];
+const REHYPE_PLUGINS = [rehypeKatex];
 
 function addCitationTokens(content: string, annotations: readonly ChatCitation[], sources: readonly ChatSource[]): string {
   const known = new Set(sources.map((source) => source.id));
@@ -94,6 +97,14 @@ function renderCitationChildren(children: React.ReactNode, annotations: ChatCita
   });
 }
 
+const MarkdownBlock = React.memo(function MarkdownBlock({ content, components }: { content: string; components: Components }) {
+  return (
+    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={components}>
+      {content}
+    </ReactMarkdown>
+  );
+});
+
 function plainText(children: React.ReactNode): string {
   return React.Children.toArray(children)
     .map((child) => {
@@ -104,21 +115,26 @@ function plainText(children: React.ReactNode): string {
     .join("");
 }
 
-export function AssistantResponse({
-  content,
-  annotations = [],
-  sources = [],
-  artifacts = [],
-  onOpenArtifact,
-}: {
+type AssistantResponseProps = {
   content: string;
   annotations?: ChatCitation[];
   sources?: ChatSource[];
   artifacts?: ChatArtifact[];
   onOpenArtifact?: (artifact: ChatArtifact) => void;
-}) {
+  streaming?: boolean;
+};
+
+function AssistantResponseInner({
+  content,
+  annotations = [],
+  sources = [],
+  artifacts = [],
+  onOpenArtifact,
+  streaming = false,
+}: AssistantResponseProps) {
   const [selectedCitation, setSelectedCitation] = useState<ChatCitation | null>(null);
   const markedContent = useMemo(() => addCitationTokens(normalizeLatexDelimiters(content), annotations, sources), [annotations, content, sources]);
+  const { completed, tail } = useMemo(() => splitMarkdownTail(markedContent, streaming), [markedContent, streaming]);
   const components = useMemo(() => {
     const wrap = (tag: keyof React.JSX.IntrinsicElements) => function CitationAwareElement({ children, ...props }: { children?: React.ReactNode; [key: string]: unknown }) {
       return React.createElement(tag, props, renderCitationChildren(children, annotations, sources, setSelectedCitation));
@@ -157,9 +173,12 @@ export function AssistantResponse({
   return (
     <>
       <div className="assistant-markdown">
-        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={components}>{markedContent}</ReactMarkdown>
+        {completed && <MarkdownBlock key="completed" content={completed} components={components} />}
+        {tail && <MarkdownBlock key="tail" content={tail} components={components} />}
       </div>
       <CitationInspector citation={selectedCitation} sources={sources} onClose={() => setSelectedCitation(null)} />
     </>
   );
 }
+
+export const AssistantResponse = React.memo(AssistantResponseInner);
