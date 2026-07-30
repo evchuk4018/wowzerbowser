@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { normalizeTodoList, MAX_TODOS } from "../lib/todo-protocol.ts";
 import { TODO_TOOL_DEFINITIONS, GET_TODOS_TOOL_NAME, COMPLETE_TODO_TOOL_NAME } from "../app/server/agent/todo-tool.ts";
-import { shouldPlanTodos } from "../app/server/chat/chat-todo-planner.ts";
+import { planTodos, shouldPlanTodos } from "../app/server/chat/chat-todo-planner.ts";
 import { applyChatStreamEvent } from "../lib/chat-history.ts";
 
 test("todo protocol bounds, normalizes, and orders five items", () => {
@@ -43,4 +43,10 @@ test("todo updates are durable through the chat event projection", () => {
   const message = { id: "assistant", role: "assistant", content: "", status: "streaming" };
   const todos = { revision: 1, items: [{ id: "one", text: "Do one", status: "pending", position: 0 }] };
   assert.deepEqual(applyChatStreamEvent(message, { type: "todo_update", todos }, 1).todos, todos);
+});
+
+test("an existing todo is not treated as a plan created for the current response", async () => {
+  const current = { revision: 1, items: [{ id: "research", text: "Research", status: "pending", position: 0 }] };
+  const outcome = await planTodos({ ownerId: "owner", conversationId: "conversation", userMessage: "Thanks", current });
+  assert.deepEqual(outcome, { list: current, plannedThisTurn: false });
 });

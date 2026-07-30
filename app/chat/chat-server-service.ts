@@ -47,6 +47,10 @@ import { builtinSkillFallbacks } from "../server/skills/builtin-skills";
 import { AUTOMATION_SKILL_KEY, AUTOMATION_TOOL_DEFINITIONS } from "../server/agent/automation-tool-manifest";
 import { executeAutomationTool } from "../server/agent/automation-tool";
 import { COMPLETE_AUTOMATION_RUN_TOOL_DEFINITION, COMPLETE_AUTOMATION_RUN_TOOL_NAME, executeCompleteAutomationRun, type AutomationRunResult } from "../server/agent/automation-run-result-tool";
+import { availableDeepResearchTools } from "../server/agent/deep-research-tool-manifest";
+import { executeDeepResearchTool } from "../server/agent/deep-research-tool";
+import { deepResearchInstructionsFor } from "../server/agent/deep-research-tool-instructions";
+import type { ResearchRun } from "../server/research/research-types";
 
 const MAX_RESPONSE_MS = 240_000;
 
@@ -91,7 +95,7 @@ export async function generateChatResponse(
   const conversationId = stableConversationId(chatRequest);
   const currentTodos = automationExecution ? { revision: 0, items: [] } : await getTodoList(ownerId, conversationId).catch(() => ({ revision: 0, items: [] }));
   const latestPreviousAssistant = [...chatRequest.messages].reverse().find((message) => message.role === "assistant")?.content;
-  const planner = automationExecution ? null : await planTodos({
+  const planner = automationExecution ? { list: null, plannedThisTurn: false } : await planTodos({
     ownerId,
     conversationId,
     userMessage: chatRequest.messages.at(-1)?.content ?? "",
@@ -117,6 +121,7 @@ export async function generateChatResponse(
   });
   const pythonTools = availableChatTools();
   const webTools = availableWebTools();
+  const deepResearchTools = availableDeepResearchTools(!automationExecution && planner.plannedThisTurn && Boolean(planner.list?.items.length));
   const customTools = isModalConfigured()
     ? await listEnabledExecutableTools(ownerId).catch((error) => {
         console.warn({ event: "custom-tools-unavailable", ownerId, failure: error instanceof Error ? error.name : "UnknownError" });
@@ -151,13 +156,13 @@ export async function generateChatResponse(
   const pdfEditTools = availablePdfEditTools([...authoritativePdfs.values()].some((document) => document.contentType === "application/pdf"));
   const allowedProjectIds = new Set([...authoritativePdfs.values()].map((document) => document.projectId).filter((projectId): projectId is string => Boolean(projectId)));
   const phaseTools = chatRequest.thinking && !automationExecution ? [PHASE_BREAK_TOOL_DEFINITION] : [];
-  const baseToolDefinitions = [...pythonTools, ...imageTools, ...webTools, ...pdfEditTools, ...phaseTools, ...customDefinitions, ...chatMemoryTools, ...userMemoryTools, ...(automationExecution ? [] : SKILL_TOOL_DEFINITIONS), ...(automationExecution ? [] : TODO_TOOL_DEFINITIONS), ...(automationExecution ? [COMPLETE_AUTOMATION_RUN_TOOL_DEFINITION] : [])];
+  const baseToolDefinitions = [...pythonTools, ...imageTools, ...webTools, ...deepResearchTools, ...pdfEditTools, ...phaseTools, ...customDefinitions, ...chatMemoryTools, ...userMemoryTools, ...(automationExecution ? [] : SKILL_TOOL_DEFINITIONS), ...(automationExecution ? [] : TODO_TOOL_DEFINITIONS), ...(automationExecution ? [COMPLETE_AUTOMATION_RUN_TOOL_DEFINITION] : [])];
   const imageToolAdvertised = imageTools.some((tool) => tool.function.name === INSPECT_IMAGE_TOOL_NAME);
 
   const enqueue = async (event: ChatStreamEvent) => {
     if (!signal.aborted) await persistEvent(event);
   };
-      if (planner) await enqueue({ type: "todo_update", todos: planner });
+      if (planner.list) await enqueue({ type: "todo_update", todos: planner.list });
       await enqueue({
         type: "meta",
         model: chatRequest.model,
@@ -180,6 +185,7 @@ export async function generateChatResponse(
       const recalledContexts = new Map<string, string>();
       let currentPhase = 1;
       let automationToolsUnlocked = false;
+      let activeResearchRun: ResearchRun | null = null;
       const sourceCatalog = new Map<string, ChatSource>();
 
       try {
@@ -190,6 +196,7 @@ export async function generateChatResponse(
           const systemInstructions = [
             ...runPythonInstructionsFor(Boolean(pythonTools.length)),
             ...webToolInstructionsFor(Boolean(webTools.length)),
+            ...deepResearchInstructionsFor(Boolean(deepResearchTools.length)),
             ...(pdfEditTools.length ? PDF_EDIT_TOOL_INSTRUCTIONS : []),
             ...(phaseTools.length ? [PHASE_BREAK_INSTRUCTIONS] : []),
             ...customToolInstructions(customTools),
@@ -313,6 +320,16 @@ export async function generateChatResponse(
               });
             } else if (webTools.some((tool) => tool.function.name === call.name)) {
               result = await executeWebTool(call);
+            } else if (deepResearchTools.some((tool) => tool.function.name === call.name)) {
+              const executed = await executeDeepResearchTool(call, {
+                ownerId,
+                conversationId,
+                jobId: responseId ?? `research-${conversationId}`,
+                signal: roundSignal,
+                activeRun: activeResearchRun,
+              });
+              activeResearchRun = executed.activeRun;
+              result = executed.result;
             } else if (customToolsByName.has(call.name)) {
               result = await executeCustomToolCall(call, customToolsByName.get(call.name)!);
             } else if (chatMemoryTools.some((tool) => tool.function.name === call.name)) {
@@ -383,6 +400,13 @@ export async function generateChatResponse(
             const web = result.web;
             const sources = web?.kind === "search" ? web.results : web?.kind === "page" ? [web.source] : [];
             for (const source of sources) sourceCatalog.set(source.id, source);
+            const research = result.research;
+            const researchSources = research?.kind === "ledger"
+              ? research.sources
+              : research?.kind === "page"
+                ? [research.page.source]
+                : [];
+            for (const source of researchSources) sourceCatalog.set(source.id, source);
             await enqueue({ type: "tool_result", result });
             for (const artifact of result.artifacts ?? []) await enqueue({ type: "artifact", artifact });
           }

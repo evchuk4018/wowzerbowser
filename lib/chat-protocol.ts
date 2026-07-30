@@ -122,6 +122,50 @@ export type ChatImageToolResult = {
   model: string | null;
 };
 
+export type ResearchConfidence = "high" | "medium" | "low";
+
+export type ResearchClaim = {
+  id: string;
+  claim: string;
+  supportingSourceIds: string[];
+  conflictingSourceIds: string[];
+  dates: string[];
+  confidence: ResearchConfidence;
+  status: "supported" | "weak" | "conflicting" | "outdated";
+};
+
+export type ResearchPage = {
+  id: string;
+  source: ChatSource;
+  fetched: boolean;
+  extractor?: string;
+};
+
+export type ResearchBudget = {
+  searches: number;
+  fetchedPages: number;
+  followUpSearches: number;
+  evidenceTokens: number;
+  modelCalls: number;
+  estimatedCostUsd: number;
+};
+
+export type ChatResearchToolResult =
+  | {
+      kind: "ledger";
+      runId: string;
+      request: string;
+      claims: ResearchClaim[];
+      sources: ChatSource[];
+      pages: ResearchPage[];
+      budget: ResearchBudget;
+      stopReason: "complete" | "early_stopping" | "search_limit" | "page_limit" | "token_limit" | "model_limit" | "cost_limit";
+      warnings: string[];
+    }
+  | { kind: "matches"; runId: string; pageId: string; query: string; matches: Array<{ excerpt: string; start: number }> }
+  | { kind: "links"; runId: string; pageId: string; links: Array<{ id: string; text: string }> }
+  | { kind: "page"; runId: string; page: ResearchPage; markdown: string };
+
 export type ChatDocumentEditPage = {
   pageNumber: number;
   nativeTextCharacters: number;
@@ -194,6 +238,7 @@ export type ChatToolResult = {
     | { kind: "location"; available: false; message: string };
   image?: ChatImageToolResult;
   documentEdit?: ChatDocumentEditResult;
+  research?: ChatResearchToolResult;
 };
 
 export type ChatRequest = {
@@ -616,6 +661,15 @@ function readLocationSource(value: unknown, field: string): "deployment_metadata
   return value;
 }
 
+function readResearchToolResult(value: unknown, field: string): ChatResearchToolResult {
+  if (!isRecord(value) || !["ledger", "matches", "links", "page"].includes(String(value.kind))) {
+    throw new ChatRequestValidationError(`${field} is invalid.`);
+  }
+  const serialized = JSON.stringify(value);
+  if (serialized.length > 512 * 1024) throw new ChatRequestValidationError(`${field} is too long.`);
+  return JSON.parse(serialized) as ChatResearchToolResult;
+}
+
 function readToolCalls(value: unknown, field: string): ChatToolCall[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value)) throw new ChatRequestValidationError(`${field} must be an array.`);
@@ -692,6 +746,9 @@ function readToolCalls(value: unknown, field: string): ChatToolCall[] | undefine
         ...(call.result.documentEdit === undefined
           ? {}
           : { documentEdit: readDocumentEditResult(call.result.documentEdit, `${field}[${index}].result.documentEdit`) }),
+        ...(call.result.research === undefined
+          ? {}
+          : { research: readResearchToolResult(call.result.research, `${field}[${index}].result.research`) }),
       };
     }
     return {

@@ -107,6 +107,21 @@ specific URL; results are bounded and retained in the tool replay transcript.
 When a provider rejects, limits, or temporarily fails a request, key failover
 is handled internally and is never exposed to the assistant or browser.
 
+### Deep Research
+
+When the background todo planner creates a non-empty plan for the current
+response, the server also advertises `deep_research_search`, `find_in_page`,
+`list_page_links`, and `follow_page_link`. Prior conversation todos do not
+unlock these tools. Brave remains the primary search provider; direct
+Readability and Jina are attempted before Exa, and a Browserless-compatible
+`/content` endpoint is the optional final page-rendering fallback.
+
+Deep Research uses the limits shown in `.env.example`, stores public extracted
+pages in the server-only `research_page_cache` table, and records its cheap
+background model calls as `deep_research` usage. OpenAlex, Crossref, MediaWiki,
+Semantic Scholar, GitHub, Jina, and optional GDELT adapters supplement Brave
+for matching query intents. SearXNG is not included in this release.
+
 `check_time` and `check_date` are always available and use the server's
 `Intl.DateTimeFormat` implementation, optionally with an IANA time zone.
 To enable `check_location`, set `DEPLOYMENT_LOCATION` to a deliberately chosen,

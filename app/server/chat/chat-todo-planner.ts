@@ -72,9 +72,9 @@ export async function planTodos(input: {
   current: TodoList;
   signal?: AbortSignal;
   onUsage?: (answer: Awaited<ReturnType<typeof completeOpenRouterQwenText>>) => Promise<void>;
-}): Promise<TodoList | null> {
+}): Promise<{ list: TodoList | null; plannedThisTurn: boolean }> {
   if (!shouldPlanTodos(input.userMessage, input.current)) {
-    return hasActiveTodo(input.current) ? input.current : null;
+    return { list: hasActiveTodo(input.current) ? input.current : null, plannedThisTurn: false };
   }
 
   const prompt = [
@@ -86,10 +86,11 @@ export async function planTodos(input: {
     try {
       const answer = await completeOpenRouterQwenText(prompt, { systemPrompt: SYSTEM, signal: input.signal, timeoutMs: TIMEOUT_MS, maxTokens: 500 });
       await input.onUsage?.(answer);
-      return await replaceTodoList(input.ownerId, input.conversationId, parseItems(answer.content));
+      const list = await replaceTodoList(input.ownerId, input.conversationId, parseItems(answer.content));
+      return { list, plannedThisTurn: list.items.length > 0 };
     } catch {
-      if (attempt === 1 || input.signal?.aborted) return null;
+      if (attempt === 1 || input.signal?.aborted) return { list: null, plannedThisTurn: false };
     }
   }
-  return null;
+  return { list: null, plannedThisTurn: false };
 }
