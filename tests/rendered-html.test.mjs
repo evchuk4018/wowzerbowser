@@ -438,6 +438,7 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(styles, /\.composer textarea[\s\S]*?max-height: 192px;/);
   assert.match(styles, /\.composer-wrap--expanded[\s\S]*?position: fixed;/);
   assert.match(styles, /\.composer-wrap--expanded[\s\S]*?transform: none;/);
+  assert.match(styles, /\.composer--expanded[\s\S]*?height: min\(560px, 60dvh\);[\s\S]*?max-height: calc\(100dvh - 48px\);/);
   assert.match(styles, /\.composer--expanded[\s\S]*?height: 100%;[\s\S]*?min-height: 0;/);
   assert.match(styles, /\.composer--expanded textarea[\s\S]*?overflow-y: auto;/);
   assert.match(styles, /\.composer--expanded \.composer-actions[\s\S]*?margin-top: auto;/);

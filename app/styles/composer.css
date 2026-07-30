@@ -48,9 +48,9 @@
   display: flex;
   flex-direction: column;
   width: min(100%, 980px);
-  height: 100%;
+  height: min(560px, 60dvh);
   min-height: 0;
-  max-height: 100%;
+  max-height: calc(100dvh - 48px);
 }
 
 .composer-expand-button {
