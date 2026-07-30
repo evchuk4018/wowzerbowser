@@ -116,6 +116,47 @@ The OAuth request uses offline access and the narrow
 `https://www.googleapis.com/auth/calendar.events` scope. Refresh tokens are
 encrypted at rest and are never sent to the browser or model.
 
+## Discord direct messages
+
+The optional Discord integration turns a private bot DM into the same durable
+chat used by the web app. The first ordinary DM creates a conversation, later
+DMs continue it, and `/new` (or `/new <prompt>`) starts another.
+Answers link back to the persisted `/chat/{conversationId}` page. Images, PDF,
+and DOCX attachments use the existing private attachment ingestion paths.
+
+The Next.js app remains on Vercel. Ordinary DMs require Discord's persistent
+Gateway connection, so `scripts/discord-worker.mjs` runs separately as an
+always-on Railway service.
+
+1. Apply `supabase/migrations/20260730150000_discord_dm_integration.sql`.
+2. In the Discord Developer Portal, create an application and bot. Enable the
+   Message Content intent and install the bot for the owner account. The worker
+   subscribes only to direct-message and message-content events and ignores
+   guild messages.
+3. Copy the owner's Discord user ID and generate a random internal secret of at
+   least 32 characters.
+4. Configure Vercel:
+
+   ```dotenv
+   DISCORD_ALLOWED_USER_ID=the-owner-discord-user-id
+   DISCORD_INTERNAL_SECRET=the-shared-random-secret
+   ```
+
+5. Create a Railway service from this repository. `railway.json` starts
+   `npm run discord:worker`. Configure:
+
+   ```dotenv
+   NEXT_PUBLIC_SITE_URL=https://wowzerbowser.vercel.app
+   DISCORD_BOT_TOKEN=the-private-bot-token
+   DISCORD_ALLOWED_USER_ID=the-same-owner-discord-user-id
+   DISCORD_INTERNAL_SECRET=the-same-shared-random-secret
+   ```
+
+The bot token belongs only on Railway. Never prefix any Discord secret with
+`NEXT_PUBLIC_`. Internal app routes require the shared bearer secret, Discord
+message IDs provide idempotency, and undelivered jobs are recovered when the
+worker reconnects.
+
 ## Python tool
 
 The assistant can run Python in isolated Modal Sandboxes when

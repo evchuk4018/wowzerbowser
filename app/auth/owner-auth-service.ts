@@ -1,6 +1,6 @@
 import "server-only";
 
-import { sendSupabaseMagicLink, verifySupabaseAccessToken } from "./supabase-server-adapter";
+import { findSupabaseUserByEmail, sendSupabaseMagicLink, verifySupabaseAccessToken } from "./supabase-server-adapter";
 import type { AuthUser } from "./types";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -25,4 +25,17 @@ export async function sendOwnerMagicLink(emailInput: string): Promise<void> {
 export async function authorizeOwnerSession(accessToken: string): Promise<AuthUser | null> {
   const user = await verifySupabaseAccessToken(accessToken);
   return user?.email.toLowerCase() === ownerEmail() ? user : null;
+}
+
+let configuredOwnerPromise: Promise<AuthUser> | null = null;
+
+export function configuredOwner(): Promise<AuthUser> {
+  configuredOwnerPromise ??= findSupabaseUserByEmail(ownerEmail()).then((user) => {
+    if (!user) throw new Error("APP_OWNER_EMAIL does not match a Supabase Auth user.");
+    return user;
+  }).catch((error) => {
+    configuredOwnerPromise = null;
+    throw error;
+  });
+  return configuredOwnerPromise;
 }

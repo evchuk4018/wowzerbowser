@@ -37,3 +37,15 @@ export async function verifySupabaseAccessToken(accessToken: string): Promise<Au
   if (error || !data.user.email) return null;
   return { id: data.user.id, email: data.user.email };
 }
+
+export async function findSupabaseUserByEmail(email: string): Promise<AuthUser | null> {
+  const normalized = email.trim().toLowerCase();
+  for (let page = 1; page <= 100; page += 1) {
+    const { data, error } = await getServerClient().auth.admin.listUsers({ page, perPage: 100 });
+    if (error) throw error;
+    const match = data.users.find((user) => user.email?.toLowerCase() === normalized);
+    if (match?.email) return { id: match.id, email: match.email };
+    if (data.users.length < 100) return null;
+  }
+  throw new Error("The configured owner could not be resolved.");
+}
