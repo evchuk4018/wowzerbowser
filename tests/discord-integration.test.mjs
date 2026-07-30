@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   DISCORD_MESSAGE_CONTENT_LIMIT,
+  parseDiscordAutomationDeliveryResult,
   parseDiscordInboundMessage,
   splitDiscordMessage,
 } from "../lib/discord-protocol.ts";
@@ -54,6 +55,23 @@ test("Discord responses are split within limits and link the final chunk", () =>
   assert.equal(chunks.slice(0, -1).some((chunk) => chunk.includes("Open in app:")), false);
 });
 
+test("Discord automation delivery acknowledgements require valid message coordinates", () => {
+  assert.deepEqual(parseDiscordAutomationDeliveryResult({
+    status: "delivered",
+    channelId: "1234567890",
+    messageId: "2234567890",
+  }), {
+    status: "delivered",
+    channelId: "1234567890",
+    messageId: "2234567890",
+  });
+  assert.throws(() => parseDiscordAutomationDeliveryResult({
+    status: "delivered",
+    channelId: "not-a-channel",
+    messageId: "2234567890",
+  }), /Channel ID/);
+});
+
 test("Discord internal routes enforce server authentication and stay thin", async () => {
   const route = await readFile(new URL("../app/api/internal/discord/messages/route.ts", import.meta.url), "utf8");
   const statusRoute = await readFile(new URL("../app/api/internal/discord/messages/[messageId]/route.ts", import.meta.url), "utf8");
@@ -71,4 +89,18 @@ test("Discord migration keeps mapping and idempotency state server-only", async 
   assert.match(migration, /active_conversation_id/);
   assert.match(migration, /enable row level security/g);
   assert.doesNotMatch(migration, /create policy/i);
+});
+
+test("Discord worker proactively polls, opens a DM, and activates delivered conversations", async () => {
+  const [worker, service, route] = await Promise.all([
+    readFile(new URL("../scripts/discord-worker.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../app/server/discord/discord-automation-service.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/internal/discord/automation-notifications/route.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(worker, /client\.users\.fetch\(allowedUserId\)/);
+  assert.match(worker, /user\.createDM\(\)/);
+  assert.match(worker, /AUTOMATION_POLL_INTERVAL_MS/);
+  assert.match(service, /setActiveDiscordConversation/);
+  assert.match(route, /authorizeDiscordInternalRequest/);
+  assert.doesNotMatch(route, /getServerClient|client\.users|createDM/);
 });

@@ -7,6 +7,7 @@ import { recordUsage } from "../usage/usage-store";
 import { getAutomationRow, finishAutomationRun } from "./automation-repository";
 import { nextAutomationRun } from "./automation-schedule";
 import type { AutomationRunResult } from "../agent/automation-run-result-tool";
+import { queueDiscordAutomationDelivery } from "../discord/discord-automation-delivery-adapter";
 import { chatAutomationDelivery } from "./automation-delivery";
 
 type ClaimedRun = { id: string; owner_id: string; automation_id: string; scheduled_for: string };
@@ -73,6 +74,22 @@ export async function runClaimedAutomation(run: ClaimedRun): Promise<void> {
     const { conversationId } = await chatAutomationDelivery.deliver({
       ownerId: run.owner_id, runId: run.id, title: answer.title || automation.name, prompt: automation.instructions, message: answer.message,
     });
+    if (conversationId) {
+      await queueDiscordAutomationDelivery({
+        ownerId: run.owner_id,
+        runId: run.id,
+        conversationId,
+        title: answer.title || automation.name,
+        prompt: automation.instructions,
+        message: answer.message,
+      }).catch((error) => {
+        console.error({
+          event: "discord-automation-enqueue-failed",
+          automationRunId: run.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
     await finishAutomationRun(run.id, { outcome: "notified", matched: true, title: answer.title, output: answer.message, conversationId, nextRunAt, pause: automation.kind === "live_check" });
   } catch (error) {
     await finishAutomationRun(run.id, {

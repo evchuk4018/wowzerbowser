@@ -9,6 +9,8 @@ const allowedUserId = required("DISCORD_ALLOWED_USER_ID");
 const internalSecret = required("DISCORD_INTERNAL_SECRET");
 const appUrl = new URL(required("NEXT_PUBLIC_SITE_URL")).origin;
 const activeDeliveries = new Set();
+const activeAutomationDeliveries = new Set();
+const AUTOMATION_POLL_INTERVAL_MS = 5_000;
 
 function required(name) {
   const value = process.env[name]?.trim();
@@ -88,6 +90,71 @@ async function deliver(submission, fallbackMessage) {
   }
 }
 
+async function acknowledgeAutomationDelivery(notificationId, result) {
+  await appRequest(`/api/internal/discord/automation-notifications/${notificationId}`, {
+    method: "PATCH",
+    body: JSON.stringify(result),
+  });
+}
+
+async function deliverAutomationNotification(notification) {
+  if (activeAutomationDeliveries.has(notification.id)) return;
+  activeAutomationDeliveries.add(notification.id);
+  try {
+    const user = await client.users.fetch(allowedUserId);
+    const channel = await user.createDM();
+    const title = notification.title.replaceAll("*", "\\*");
+    const chunks = splitResponse(`**${title}**\n\n${notification.message}`, conversationLink(notification.conversationId));
+    let firstMessage;
+    for (const chunk of chunks) {
+      const sent = await channel.send({ content: chunk, allowedMentions: { parse: [] } });
+      firstMessage ??= sent;
+    }
+    await acknowledgeAutomationDelivery(notification.id, {
+      status: "delivered",
+      channelId: channel.id,
+      messageId: firstMessage.id,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await acknowledgeAutomationDelivery(notification.id, {
+      status: "failed",
+      error: message,
+    }).catch((acknowledgementError) => {
+      console.error({
+        event: "discord-automation-failure-acknowledgement-failed",
+        notificationId: notification.id,
+        error: acknowledgementError instanceof Error ? acknowledgementError.message : String(acknowledgementError),
+      });
+    });
+    throw error;
+  } finally {
+    activeAutomationDeliveries.delete(notification.id);
+  }
+}
+
+async function pollAutomationNotifications() {
+  try {
+    const { notifications } = await appRequest("/api/internal/discord/automation-notifications");
+    await Promise.allSettled((notifications ?? []).map(async (notification) => {
+      try {
+        await deliverAutomationNotification(notification);
+      } catch (error) {
+        console.error({
+          event: "discord-automation-delivery-failed",
+          notificationId: notification.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }));
+  } catch (error) {
+    console.error({
+      event: "discord-automation-poll-failed",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 const client = new Client({
   intents: [GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent],
   partials: [Partials.Channel],
@@ -140,6 +207,10 @@ client.once("ready", async () => {
   } catch (error) {
     console.error({ event: "discord-recovery-list-failed", error: error instanceof Error ? error.message : String(error) });
   }
+  await pollAutomationNotifications();
+  setInterval(() => {
+    void pollAutomationNotifications();
+  }, AUTOMATION_POLL_INTERVAL_MS).unref();
 });
 
 client.on("error", (error) => console.error({ event: "discord-client-error", error: error.message }));

@@ -30,6 +30,20 @@ export type DiscordSubmission = {
   output: string | null;
 };
 
+export type DiscordAutomationNotification = {
+  id: string;
+  automationRunId: string;
+  conversationId: string;
+  title: string;
+  message: string;
+  status: "delivering";
+  attemptCount: number;
+};
+
+export type DiscordAutomationDeliveryResult =
+  | { status: "delivered"; channelId: string; messageId: string }
+  | { status: "failed"; error: string };
+
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -91,6 +105,22 @@ export function parseDiscordInboundMessage(value: unknown): DiscordInboundMessag
     responseMessageId: requiredSnowflake(candidate.responseMessageId, "Response message ID"),
     content,
     attachments,
+  };
+}
+
+export function parseDiscordAutomationDeliveryResult(value: unknown): DiscordAutomationDeliveryResult {
+  const candidate = record(value);
+  if (!candidate || (candidate.status !== "delivered" && candidate.status !== "failed")) {
+    throw new Error("Discord delivery result is invalid.");
+  }
+  if (candidate.status === "failed") {
+    if (typeof candidate.error !== "string" || !candidate.error.trim()) throw new Error("Discord delivery error is required.");
+    return { status: "failed", error: candidate.error.trim().slice(0, 2_000) };
+  }
+  return {
+    status: "delivered",
+    channelId: requiredSnowflake(candidate.channelId, "Channel ID"),
+    messageId: requiredSnowflake(candidate.messageId, "Message ID"),
   };
 }
 

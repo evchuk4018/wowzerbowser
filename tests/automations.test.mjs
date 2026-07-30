@@ -39,4 +39,22 @@ test("live checks suppress false results and pause after a match", async () => {
   assert.match(runner, /outcome: "no_match"/);
   assert.match(runner, /pause: automation\.kind === "live_check"/);
   assert.match(runner, /chatAutomationDelivery\.deliver/);
+  assert.match(runner, /queueDiscordAutomationDelivery/);
+  assert.match(
+    runner,
+    /if \(!matched\) \{[\s\S]*?outcome: "no_match"[\s\S]*?return;[\s\S]*?\}[\s\S]*?queueDiscordAutomationDelivery/,
+  );
+});
+
+test("Discord automation delivery is durable, leased, and idempotent per run", async () => {
+  const [migration, repository] = await Promise.all([
+    source("supabase/migrations/20260730160000_discord_automation_notifications.sql"),
+    source("app/server/discord/discord-automation-repository.ts"),
+  ]);
+  assert.match(migration, /unique \(owner_id, automation_run_id\)/);
+  assert.match(migration, /for update skip locked/);
+  assert.match(migration, /lease_expires_at/);
+  assert.match(migration, /enable row level security/);
+  assert.doesNotMatch(migration, /create policy/i);
+  assert.match(repository, /ignoreDuplicates: true/);
 });
