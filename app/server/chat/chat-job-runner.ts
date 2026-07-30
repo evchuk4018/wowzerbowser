@@ -8,6 +8,7 @@ import type {
 import { generateChatResponse } from "../../chat/chat-server-service";
 import { recordUsage } from "../usage/usage-store";
 import { claimChatJob, createChatJobEventWriter, finishChatJob, renewChatJob } from "./chat-job-store";
+import { createChatEventCoalescer } from "./chat-event-coalescer";
 import { CHAT_JOB_HEARTBEAT_MS } from "./chat-job-lease";
 import type { ChatCitation, ChatSource } from "../../../lib/chat-citations";
 
@@ -67,6 +68,48 @@ export async function runChatJob(
   let roundLastOutputAt: number | null = null;
   let annotations: ChatCitation[] = [];
   let sources: ChatSource[] = [];
+  const publishEvent = (event: ChatStreamEvent): void => {
+    const sequence = nextEventIndex;
+    nextEventIndex += 1;
+    eventWriter.enqueue({ eventIndex: sequence, event });
+    try {
+      options.onEvent?.({ ...event, sequence, jobId });
+    } catch {
+      // Live delivery is best effort. Durable execution must survive a
+      // closed or failed response stream.
+    }
+    if (event.type === "round") {
+      if (roundFirstOutputAt !== null && roundLastOutputAt !== null) {
+        completedProviderOutputWindowMs += Math.max(0, roundLastOutputAt - roundFirstOutputAt);
+      }
+      roundFirstOutputAt = null;
+      roundLastOutputAt = null;
+    }
+    if (event.type === "reasoning" || event.type === "content") {
+      const now = performance.now();
+      roundFirstOutputAt ??= now;
+      roundLastOutputAt = now;
+    }
+    if (event.type === "content") output += event.delta;
+    if (event.type === "annotations") { annotations = event.annotations; sources = event.sources; }
+    if (event.type === "done") usage = event.usage;
+    if (event.type === "error") generationError = event.message;
+  };
+  const eventCoalescer = createChatEventCoalescer(publishEvent);
+  const drainEventPipelines = async (): Promise<void> => {
+    let firstError: unknown = null;
+    try {
+      await eventCoalescer.drain();
+    } catch (error: unknown) {
+      firstError = error;
+    }
+    try {
+      await eventWriter.drain();
+    } catch (error: unknown) {
+      firstError ??= error;
+    }
+    if (firstError !== null) throw firstError;
+  };
   const terminalResponse = (status: ChatJobTerminalResponse["status"], error: string | null): ChatJobTerminalResponse => {
     const completionTokens = usage?.completionTokens ?? null;
     const currentRoundWindowMs = roundFirstOutputAt === null || roundLastOutputAt === null
@@ -94,33 +137,7 @@ export async function runChatJob(
       request,
       ownerId,
       controller.signal,
-      async (event: ChatStreamEvent) => {
-        const sequence = nextEventIndex;
-        nextEventIndex += 1;
-        eventWriter.enqueue({ eventIndex: sequence, event });
-        try {
-          options.onEvent?.({ ...event, sequence, jobId });
-        } catch {
-          // Live delivery is best effort. Durable execution must survive a
-          // closed or failed response stream.
-        }
-        if (event.type === "round") {
-          if (roundFirstOutputAt !== null && roundLastOutputAt !== null) {
-            completedProviderOutputWindowMs += Math.max(0, roundLastOutputAt - roundFirstOutputAt);
-          }
-          roundFirstOutputAt = null;
-          roundLastOutputAt = null;
-        }
-        if (event.type === "reasoning" || event.type === "content") {
-          const now = performance.now();
-          roundFirstOutputAt ??= now;
-          roundLastOutputAt = now;
-        }
-        if (event.type === "content") output += event.delta;
-        if (event.type === "annotations") { annotations = event.annotations; sources = event.sources; }
-        if (event.type === "done") usage = event.usage;
-        if (event.type === "error") generationError = event.message;
-      },
+      (event: ChatStreamEvent) => eventCoalescer.enqueue(event),
       async ({ round, usage: providerUsage, estimatedUsage, provider, model, exactCostUsd, pricing }) => {
         await recordUsage({
           ownerId,
@@ -161,7 +178,7 @@ export async function runChatJob(
         });
       },
     );
-    await eventWriter.drain();
+    await drainEventPipelines();
     if (!controller.signal.aborted) {
       const status = generationError ? "failed" : "completed";
       const applied = await finishChatJob(ownerId, conversationId, jobId, leaseToken, status, { error: generationError, usage, finalOutput: output });
@@ -169,7 +186,7 @@ export async function runChatJob(
     }
     return cancellationObserved ? terminalResponse("cancelled", null) : null;
   } catch (error) {
-    await eventWriter.drain().catch(() => undefined);
+    await drainEventPipelines().catch(() => undefined);
     const message = error instanceof Error ? error.message : "Generation failed.";
     if (controller.signal.aborted) {
       return cancellationObserved ? terminalResponse("cancelled", null) : null;
@@ -177,7 +194,7 @@ export async function runChatJob(
     const applied = await finishChatJob(ownerId, conversationId, jobId, leaseToken, "failed", { error: message, usage, finalOutput: output });
     return applied ? terminalResponse("failed", message) : null;
   } finally {
-    await eventWriter.drain().catch(() => undefined);
+    await drainEventPipelines().catch(() => undefined);
     clearInterval(heartbeat);
   }
 }
