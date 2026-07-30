@@ -6,6 +6,7 @@ import {
   parseDreamingActions,
 } from "../lib/user-memory.ts";
 import { buildDreamingPrompt } from "../app/server/memory/dreaming-prompt.ts";
+import { buildDreamingConsolidationPrompt, formatConsolidatedPrompt } from "../app/server/memory/dreaming-prompt.ts";
 import {
   describeBackgroundError,
   formatBackgroundError,
@@ -83,6 +84,17 @@ test("dreaming prompt includes the full profile, summaries, contradiction rules,
   assert.match(prompt, /untrusted data/);
 });
 
+test("dreaming consolidation prompt preserves context boundaries and previous synthesis", () => {
+  const prompt = buildDreamingConsolidationPrompt({ revision: 0, folders: [], memories: [] }, [], "Older stable preference.");
+  assert.match(prompt, /current-profile/);
+  assert.match(prompt, /dream-summaries/);
+  assert.match(prompt, /previous-consolidation/);
+  assert.match(prompt, /only when relevant/);
+  assert.match(formatConsolidatedPrompt("Fitness\nUser prefers sprint training."), /<consolidated_user_memory>/);
+  assert.match(formatConsolidatedPrompt("Fitness"), /not a universal instruction/);
+  assert.equal(formatConsolidatedPrompt(""), "");
+});
+
 test("Qwen dreaming adapter enables thinking and parses validated JSON actions", async () => {
   const originalKey = process.env.OPENROUTER_API_KEY;
   process.env.OPENROUTER_API_KEY = "test-key";
@@ -129,6 +141,19 @@ test("persistence schema provides auditable provenance and exclusive three-job b
   assert.match(migration, /owner_id uuid primary key/);
   assert.match(migration, /user_memories\|folder_id uuid/);
   assert.doesNotMatch(migration, /\buser_id\b/);
+});
+
+test("consolidation persistence uses five-run cycles and an owner-scoped prompt cap", async () => {
+  const migration = await source("supabase/migrations/20260730150000_dreaming_consolidation.sql");
+  assert.match(migration, /dreaming_cycle_count/);
+  assert.match(migration, /consolidated_prompt/);
+  assert.match(migration, /dreaming_consolidations/);
+  assert.match(migration, /primary key \(owner_id, cycle_number\)/);
+  assert.match(migration, /mod\(v_count, 5\)/);
+  assert.match(migration, /record_dreaming_cycle/);
+  const service = await source("app/server/memory/dreaming-service.ts");
+  assert.match(service, /recordDreamingCycle\(ownerId, runId\)/);
+  assert.match(service, /slice\(0, 8_000\)/);
 });
 
 test("dreaming repository deduplicates three source jobs by conversation using the newest source", async () => {

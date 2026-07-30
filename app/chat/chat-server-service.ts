@@ -64,6 +64,8 @@ import {
   messageUnlocksCalendarTools,
 } from "../server/agent/calendar-tool-manifest";
 import { executeCalendarTool } from "../server/agent/calendar-tool";
+import { getConsolidatedPrompt } from "../server/memory/dreaming-repository";
+import { formatConsolidatedPrompt } from "../server/memory/dreaming-prompt";
 import { listConnectorCatalog } from "../server/connectors/connector-service";
 import { connectorToolsToModelTools, executeConnectorTool, executeSearchConnectorTools, SEARCH_CONNECTOR_TOOLS_DEFINITION, SEARCH_CONNECTOR_TOOLS_NAME } from "../server/connectors/connector-tool-router";
 import type { ConnectorTool } from "../../lib/connector-protocol";
@@ -104,6 +106,9 @@ export async function generateChatResponse(
     chatRequest = { ...chatRequest, model: { provider: "deepseek", model: chatRequest.model } };
   }
   const selectedMetadata = await (automationExecution ? authorizeAutomationModel(ownerId, chatRequest.model) : authorizeChatModel(ownerId, chatRequest.model));
+  const consolidatedMemory = automationExecution ? "" : formatConsolidatedPrompt(
+    await getConsolidatedPrompt(ownerId).catch(() => ""),
+  );
   const providerAdapter = chatProviderAdapter(chatRequest.model.provider);
   providerAdapter.assertConfigured();
   const responseDeadlineAt = Date.now() + MAX_RESPONSE_MS;
@@ -309,6 +314,7 @@ export async function generateChatResponse(
             ...customToolInstructions(activeCustomTools),
             ...(skillTools.length ? [skillCatalogInstructions(skills)] : []),
             ...(activeUserMemoryTools.length ? [USER_MEMORY_TOOL_INSTRUCTIONS] : []),
+            ...(consolidatedMemory ? [consolidatedMemory] : []),
             ...(contextTools.length ? [CURRENT_CHAT_CONTEXT_TOOL_INSTRUCTIONS] : []),
             RESPONSE_STYLE_INSTRUCTIONS,
           ];

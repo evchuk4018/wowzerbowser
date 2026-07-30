@@ -15,6 +15,15 @@ export type DreamingRun = {
   lastError: string | null;
 };
 
+export type DreamingConsolidation = {
+  ownerId: string;
+  cycleNumber: number;
+  sourceRunIds: string[];
+  status: "queued" | "running" | "completed" | "failed";
+  prompt: string;
+  model: string | null;
+};
+
 type SourceRow = {
   job_id: string;
   sequence: number | string;
@@ -44,6 +53,83 @@ export async function claimDreamingRun(ownerId: string): Promise<string | null> 
   const { data, error } = await db().rpc("claim_user_dreaming_run", { p_owner_id: ownerId });
   if (error) throw error;
   return typeof data === "string" ? data : null;
+}
+
+export async function recordDreamingCycle(ownerId: string, runId: string): Promise<number | null> {
+  const { data, error } = await db().rpc("record_dreaming_cycle", { p_owner_id: ownerId, p_run_id: runId });
+  if (error) throw error;
+  return typeof data === "number" ? data : null;
+}
+
+export async function claimDreamingConsolidation(ownerId: string, cycleNumber?: number): Promise<DreamingConsolidation | null> {
+  const now = new Date();
+  let query = db().from("dreaming_consolidations").update({
+    status: "running",
+    lease_expires_at: new Date(now.getTime() + 120_000).toISOString(),
+    updated_at: now.toISOString(),
+  }).eq("owner_id", ownerId).or("status.eq.queued,and(status.eq.running,lease_expires_at.lt." + now.toISOString() + ")");
+  if (cycleNumber !== undefined) query = query.eq("cycle_number", cycleNumber);
+  const { data, error } = await query.order("cycle_number").limit(1)
+    .select("owner_id,cycle_number,source_run_ids,status,prompt,model").maybeSingle();
+  if (error) throw error;
+  return data ? consolidationFromRow(data) : null;
+}
+
+function consolidationFromRow(row: Record<string, unknown>): DreamingConsolidation {
+  return {
+    ownerId: String(row.owner_id),
+    cycleNumber: Number(row.cycle_number),
+    sourceRunIds: Array.isArray(row.source_run_ids) ? row.source_run_ids.filter((value): value is string => typeof value === "string") : [],
+    status: row.status as DreamingConsolidation["status"],
+    prompt: typeof row.prompt === "string" ? row.prompt : "",
+    model: typeof row.model === "string" ? row.model : null,
+  };
+}
+
+export async function getDreamingConsolidationSources(ownerId: string, runIds: string[]): Promise<DreamingSource[]> {
+  if (!runIds.length) return [];
+  const { data, error } = await db().from("dreaming_run_sources")
+    .select("run_id,job_id,sequence,conversation_id,completed_at")
+    .eq("owner_id", ownerId).in("run_id", runIds).order("sequence");
+  if (error) throw error;
+  const rows = (data ?? []) as Array<SourceRow & { run_id: string }>;
+  const jobs = rows.map((row) => row.job_id);
+  if (!jobs.length) return [];
+  const summaries = await db().from("chat_summary_jobs").select("source_job_id,result_summary,status")
+    .eq("owner_id", ownerId).in("source_job_id", jobs);
+  if (summaries.error) throw summaries.error;
+  const summaryByJob = new Map((summaries.data ?? [])
+    .filter((row) => row.status === "completed" && typeof row.result_summary === "string")
+    .map((row) => [row.source_job_id as string, row.result_summary as string]));
+  return rows.flatMap((row) => summaryByJob.has(row.job_id) ? [{
+    jobId: row.job_id, chatId: row.conversation_id, completedAt: row.completed_at,
+    summary: summaryByJob.get(row.job_id) ?? "",
+  }] : []);
+}
+
+export async function completeDreamingConsolidation(ownerId: string, cycleNumber: number, prompt: string, model: string): Promise<void> {
+  const now = new Date().toISOString();
+  const profile = await db().from("user_memory_profiles").update({ consolidated_prompt: prompt, updated_at: now })
+    .eq("owner_id", ownerId).select("owner_id").maybeSingle();
+  if (profile.error) throw profile.error;
+  const { error } = await db().from("dreaming_consolidations").update({
+    status: "completed", prompt, model, lease_expires_at: null, completed_at: now, updated_at: now, last_error: null,
+  }).eq("owner_id", ownerId).eq("cycle_number", cycleNumber).eq("status", "running");
+  if (error) throw error;
+}
+
+export async function failDreamingConsolidation(ownerId: string, cycleNumber: number, message: string): Promise<void> {
+  const { error } = await db().from("dreaming_consolidations").update({
+    status: "queued", lease_expires_at: null, last_error: message.slice(0, 240), updated_at: new Date().toISOString(),
+  }).eq("owner_id", ownerId).eq("cycle_number", cycleNumber).eq("status", "running");
+  if (error) throw error;
+}
+
+export async function getConsolidatedPrompt(ownerId: string): Promise<string> {
+  const { data, error } = await db().from("user_memory_profiles").select("consolidated_prompt")
+    .eq("owner_id", ownerId).maybeSingle();
+  if (error) throw error;
+  return typeof data?.consolidated_prompt === "string" ? data.consolidated_prompt : "";
 }
 
 export async function getDreamingRun(ownerId: string, runId: string): Promise<DreamingRun | null> {

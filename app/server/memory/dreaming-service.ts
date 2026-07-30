@@ -2,6 +2,7 @@ import "server-only";
 
 import type { DreamingAction, DreamingSource } from "../../../lib/user-memory";
 import { consolidateUserMemoryWithQwen } from "../../providers/openrouter/openrouter-dreaming-adapter";
+import { consolidateDreamingMemoryWithQwen } from "../../providers/openrouter/openrouter-dreaming-consolidation-adapter";
 import { recordUsage } from "../usage/usage-store";
 import { formatBackgroundError, logBackgroundTaskFailure } from "../observability/background-error";
 import {
@@ -15,8 +16,14 @@ import {
   markDreamingActionApplied,
   registerCompletedJobForDreaming,
   saveDreamingActionPlan,
+  recordDreamingCycle,
+  claimDreamingConsolidation,
+  getDreamingConsolidationSources,
+  getConsolidatedPrompt,
+  completeDreamingConsolidation,
+  failDreamingConsolidation,
 } from "./dreaming-repository";
-import { buildDreamingPrompt } from "./dreaming-prompt";
+import { buildDreamingConsolidationPrompt, buildDreamingPrompt } from "./dreaming-prompt";
 import {
   createUserMemory,
   createUserMemoryFolder,
@@ -91,6 +98,10 @@ async function executeRun(
     for (const [index, action] of actions.entries()) await applyAction(ownerId, runId, index, action, sources);
     const completedTree = await getUserMemoryTree(ownerId);
     await completeDreamingRun(ownerId, runId, completedTree.revision, answer.model, { actions });
+    const cycle = await recordDreamingCycle(ownerId, runId);
+    if (cycle) await processDreamingConsolidation(ownerId, cycle).catch((error) => {
+      logBackgroundTaskFailure("user-memory-consolidation-failed", { ownerId, cycle }, error);
+    });
     if (answer.usage) {
       await recordUsage({
         ownerId,
@@ -117,6 +128,28 @@ async function executeRun(
       attempt,
     }, error);
     return true;
+  }
+}
+
+async function processDreamingConsolidation(ownerId: string, cycleNumber: number): Promise<void> {
+  const job = await claimDreamingConsolidation(ownerId, cycleNumber);
+  if (!job || job.cycleNumber !== cycleNumber) return;
+  try {
+    const [tree, sources, previousSummary] = await Promise.all([
+      getUserMemoryTree(ownerId),
+      getDreamingConsolidationSources(ownerId, job.sourceRunIds),
+      getConsolidatedPrompt(ownerId),
+    ]);
+    const answer = await consolidateDreamingMemoryWithQwen(buildDreamingConsolidationPrompt(tree, sources, previousSummary));
+    const prompt = answer.summary.trim().slice(0, 8_000);
+    await completeDreamingConsolidation(ownerId, cycleNumber, prompt, answer.model);
+    if (answer.usage) await recordUsage({
+      ownerId, provider: "openrouter", model: answer.model, requestKind: "dreaming", requestId: `consolidation-${cycleNumber}`,
+      round: 0, usage: answer.usage, source: "exact", exactCostUsd: answer.exactCostUsd, unpriced: answer.exactCostUsd === undefined,
+    }).catch(() => undefined);
+  } catch (error) {
+    await failDreamingConsolidation(ownerId, cycleNumber, formatBackgroundError(error)).catch(() => undefined);
+    throw error;
   }
 }
 
