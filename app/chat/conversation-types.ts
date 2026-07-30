@@ -23,4 +23,5 @@ export type ChatSettings = {
   systemPrompt: string;
   userPresence: string;
   visionModel: ChatModelRef | null;
+  automationModel: ChatModelRef;
 };

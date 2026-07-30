@@ -24,6 +24,7 @@ const db = () => getServerClient();
 export function skillValue(row: SkillRow): SkillDefinition {
   return {
     id: row.id,
+    ...(row.builtin_key ? { builtinKey: row.builtin_key } : {}),
     name: row.name,
     summary: row.summary,
     instructions: row.instructions,

@@ -2,6 +2,42 @@
 
 A private chat workspace built with Next.js and ready for Vercel deployment.
 
+## Recurring automations
+
+Apply `supabase/migrations/20260730100000_recurring_automations.sql`, set a random
+`AUTOMATION_DISPATCH_SECRET` in the application environment, and store the same
+value plus the production app URL in Supabase Vault. Configure one Supabase Cron
+job to use `pg_net` to `POST /api/internal/automations/dispatch` every five
+minutes with `Authorization: Bearer <secret>`. The dispatcher atomically leases
+due work; do not create one cron job per user automation.
+
+After enabling the Supabase Cron and Vault integrations, the production setup is:
+
+```sql
+select vault.create_secret('https://your-app.example', 'automation_app_url');
+select vault.create_secret('the-same-random-secret-as-vercel', 'automation_dispatch_secret');
+
+select cron.schedule(
+  'dispatch-recurring-automations',
+  '*/5 * * * *',
+  $cron$
+  select net.http_post(
+    url := (select decrypted_secret from vault.decrypted_secrets where name = 'automation_app_url')
+      || '/api/internal/automations/dispatch',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer ' ||
+        (select decrypted_secret from vault.decrypted_secrets where name = 'automation_dispatch_secret')
+    ),
+    body := '{}'::jsonb
+  );
+  $cron$
+);
+```
+
+Automation runs default to `qwen/qwen3.7-flash`, require the OpenRouter key, and
+have a user-configurable model in Settings → Configurables.
+
 ## Prerequisites
 
 - Node.js `>=22.13.0`

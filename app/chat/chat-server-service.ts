@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import type { ChatAssistantRound, ChatModelPricing, ChatRequest, ChatStreamEvent, ChatToolCall, ChatToolResult, ChatUsage } from "../../lib/chat-protocol";
 import { estimateUsageFromText } from "../../lib/usage-pricing";
 import { chatProviderAdapter } from "../server/chat/chat-provider-registry";
-import { authorizeChatModel } from "../server/chat/chat-model-catalog-service";
+import { authorizeAutomationModel, authorizeChatModel } from "../server/chat/chat-model-catalog-service";
 import { availableChatTools, executePythonTool } from "../server/agent/python-tool";
 import { runPythonInstructionsFor } from "../server/agent/python-tool-instructions";
 import { availableWebTools, executeWebTool } from "../server/agent/web-tools";
@@ -44,6 +44,9 @@ import { skillCatalogInstructions } from "../server/agent/skill-instructions";
 import { executeReadSkillTool } from "../server/agent/skill-tool";
 import { READ_SKILL_TOOL_NAME, SKILL_TOOL_DEFINITIONS } from "../server/agent/skill-tool-manifest";
 import { builtinSkillFallbacks } from "../server/skills/builtin-skills";
+import { AUTOMATION_SKILL_KEY, AUTOMATION_TOOL_DEFINITIONS } from "../server/agent/automation-tool-manifest";
+import { executeAutomationTool } from "../server/agent/automation-tool";
+import { COMPLETE_AUTOMATION_RUN_TOOL_DEFINITION, COMPLETE_AUTOMATION_RUN_TOOL_NAME, executeCompleteAutomationRun, type AutomationRunResult } from "../server/agent/automation-run-result-tool";
 
 const MAX_RESPONSE_MS = 240_000;
 
@@ -74,19 +77,21 @@ export async function generateChatResponse(
   persistEvent: (event: ChatStreamEvent) => Promise<void>,
   persistUsage?: (usage: ChatRoundUsage) => Promise<void>,
   persistSummaryUsage?: (usage: ChatSummaryUsage) => Promise<void>,
+  executionOptions: { profile?: "chat" | "automation"; onAutomationResult?: (result: AutomationRunResult) => void } = {},
 ): Promise<void> {
+  const automationExecution = executionOptions.profile === "automation";
   if (typeof chatRequest.model === "string") {
     chatRequest = { ...chatRequest, model: { provider: "deepseek", model: chatRequest.model } };
   }
-  const selectedMetadata = await authorizeChatModel(ownerId, chatRequest.model);
+  const selectedMetadata = await (automationExecution ? authorizeAutomationModel(ownerId, chatRequest.model) : authorizeChatModel(ownerId, chatRequest.model));
   const providerAdapter = chatProviderAdapter(chatRequest.model.provider);
   providerAdapter.assertConfigured();
   const responseDeadlineAt = Date.now() + MAX_RESPONSE_MS;
   const responseId = chatRequest.jobId;
   const conversationId = stableConversationId(chatRequest);
-  const currentTodos = await getTodoList(ownerId, conversationId).catch(() => ({ revision: 0, items: [] }));
+  const currentTodos = automationExecution ? { revision: 0, items: [] } : await getTodoList(ownerId, conversationId).catch(() => ({ revision: 0, items: [] }));
   const latestPreviousAssistant = [...chatRequest.messages].reverse().find((message) => message.role === "assistant")?.content;
-  const planner = await planTodos({
+  const planner = automationExecution ? null : await planTodos({
     ownerId,
     conversationId,
     userMessage: chatRequest.messages.at(-1)?.content ?? "",
@@ -120,9 +125,9 @@ export async function generateChatResponse(
     : [];
   const customToolsByName = new Map(customTools.map((tool) => [tool.name, tool]));
   const customDefinitions = customToolDefinitions(customTools);
-  const chatMemoryTools = chatMemoryToolDefinitions();
-  const userMemoryTools = userMemoryToolDefinitions();
-  const skills = await listOwnerSkills(ownerId).catch((error) => {
+  const chatMemoryTools = automationExecution ? [] : chatMemoryToolDefinitions();
+  const userMemoryTools = automationExecution ? [] : userMemoryToolDefinitions();
+  const skills = automationExecution ? [] : await listOwnerSkills(ownerId).catch((error) => {
     console.warn({ event: "skills-unavailable", ownerId, failure: error instanceof Error ? error.name : "UnknownError" });
     return builtinSkillFallbacks();
   });
@@ -145,8 +150,8 @@ export async function generateChatResponse(
   const imageTools = availableImageTools(allowedImageIds.length > 0);
   const pdfEditTools = availablePdfEditTools([...authoritativePdfs.values()].some((document) => document.contentType === "application/pdf"));
   const allowedProjectIds = new Set([...authoritativePdfs.values()].map((document) => document.projectId).filter((projectId): projectId is string => Boolean(projectId)));
-  const phaseTools = chatRequest.thinking ? [PHASE_BREAK_TOOL_DEFINITION] : [];
-  const baseToolDefinitions = [...pythonTools, ...imageTools, ...webTools, ...pdfEditTools, ...phaseTools, ...customDefinitions, ...chatMemoryTools, ...userMemoryTools, ...SKILL_TOOL_DEFINITIONS, ...TODO_TOOL_DEFINITIONS];
+  const phaseTools = chatRequest.thinking && !automationExecution ? [PHASE_BREAK_TOOL_DEFINITION] : [];
+  const baseToolDefinitions = [...pythonTools, ...imageTools, ...webTools, ...pdfEditTools, ...phaseTools, ...customDefinitions, ...chatMemoryTools, ...userMemoryTools, ...(automationExecution ? [] : SKILL_TOOL_DEFINITIONS), ...(automationExecution ? [] : TODO_TOOL_DEFINITIONS), ...(automationExecution ? [COMPLETE_AUTOMATION_RUN_TOOL_DEFINITION] : [])];
   const imageToolAdvertised = imageTools.some((tool) => tool.function.name === INSPECT_IMAGE_TOOL_NAME);
 
   const enqueue = async (event: ChatStreamEvent) => {
@@ -174,11 +179,13 @@ export async function generateChatResponse(
       let executor: ModalPythonExecutor | null = null;
       const recalledContexts = new Map<string, string>();
       let currentPhase = 1;
+      let automationToolsUnlocked = false;
       const sourceCatalog = new Map<string, ChatSource>();
 
       try {
         for (let round = 1; ; round += 1) {
-          const toolDefinitions = [...baseToolDefinitions, ...availablePdfTools(allowedPdfIds.size > 0)];
+          const automationDefinitions = !automationExecution && automationToolsUnlocked ? AUTOMATION_TOOL_DEFINITIONS : [];
+          const toolDefinitions = [...baseToolDefinitions, ...automationDefinitions, ...availablePdfTools(allowedPdfIds.size > 0)];
           await enqueue({ type: "round", round });
           const systemInstructions = [
             ...runPythonInstructionsFor(Boolean(pythonTools.length)),
@@ -338,6 +345,18 @@ export async function generateChatResponse(
               });
             } else if (call.name === READ_SKILL_TOOL_NAME) {
               result = executeReadSkillTool(call, skillsById);
+              if (result.ok) {
+                try {
+                  const skillId = (JSON.parse(call.arguments) as { skillId?: unknown }).skillId;
+                  if (typeof skillId === "string" && skillsById.get(skillId)?.builtinKey === AUTOMATION_SKILL_KEY) automationToolsUnlocked = true;
+                } catch {}
+              }
+            } else if (automationDefinitions.some((tool) => tool.function.name === call.name)) {
+              result = await executeAutomationTool(call, ownerId);
+            } else if (automationExecution && call.name === COMPLETE_AUTOMATION_RUN_TOOL_NAME) {
+              const completed = executeCompleteAutomationRun(call);
+              result = completed.result;
+              if (completed.value) executionOptions.onAutomationResult?.(completed.value);
             } else if (TODO_TOOL_DEFINITIONS.some((tool) => tool.function.name === call.name)) {
               result = await executeTodoTool(call, {
                 ownerId,

@@ -1,49 +1,47 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { DEFAULT_AUTOMATION_MODEL } from "../../lib/automation-protocol";
 import { chatModelIdentity, type ChatModelInfo, type ChatModelRef } from "../../lib/chat-protocol";
 
-export function ConfigurablesSettings({ getAccessToken, visionModel, onVisionModelChange }: {
+export function ConfigurablesSettings({ getAccessToken, visionModel, onVisionModelChange, automationModel, onAutomationModelChange }: {
   getAccessToken: () => Promise<string | null>;
   visionModel: ChatModelRef | null;
   onVisionModelChange: (model: ChatModelRef | null) => void;
+  automationModel: ChatModelRef;
+  onAutomationModelChange: (model: ChatModelRef) => void;
 }) {
-  const [models, setModels] = useState<ChatModelInfo[]>([]);
+  const [visionModels, setVisionModels] = useState<ChatModelInfo[]>([]);
+  const [automationModels, setAutomationModels] = useState<ChatModelInfo[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-
   useEffect(() => {
     let active = true;
-    void getAccessToken()
-      .then((token) => fetch("/api/chat/models?scope=vision", { headers: { authorization: `Bearer ${token}` } }))
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Vision models are unavailable.");
-        return response.json() as Promise<{ models?: ChatModelInfo[] }>;
-      })
-      .then((body) => {
-        if (!active) return;
-        setModels(Array.isArray(body.models) ? body.models : []);
-        setStatus("ready");
-      })
-      .catch(() => { if (active) setStatus("error"); });
+    void getAccessToken().then(async (token) => {
+      const headers = { authorization: `Bearer ${token}` };
+      const [vision, chat] = await Promise.all([fetch("/api/chat/models?scope=vision", { headers }), fetch("/api/chat/models", { headers })]);
+      if (!vision.ok || !chat.ok) throw new Error("Models are unavailable.");
+      return Promise.all([vision.json(), chat.json()]) as Promise<[{ models?: ChatModelInfo[] }, { models?: ChatModelInfo[] }]>;
+    }).then(([vision, chat]) => {
+      if (!active) return;
+      setVisionModels(vision.models ?? []);
+      setAutomationModels((chat.models ?? []).filter((model) => model.toolSupport));
+      setStatus("ready");
+    }).catch(() => { if (active) setStatus("error"); });
     return () => { active = false; };
   }, [getAccessToken]);
 
-  const selected = visionModel ? chatModelIdentity(visionModel) : "auto";
   return <div className="configurables-settings">
-    <div className="settings-panel-heading"><h3>Configurables</h3><p>Choose the model used for image analysis, image questions, and PDF OCR.</p></div>
-    <label className="settings-field">
-      <span>Vision model</span>
-      <select aria-label="Vision model" value={selected} onChange={(event) => {
-        const model = models.find((item) => chatModelIdentity(item.ref) === event.target.value);
-        onVisionModelChange(model?.ref ?? null);
-      }}>
-        <option value="auto">Auto (current default)</option>
-        {models.map((model) => <option key={chatModelIdentity(model.ref)} value={chatModelIdentity(model.ref)}>{model.displayName} — {model.ref.model}</option>)}
-      </select>
-      <small>Auto uses OpenRouter’s existing automatic fallback chain. Enable additional image-capable models in Models first.</small>
-    </label>
-    {status === "loading" && <p className="settings-status">Loading enabled vision models…</p>}
-    {status === "error" && <p className="settings-status settings-error" role="alert">Vision models could not be loaded.</p>}
-    {status === "ready" && !models.length && <p className="settings-status">No enabled custom vision models are available.</p>}
+    <div className="settings-panel-heading"><h3>Configurables</h3><p>Choose models used for vision and recurring automations.</p></div>
+    <label className="settings-field"><span>Vision model</span><select aria-label="Vision model" value={visionModel ? chatModelIdentity(visionModel) : "auto"} onChange={(event) => {
+      onVisionModelChange(visionModels.find((item) => chatModelIdentity(item.ref) === event.target.value)?.ref ?? null);
+    }}><option value="auto">Auto (current default)</option>{visionModels.map((model) => <option key={chatModelIdentity(model.ref)} value={chatModelIdentity(model.ref)}>{model.displayName} — {model.ref.model}</option>)}</select><small>Auto uses OpenRouter’s existing automatic fallback chain.</small></label>
+    <label className="settings-field"><span>Automation model</span><select aria-label="Automation model" value={chatModelIdentity(automationModel)} onChange={(event) => {
+      onAutomationModelChange(automationModels.find((item) => chatModelIdentity(item.ref) === event.target.value)?.ref ?? DEFAULT_AUTOMATION_MODEL);
+    }}>
+      {!automationModels.some((model) => chatModelIdentity(model.ref) === chatModelIdentity(DEFAULT_AUTOMATION_MODEL)) && <option value={chatModelIdentity(DEFAULT_AUTOMATION_MODEL)}>Qwen 3.7 Flash — qwen/qwen3.7-flash</option>}
+      {automationModels.map((model) => <option key={chatModelIdentity(model.ref)} value={chatModelIdentity(model.ref)}>{model.displayName} — {model.ref.model}</option>)}
+    </select><small>Qwen 3.7 Flash is the default. Alternatives must be enabled and support tools.</small></label>
+    {status === "loading" && <p className="settings-status">Loading enabled models…</p>}
+    {status === "error" && <p className="settings-status settings-error" role="alert">Models could not be loaded.</p>}
   </div>;
 }

@@ -12,6 +12,21 @@ export type BuiltinSkillDefinition = {
 
 export const BUILTIN_SKILLS: readonly BuiltinSkillDefinition[] = Object.freeze([
   {
+    key: "manage-automations",
+    version: 1,
+    name: "Manage recurring automations",
+    summary: "Create and manage scheduled reports and conditional live checks.",
+    instructions: `<skill>
+Use this skill when the user asks to create, view, change, pause, resume, or delete a recurring automation.
+
+Choose report when every scheduled run should create a chat, such as a daily news brief. Choose live_check when a chat should be created only after a measurable condition becomes true. Live checks pause after the first match.
+
+Make the instructions self-contained: identify what to check, relevant sources or constraints, the exact condition for live checks, and what a useful result should contain. Use an explicit IANA timezone. If the user's timezone cannot be established, ask before creating a clock-time schedule. Intervals must be at least 15 minutes.
+
+List or read existing automations before editing or deleting. After a mutation, clearly confirm the name, type, human-readable schedule, timezone, and active or paused status.
+</skill>`,
+  },
+  {
     key: "create-pdf",
     version: 1,
     name: "Create a PDF",
@@ -54,6 +69,7 @@ export function builtinSkill(key: string): BuiltinSkillDefinition | undefined {
 export function builtinSkillFallbacks(): SkillDefinition[] {
   return BUILTIN_SKILLS.map((skill) => ({
     id: `builtin:${skill.key}`,
+    builtinKey: skill.key,
     name: skill.name,
     summary: skill.summary,
     instructions: skill.instructions,

@@ -130,6 +130,25 @@ async function insertIfAbsent(tableName: "chat_conversations" | "chat_turns" | "
   if (error && error.code !== "23505") throw error;
 }
 
+export async function createCompletedAutomationConversation(input: {
+  ownerId: string;
+  runId: string;
+  title: string;
+  prompt: string;
+  output: string;
+}): Promise<string> {
+  const conversationId = input.runId;
+  const turnId = `${input.runId}:turn`;
+  const versionId = `${input.runId}:version`;
+  const now = new Date().toISOString();
+  await insertIfAbsent("chat_conversations", { owner_id: input.ownerId, conversation_id: conversationId, title: input.title.slice(0, 160), created_at: now, updated_at: now });
+  await insertIfAbsent("chat_turns", { owner_id: input.ownerId, conversation_id: conversationId, turn_id: turnId, position: 0, active_version: 0, created_at: now, updated_at: now });
+  await insertIfAbsent("chat_message_versions", { owner_id: input.ownerId, conversation_id: conversationId, turn_id: turnId, version_id: versionId, version_index: 0, created_at: now });
+  await insertIfAbsent("chat_messages", messageRow(input.ownerId, conversationId, turnId, versionId, { id: `${input.runId}:user`, role: "user", content: input.prompt }));
+  await insertIfAbsent("chat_messages", messageRow(input.ownerId, conversationId, turnId, versionId, { id: `${input.runId}:assistant`, role: "assistant", content: input.output, status: "complete" }));
+  return conversationId;
+}
+
 /**
  * Backfill lineage for old rows while the active linear path is still known.
  * This keeps pre-lineage conversations compatible when the first branch is

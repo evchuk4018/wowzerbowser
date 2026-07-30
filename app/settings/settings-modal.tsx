@@ -12,6 +12,7 @@ import { ToolsSettings } from "./tools-settings";
 import { ModelsSettings } from "./models-settings";
 import { ConfigurablesSettings } from "./configurables-settings";
 import { SkillsSettings } from "./skills-settings";
+import { AutomationsSettings } from "./automations-settings";
 
 export type SettingsModalProps = {
   settings: ChatSettings;
@@ -27,7 +28,7 @@ type SettingsSection =
   | "tools"
   | "models"
   | "memory"
-  | "storage"
+  | "automations"
   | "safety"
   | "security"
   | "account"
@@ -39,7 +40,7 @@ const sections: Array<{ id: SettingsSection; label: string; description: string;
   { id: "tools", label: "Tools", description: "Create Python tools and securely connect APIs.", icon: "♢" },
   { id: "models", label: "Models", description: "Enable built-in and OpenRouter chat models.", icon: "✦" },
   { id: "memory", label: "Memory", description: "Review what the model remembers about you.", icon: "◉" },
-  { id: "storage", label: "Storage", description: "Review stored data and retention options.", icon: "▱" },
+  { id: "automations", label: "Automations", description: "Schedule reports and conditional live checks.", icon: "▱" },
   { id: "safety", label: "Configurables", description: "Choose runtime models and provider behavior.", icon: "◇" },
   { id: "security", label: "Security and login", description: "Protect your account and active sessions.", icon: "⌾" },
   { id: "account", label: "Account", description: "Manage your profile and account details.", icon: "◎" },
@@ -418,11 +419,15 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage, getAccessT
               <MemorySettings getAccessToken={getAccessToken} />
             ) : activeSection === "skills" ? (
               <SkillsSettings getAccessToken={getAccessToken} />
+            ) : activeSection === "automations" ? (
+              <AutomationsSettings getAccessToken={getAccessToken} />
             ) : activeSection === "safety" ? (
               <ConfigurablesSettings
                 getAccessToken={getAccessToken}
                 visionModel={draft.visionModel}
                 onVisionModelChange={(visionModel) => setDraft((current) => ({ ...current, visionModel }))}
+                automationModel={draft.automationModel}
+                onAutomationModelChange={(automationModel) => setDraft((current) => ({ ...current, automationModel }))}
               />
             ) : (
               <PlaceholderSettings label={activeLabel} />
@@ -438,6 +443,7 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage, getAccessT
                   systemPrompt: settings.systemPrompt,
                   userPresence: draft.userPresence.trim(),
                   visionModel: draft.visionModel,
+                  automationModel: draft.automationModel,
                 })}
               >
                 Save

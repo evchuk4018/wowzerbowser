@@ -9,6 +9,7 @@
     "dev": "next dev",
     "test:reasoning-titles": "tsx --conditions=react-server --test tests/reasoning-title-service.test.mjs",
     "test:todos": "tsx --conditions=react-server --test tests/todo-tool.test.mjs",
+    "test:automations": "tsx --conditions=react-server --test tests/automations.test.mjs",
     "build": "next build",
     "prebuild": "npm run verify:pdf-runtime",
     "postbuild": "node scripts/verify-pdf-runtime.mjs --trace",

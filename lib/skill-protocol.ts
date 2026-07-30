@@ -9,6 +9,7 @@ export type SkillSource = "builtin" | "custom";
 
 export type SkillDefinition = {
   id: string;
+  builtinKey?: string;
   name: string;
   summary: string;
   instructions: string;

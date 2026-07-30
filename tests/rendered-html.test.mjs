@@ -402,7 +402,7 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(settings, /Models/);
   assert.match(settings, /ModelsSettings/);
   assert.match(settings, /Memory/);
-  assert.match(settings, /Storage/);
+  assert.match(settings, /Automations/);
   assert.match(settings, /Configurables/);
   assert.match(settings, /Security and login/);
   assert.match(settings, /Account/);

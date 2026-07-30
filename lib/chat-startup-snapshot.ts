@@ -11,6 +11,7 @@ import {
 import type { ChatDocumentAttachment } from "./chat-document";
 import type { ChatImageAttachment } from "./chat-image";
 import { isChatModelRef, type ChatModelRef } from "./chat-protocol";
+import { DEFAULT_AUTOMATION_MODEL } from "./automation-protocol";
 
 export const CHAT_STARTUP_SNAPSHOT_SCHEMA_VERSION = 1 as const;
 export const CHAT_STARTUP_SNAPSHOT_MAX_TURNS = 30;
@@ -27,6 +28,7 @@ export type ChatStartupSnapshotV1 = {
   activeConversationId: string | null;
   userPresence: string;
   visionModel: ChatModelRef | null;
+  automationModel: ChatModelRef;
   modelPreferences: Array<ChatModelPreference & { conversationId: string }>;
   originalTurnCount: number;
 };
@@ -40,6 +42,7 @@ export type ChatStartupSnapshotInput = {
   activeConversationId: string | null;
   userPresence: string;
   visionModel?: ChatModelRef | null;
+  automationModel?: ChatModelRef;
   modelPreferences: readonly (ChatModelPreference & { conversationId: string })[];
 };
 
@@ -320,6 +323,7 @@ export function parseChatStartupSnapshot(value: unknown, expectedUserId: string)
   const savedAt = isRecord(value) && typeof value.savedAt === "string" ? value.savedAt : null;
   const userPresence = isRecord(value) && typeof value.userPresence === "string" ? value.userPresence : null;
   const visionModel = isRecord(value) && (value.visionModel === null || value.visionModel === undefined || isChatModelRef(value.visionModel)) ? (value.visionModel ?? null) as ChatModelRef | null : null;
+  const automationModel = isRecord(value) && isChatModelRef(value.automationModel) ? value.automationModel : DEFAULT_AUTOMATION_MODEL;
   const originalTurnCount = isRecord(value) && typeof value.originalTurnCount === "number"
     ? value.originalTurnCount
     : null;
@@ -360,6 +364,7 @@ export function parseChatStartupSnapshot(value: unknown, expectedUserId: string)
     activeConversationId,
     userPresence,
     visionModel,
+    automationModel,
     modelPreferences: modelPreferences as Array<ChatModelPreference & { conversationId: string }>,
     originalTurnCount,
   };
@@ -387,6 +392,7 @@ export function createChatStartupSnapshot(input: ChatStartupSnapshotInput): Chat
     activeConversationId: activeConversation?.id ?? input.activeConversationId,
     userPresence: input.userPresence,
     visionModel: input.visionModel ?? null,
+    automationModel: input.automationModel ?? DEFAULT_AUTOMATION_MODEL,
     modelPreferences: input.modelPreferences.flatMap(({ conversationId, ...preference }) => {
       const parsed = parseChatModelPreference(preference);
       return parsed ? [{ conversationId, ...parsed }] : [];

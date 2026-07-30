@@ -9,11 +9,11 @@ import { getServerClient } from "../../auth/supabase-server-adapter";
 export async function getChatUserPreferences(ownerId: string): Promise<ChatUserPreferences> {
   const { data, error } = await getServerClient()
     .from("chat_user_preferences")
-    .select("user_presence,vision_model")
+    .select("user_presence,vision_model,automation_model")
     .eq("owner_id", ownerId)
     .maybeSingle();
   if (error) throw error;
-  return data ? { userPresence: data.user_presence, visionModel: data.vision_model ?? null } : DEFAULT_CHAT_USER_PREFERENCES;
+  return data ? { userPresence: data.user_presence, visionModel: data.vision_model ?? null, automationModel: data.automation_model ?? DEFAULT_CHAT_USER_PREFERENCES.automationModel } : DEFAULT_CHAT_USER_PREFERENCES;
 }
 
 export async function saveChatUserPreferences(ownerId: string, preferences: ChatUserPreferences): Promise<void> {
@@ -21,6 +21,7 @@ export async function saveChatUserPreferences(ownerId: string, preferences: Chat
     owner_id: ownerId,
     user_presence: preferences.userPresence,
     vision_model: preferences.visionModel,
+    automation_model: preferences.automationModel ?? DEFAULT_CHAT_USER_PREFERENCES.automationModel,
     updated_at: new Date().toISOString(),
   });
   if (error) throw error;

@@ -809,6 +809,16 @@
 }
 
 .skills-settings { display: grid; gap: 18px; }
+.automations-settings { display: grid; gap: 18px; }
+.automation-list { display: grid; gap: 10px; }
+.automation-row { display: grid; gap: 9px; border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: rgba(255, 255, 255, .018); }
+.automation-row > div:first-child { display: grid; gap: 4px; }
+.automation-row small, .automation-row p { margin: 0; color: var(--quiet); font-size: 11px; line-height: 1.45; }
+.automation-row > div:nth-child(2) { display: flex; flex-wrap: wrap; gap: 7px; }
+.automation-row button { border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; color: var(--muted); background: transparent; cursor: pointer; }
+.automation-editor { display: grid; gap: 13px; border-top: 1px solid var(--line); padding-top: 18px; }
+.automation-editor h4 { margin: 0; }
+.automation-actions { padding: 0; border: 0; }
 .skills-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .skills-heading > div { min-width: 0; }
 .skills-list { display: grid; gap: 10px; }

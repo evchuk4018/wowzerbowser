@@ -83,3 +83,11 @@ export async function authorizeChatModel(ownerId: string, ref: ChatModelRef): Pr
   if (!model) throw new ChatModelAuthorizationError("Model is no longer eligible.");
   return model;
 }
+
+export async function authorizeAutomationModel(ownerId: string, ref: ChatModelRef): Promise<ChatModelInfo> {
+  if (ref.provider !== "openrouter" || ref.model !== "qwen/qwen3.7-flash") return authorizeChatModel(ownerId, ref);
+  const catalog = await discoverChatModels(ownerId, new URLSearchParams({ q: ref.model }));
+  const model = catalog.models.find((item) => item.ref.model === ref.model && item.toolSupport && item.outputModalities.includes("text"));
+  if (!model) throw new ChatModelAuthorizationError("The default automation model is unavailable.");
+  return model;
+}
