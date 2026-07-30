@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { parseAutomationMutation } from "../lib/automation-protocol.ts";
 import { nextAutomationRun } from "../app/server/automations/automation-schedule.ts";
 import { messageUnlocksAutomationTools } from "../app/server/agent/automation-tool-manifest.ts";
+import { resolveAutomationAnswer } from "../app/server/automations/automation-answer.ts";
 
 const source = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -48,11 +49,45 @@ test("live checks suppress false results and pause after a match", async () => {
   const runner = await source("app/server/automations/automation-runner.ts");
   assert.match(runner, /outcome: "no_match"/);
   assert.match(runner, /pause: automation\.kind === "live_check"/);
+  assert.match(runner, /automation\.kind === "report" \? true : answer\.matched/);
   assert.match(runner, /chatAutomationDelivery\.deliver/);
   assert.match(runner, /queueDiscordAutomationDelivery/);
   assert.match(
     runner,
     /if \(!matched\) \{[\s\S]*?outcome: "no_match"[\s\S]*?return;[\s\S]*?\}[\s\S]*?queueDiscordAutomationDelivery/,
+  );
+});
+
+test("automation answers prefer structured results and retain JSON compatibility", () => {
+  assert.deepEqual(
+    resolveAutomationAnswer(
+      { matched: true, title: " Structured title ", message: " Structured message " },
+      "ignored prose",
+      "Fallback title",
+    ),
+    { matched: true, title: "Structured title", message: "Structured message" },
+  );
+  assert.deepEqual(
+    resolveAutomationAnswer(null, '{"matched":true,"title":"JSON title","message":"JSON message"}', "Fallback title"),
+    { matched: true, title: "JSON title", message: "JSON message" },
+  );
+  assert.deepEqual(
+    resolveAutomationAnswer(null, '```json\n{"matched":false,"title":"Fenced title","message":"Fenced message"}\n```', "Fallback title"),
+    { matched: false, title: "Fenced title", message: "Fenced message" },
+  );
+});
+
+test("ordinary automation prose becomes a safe non-matching fallback", () => {
+  const answer = resolveAutomationAnswer(null, "Based on my research, the project remains on schedule.", "Daily project report");
+  assert.deepEqual(answer, {
+    matched: false,
+    title: "Daily project report",
+    message: "Based on my research, the project remains on schedule.",
+  });
+  assert.equal(answer.matched, false, "live checks require an explicit structured match");
+  assert.throws(
+    () => resolveAutomationAnswer(null, " \n ", "Empty automation"),
+    /no usable result/,
   );
 });
 

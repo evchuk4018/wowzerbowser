@@ -9,18 +9,9 @@ import { nextAutomationRun } from "./automation-schedule";
 import type { AutomationRunResult } from "../agent/automation-run-result-tool";
 import { queueDiscordAutomationDelivery } from "../discord/discord-automation-delivery-adapter";
 import { chatAutomationDelivery } from "./automation-delivery";
+import { resolveAutomationAnswer } from "./automation-answer";
 
 type ClaimedRun = { id: string; owner_id: string; automation_id: string; scheduled_for: string };
-type AutomationAnswer = { matched: boolean; title: string; message: string };
-
-function parseAnswer(content: string): AutomationAnswer {
-  const fenced = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  const value = JSON.parse(fenced) as Record<string, unknown>;
-  if (typeof value.matched !== "boolean" || typeof value.title !== "string" || !value.title.trim() || typeof value.message !== "string") {
-    throw new Error("Automation returned an invalid structured result.");
-  }
-  return { matched: value.matched, title: value.title.trim().slice(0, 160), message: value.message.trim() };
-}
 
 export async function runClaimedAutomation(run: ClaimedRun): Promise<void> {
   const automation = await getAutomationRow(run.owner_id, run.automation_id);
@@ -65,7 +56,7 @@ export async function runClaimedAutomation(run: ClaimedRun): Promise<void> {
       });
     }, undefined, { profile: "automation", onAutomationResult: (value) => { structuredAnswer = value; } });
     if (generationError) throw new Error(generationError);
-    const answer: AutomationAnswer = structuredAnswer ?? parseAnswer(content);
+    const answer = resolveAutomationAnswer(structuredAnswer, content, automation.name);
     const matched = automation.kind === "report" ? true : answer.matched;
     if (!matched) {
       await finishAutomationRun(run.id, { outcome: "no_match", matched: false, title: answer.title, output: answer.message, nextRunAt, pause: false });
