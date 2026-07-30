@@ -1,11 +1,11 @@
 import "server-only";
 import type { ChatAssistantRound, ChatModelInfo, ChatProvider, ChatRequest, ChatStreamEvent } from "../../../lib/chat-protocol";
-import type { DeepSeekToolDefinition } from "../../providers/deepseek/deepseek-adapter";
+import type { ModelToolDefinition } from "../../../lib/model-tool-protocol";
 
 export type ChatProviderRoundOptions = {
   replayRounds: ChatAssistantRound[];
   systemInstructions: string[];
-  tools?: readonly DeepSeekToolDefinition[];
+  tools?: readonly ModelToolDefinition[];
   onResponse?: (accepted: boolean) => void;
 };
 export interface ChatProviderAdapter {

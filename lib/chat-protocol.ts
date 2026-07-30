@@ -266,7 +266,7 @@ export type ChatSubmissionMetadata = {
   versionIndex: number;
 };
 
-export type ChatJobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type ChatJobStatus = "queued" | "running" | "awaiting_approval" | "completed" | "failed" | "cancelled";
 export type SequencedChatStreamEvent = ChatStreamEvent & { sequence: number; jobId: string };
 export type ChatJobResumeResponse = {
   jobId: string;
@@ -340,6 +340,7 @@ export type ChatStreamEvent =
   | { type: "content"; delta: string }
   | { type: "tool_call"; call: ChatToolCall }
   | { type: "tool_result"; result: ChatToolResult }
+  | { type: "connector_approval"; approval: import("./connector-protocol").ConnectorApprovalSummary }
   | { type: "annotations"; annotations: ChatCitation[]; sources: ChatSource[] }
   | { type: "artifact"; artifact: ChatArtifact }
   | {

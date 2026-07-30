@@ -63,6 +63,7 @@ export function reduceChatStreamEvent(
       waiting = false;
       break;
     case "tool_result":
+    case "connector_approval":
     case "artifact":
     case "annotations":
       waiting = false;

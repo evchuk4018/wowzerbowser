@@ -13,6 +13,7 @@ import { ModelsSettings } from "./models-settings";
 import { ConfigurablesSettings } from "./configurables-settings";
 import { SkillsSettings } from "./skills-settings";
 import { AutomationsSettings } from "./automations-settings";
+import { ConnectorsSettings } from "./connectors-settings";
 
 export type SettingsModalProps = {
   settings: ChatSettings;
@@ -26,6 +27,7 @@ type SettingsSection =
   | "general"
   | "usage"
   | "tools"
+  | "connectors"
   | "models"
   | "memory"
   | "automations"
@@ -38,6 +40,7 @@ const sections: Array<{ id: SettingsSection; label: string; description: string;
   { id: "general", label: "General", description: "Conversation context and app preferences.", icon: "settings" },
   { id: "usage", label: "Usage", description: "Review token volume and estimated costs.", icon: "◫" },
   { id: "tools", label: "Tools", description: "Create Python tools and securely connect APIs.", icon: "♢" },
+  { id: "connectors", label: "Connectors", description: "Connect Gmail, Drive, Notion, Slack, and MCP servers.", icon: "↗" },
   { id: "models", label: "Models", description: "Enable built-in and OpenRouter chat models.", icon: "✦" },
   { id: "memory", label: "Memory", description: "Review what the model remembers about you.", icon: "◉" },
   { id: "automations", label: "Automations", description: "Schedule reports and conditional live checks.", icon: "▱" },
@@ -427,6 +430,8 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage, getAccessT
               <UsageSettings loadUsage={loadUsage} />
             ) : activeSection === "tools" ? (
               <ToolsSettings getAccessToken={getAccessToken} />
+            ) : activeSection === "connectors" ? (
+              <ConnectorsSettings getAccessToken={getAccessToken} />
             ) : activeSection === "models" ? (
               <ModelsSettings getAccessToken={getAccessToken} />
             ) : activeSection === "memory" ? (

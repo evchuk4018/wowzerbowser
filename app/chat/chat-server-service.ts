@@ -64,6 +64,9 @@ import {
   messageUnlocksCalendarTools,
 } from "../server/agent/calendar-tool-manifest";
 import { executeCalendarTool } from "../server/agent/calendar-tool";
+import { listConnectorCatalog } from "../server/connectors/connector-service";
+import { connectorToolsToModelTools, executeConnectorTool, executeSearchConnectorTools, SEARCH_CONNECTOR_TOOLS_DEFINITION, SEARCH_CONNECTOR_TOOLS_NAME } from "../server/connectors/connector-tool-router";
+import type { ConnectorTool } from "../../lib/connector-protocol";
 
 const MAX_RESPONSE_MS = 240_000;
 
@@ -167,6 +170,11 @@ export async function generateChatResponse(
     (message) => message.role === "user" && messageUnlocksAutomationTools(message.content),
   );
   const calendarKeywordUnlock = !automationExecution && messageUnlocksCalendarTools(latestUserMessage?.content ?? "");
+  const connectorCatalog = !automationExecution ? await listConnectorCatalog(ownerId).catch((error) => {
+    console.warn({ event: "connectors-unavailable", ownerId, failure: error instanceof Error ? error.name : "UnknownError" });
+    return [];
+  }) : [];
+  const connectorDiscoveryAvailable = connectorCatalog.some((connector) => connector.installed && connector.connections.some((connection) => connection.status === "connected"));
   const toolGroups: FocusedToolGroup[] = [
     ...(pythonTools.length ? [{ id: "python", summary: "Run Python for computation, data processing, or generated files.", keywords: ["python", "calculate", "compute", "chart", "spreadsheet", "generate file"], fallback: true }] : []),
     ...(imageTools.length ? [{ id: "image", summary: "Inspect an attached image.", keywords: ["image", "photo", "picture", "screenshot"], required: Boolean(latestMessage?.attachments?.length) }] : []),
@@ -180,6 +188,7 @@ export async function generateChatResponse(
     ...(skills.length ? [{ id: "skills", summary: "Load task-specific saved skill instructions.", keywords: skills.flatMap(({ name, summary }) => [name, summary]), fallback: true }] : []),
     ...(automationKeywordUnlock ? [{ id: "automations", summary: "Create and manage recurring automations.", keywords: ["automation", "recurring", "schedule", "daily", "weekly"], required: true }] : []),
     ...(calendarKeywordUnlock ? [{ id: "calendar", summary: "Read and manage the connected primary Google Calendar.", keywords: ["calendar", "calender", "caldner", "calnder"], required: true }] : []),
+    ...(connectorDiscoveryAvailable ? [{ id: "connectors", summary: `Discover actions in connected services: ${connectorCatalog.filter((item) => item.installed).map((item) => item.name).join(", ")}.`, keywords: ["gmail", "email", "drive", "file", "notion", "page", "slack", "message", "connected service", "connector", "mcp"], fallback: true }] : []),
     ...customTools.map((tool) => ({ id: `custom:${tool.name}`, summary: tool.description, keywords: [tool.name, tool.description], fallback: true })),
     ...(!automationExecution && (planner.plannedThisTurn || Boolean(planner.list?.items.length)) ? [{ id: "todos", summary: "Update the visible task todo list.", keywords: ["todo", "plan", "steps", "tasks"], required: true }] : []),
     ...(automationExecution ? [{ id: "automation-result", summary: "Complete the current automation run.", keywords: [], required: true }] : []),
@@ -234,6 +243,7 @@ export async function generateChatResponse(
   const activeChatMemoryTools = selected("chat-memory") ? chatMemoryTools : [];
   const activeUserMemoryTools = selected("user-memory") ? userMemoryTools : [];
   const activeCustomTools = customTools.filter((tool) => selected(`custom:${tool.name}`));
+  let discoveredConnectorTools: ConnectorTool[] = [];
   const customDefinitions = customToolDefinitions(activeCustomTools);
   const skillTools = selected("skills") && !automationExecution ? SKILL_TOOL_DEFINITIONS : [];
   const todoTools = selected("todos") && !automationExecution ? TODO_TOOL_DEFINITIONS : [];
@@ -247,7 +257,7 @@ export async function generateChatResponse(
   }));
   chatRequest = { ...chatRequest, messages: contextualMessages };
   const allowedProjectIds = new Set([...authoritativePdfs.values()].map((document) => document.projectId).filter((projectId): projectId is string => Boolean(projectId)));
-  const baseToolDefinitions = [...activePythonTools, ...activeImageTools, ...activeWebTools, ...activeDeepResearchTools, ...pdfEditTools, ...activePhaseTools, ...customDefinitions, ...activeChatMemoryTools, ...activeUserMemoryTools, ...skillTools, ...todoTools, ...automationResultTools, ...contextTools];
+  const baseToolDefinitions = [...activePythonTools, ...activeImageTools, ...activeWebTools, ...activeDeepResearchTools, ...pdfEditTools, ...activePhaseTools, ...customDefinitions, ...activeChatMemoryTools, ...activeUserMemoryTools, ...skillTools, ...todoTools, ...automationResultTools, ...contextTools, ...(connectorDiscoveryAvailable && selected("connectors") ? [SEARCH_CONNECTOR_TOOLS_DEFINITION] : [])];
   const imageToolAdvertised = activeImageTools.some((tool) => tool.function.name === INSPECT_IMAGE_TOOL_NAME);
 
   const enqueue = async (event: ChatStreamEvent) => {
@@ -287,7 +297,8 @@ export async function generateChatResponse(
           const dynamicPdfTools = selected("documents")
             ? availablePdfTools(allowedPdfIds.size > 0).filter((tool) => !baseToolDefinitions.some((base) => base.function.name === tool.function.name))
             : [];
-          const toolDefinitions = [...baseToolDefinitions, ...automationDefinitions, ...calendarDefinitions, ...dynamicPdfTools];
+          const dynamicConnectorTools = selected("connectors") ? connectorToolsToModelTools(discoveredConnectorTools) : [];
+          const toolDefinitions = [...baseToolDefinitions, ...automationDefinitions, ...calendarDefinitions, ...dynamicPdfTools, ...dynamicConnectorTools];
           await enqueue({ type: "round", round });
           const systemInstructions = [
             ...runPythonInstructionsFor(Boolean(activePythonTools.length)),
@@ -489,6 +500,18 @@ export async function generateChatResponse(
               result = await executePdfTool(call, { ownerId, conversationId, allowedPdfIds });
             } else if (call.name === SEARCH_CURRENT_CHAT_TOOL_NAME && focusedPlan) {
               result = executeCurrentChatContextTool(call, focusedPlan.searchEntries);
+            } else if (call.name === SEARCH_CONNECTOR_TOOLS_NAME && connectorDiscoveryAvailable) {
+              const discovered = await executeSearchConnectorTools(call, ownerId);
+              discoveredConnectorTools = discovered.tools;
+              result = discovered.result;
+            } else if (call.name.startsWith("connector__") && connectorDiscoveryAvailable) {
+              result = await executeConnectorTool(call, {
+                ownerId,
+                conversationId,
+                jobId: responseId,
+                signal: roundSignal,
+                onApproval: async (approval) => enqueue({ type: "connector_approval", approval }),
+              });
             } else {
               result = {
                 id: call.id,

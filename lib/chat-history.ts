@@ -8,6 +8,7 @@ import type {
 } from "./chat-protocol";
 import type { ChatCitation, ChatSource } from "./chat-citations";
 import type { TodoList } from "./todo-protocol";
+import type { ConnectorApprovalSummary } from "./connector-protocol";
 
 export type ChatMessageStatus = "streaming" | "complete" | "error" | "cancelled";
 
@@ -75,6 +76,7 @@ export type ChatHistoryMessage = {
   annotations?: ChatCitation[];
   sources?: ChatSource[];
   todos?: TodoList;
+  connectorApproval?: ConnectorApprovalSummary;
 };
 
 export type ChatTurnVersion = {
@@ -243,6 +245,7 @@ export function applyChatStreamEvent(
       { ...activity, phase: next.tracePhase ?? 1 },
     ];
   } else if (event.type === "tool_result") {
+    next.connectorApproval = undefined;
     next.activities = next.activities?.map((activity) =>
       activity.kind !== "reasoning" && activity.kind !== "phase_break" && activity.call.id === event.result.id
         ? {
@@ -286,6 +289,8 @@ export function applyChatStreamEvent(
     next.activities = finishRunningActivities(next.activities, true, now);
   } else if (event.type === "done") {
     next.activities = finishRunningActivities(next.activities, true, now);
+  } else if (event.type === "connector_approval") {
+    next.connectorApproval = event.approval;
   }
   return next;
 }

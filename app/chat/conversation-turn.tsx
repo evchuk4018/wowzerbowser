@@ -12,6 +12,7 @@ import type { ChatDocumentAttachment } from "../../lib/chat-document";
 import { fetchChatImage } from "./chat-service";
 import { useEffect, useState } from "react";
 import { loadChatImagePreview } from "./chat-image-preview-loader";
+import { ConnectorApprovalModal } from "../settings/connector-approval-modal";
 
 export type ThinkingTiming = { startedAt: number; now: number };
 
@@ -229,6 +230,12 @@ export function ConversationTurn({
                 <CallActivityIndicator />
               ) : null}
             </div>
+            {assistantMessage.connectorApproval && (
+              <ConnectorApprovalModal
+                approval={assistantMessage.connectorApproval}
+                getAccessToken={getAccessToken}
+              />
+            )}
           </>
         )}
         {assistantMessage.error && <div className="message-error">{assistantMessage.error}</div>}

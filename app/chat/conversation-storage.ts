@@ -287,6 +287,7 @@ export function normalizeStoredMessage(
   if (tracePhase !== undefined && tracePhase >= 1) message.tracePhase = tracePhase;
   if (Array.isArray(candidate.annotations)) message.annotations = candidate.annotations as Message["annotations"];
   if (Array.isArray(candidate.sources)) message.sources = candidate.sources as Message["sources"];
+  if (candidate.connectorApproval && typeof candidate.connectorApproval === "object") message.connectorApproval = candidate.connectorApproval as Message["connectorApproval"];
   if (Array.isArray(candidate.attachments)) {
     const attachments = normalizeChatImageAttachments(candidate.attachments);
     if (attachments.length) message.attachments = attachments;

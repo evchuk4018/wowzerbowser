@@ -16,20 +16,15 @@ import {
 import { DeepSeekDsmlParser } from "./deepseek-dsml";
 import { assertDeepSeekConfigured, DEEPSEEK_BASE_URL, deepSeekHeaders } from "./deepseek-client-config";
 import { DeepSeekError } from "./deepseek-error";
+import type { ModelToolDefinition } from "../../../lib/model-tool-protocol";
 
 export { buildDeepSeekMessages } from "./deepseek-messages";
 export type { DeepSeekMessage } from "./deepseek-messages";
 
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 
-export type DeepSeekToolDefinition = {
-  type: "function";
-  function: {
-    name: string;
-    description: string;
-    parameters: Record<string, unknown>;
-  };
-};
+/** Backwards-compatible alias for manifests that predate provider-neutral tools. */
+export type DeepSeekToolDefinition = ModelToolDefinition;
 
 export type DeepSeekRoundOptions = {
   /**
