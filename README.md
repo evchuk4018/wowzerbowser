@@ -14,7 +14,7 @@ due work; do not create one cron job per user automation.
 After enabling the Supabase Cron and Vault integrations, the production setup is:
 
 ```sql
-select vault.create_secret('https://your-app.example', 'automation_app_url');
+select vault.create_secret('https://wowzerbowser.vercel.app', 'automation_app_url');
 select vault.create_secret('the-same-random-secret-as-vercel', 'automation_dispatch_secret');
 
 select cron.schedule(
@@ -95,7 +95,7 @@ connected account's primary calendar.
 3. Create an OAuth 2.0 client with application type **Web application**.
 4. Add the applicable authorized redirect URIs:
    - `http://localhost:3000/api/integrations/google-calendar/callback`
-   - `https://YOUR_DOMAIN/api/integrations/google-calendar/callback`
+   - `https://wowzerbowser.vercel.app/api/integrations/google-calendar/callback`
 5. Configure:
 
    ```dotenv
