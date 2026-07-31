@@ -162,7 +162,7 @@ export async function generateChatResponse(
   const automationKeywordUnlock = !automationExecution && chatRequest.messages.some(
     (message) => message.role === "user" && messageUnlocksAutomationTools(message.content),
   );
-  const calendarKeywordUnlock = !automationExecution && messageUnlocksCalendarTools(latestUserMessage?.content ?? "");
+  const calendarKeywordUnlock = messageUnlocksCalendarTools(latestUserMessage?.content ?? "");
   const connectorDiscoveryAvailable = connectorCatalog.some((connector) => connector.installed && connector.connections.some((connection) => connection.status === "connected"));
   const potentialDeepResearchTools = automationExecution ? [] : availableDeepResearchTools(true);
   const potentialTodoTools = automationExecution ? [] : TODO_TOOL_DEFINITIONS;
@@ -319,7 +319,7 @@ export async function generateChatResponse(
       try {
         for (let round = 1; ; round += 1) {
           const automationDefinitions = !automationExecution && automationToolsUnlocked ? AUTOMATION_TOOL_DEFINITIONS : [];
-          const calendarDefinitions = !automationExecution && calendarToolsUnlocked ? CALENDAR_TOOL_DEFINITIONS : [];
+          const calendarDefinitions = calendarToolsUnlocked ? CALENDAR_TOOL_DEFINITIONS : [];
           const dynamicPdfTools = selected("documents")
             ? availablePdfTools(allowedPdfIds.size > 0).filter((tool) => !baseToolDefinitions.some((base) => base.function.name === tool.function.name))
             : [];
@@ -335,6 +335,9 @@ export async function generateChatResponse(
             ...customToolInstructions(activeCustomTools),
             ...(skillTools.length ? [skillCatalogInstructions(skills)] : []),
             ...(activeUserMemoryTools.length ? [USER_MEMORY_TOOL_INSTRUCTIONS] : []),
+            ...(calendarDefinitions.length ? [
+              "For calendar requests, use list_calendar_events with an explicit RFC 3339 timeMin and timeMax based on the automation timezone or the user's requested timezone.",
+            ] : []),
             ...(consolidatedMemory ? [consolidatedMemory] : []),
             ...(contextTools.length ? [CURRENT_CHAT_CONTEXT_TOOL_INSTRUCTIONS] : []),
             RESPONSE_STYLE_INSTRUCTIONS,

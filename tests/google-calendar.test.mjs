@@ -34,8 +34,17 @@ test("chat orchestration gates calendar tools by keyword or successful skill rea
   assert.match(chat, /calendarKeywordUnlock.*messageUnlocksCalendarTools\(latestUserMessage/);
   assert.match(chat, /calendarToolsUnlocked = calendarKeywordUnlock/);
   assert.match(chat, /builtinKey === CALENDAR_SKILL_KEY.*calendarToolsUnlocked = true/);
-  assert.match(chat, /calendarToolsUnlocked \? CALENDAR_TOOL_DEFINITIONS : \[\]/);
+  assert.match(chat, /const calendarDefinitions = calendarToolsUnlocked \? CALENDAR_TOOL_DEFINITIONS : \[\]/);
+  assert.match(chat, /For calendar requests, use list_calendar_events/);
   assert.match(chat, /executeCalendarTool\(call, ownerId\)/);
+});
+
+test("automation calendar instructions expose calendar tools without exposing them to unrelated runs", () => {
+  const chat = source("app/chat/chat-server-service.ts");
+  assert.match(chat, /const calendarKeywordUnlock = messageUnlocksCalendarTools\(latestUserMessage\?\.content \?\? ""\)/);
+  assert.match(chat, /const calendarDefinitions = calendarToolsUnlocked \? CALENDAR_TOOL_DEFINITIONS : \[\]/);
+  assert.doesNotMatch(chat, /const calendarKeywordUnlock = !automationExecution/);
+  assert.doesNotMatch(chat, /const calendarDefinitions = !automationExecution/);
 });
 
 test("calendar credentials remain owner-scoped and server-only", () => {
