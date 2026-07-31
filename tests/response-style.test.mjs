@@ -81,8 +81,10 @@ test("system instruction assembly imports response style last after tool instruc
   assert.equal((service.match(/RESPONSE_STYLE_INSTRUCTIONS/g) ?? []).length, 2);
 });
 
-test("new model preferences disable thinking while saved and required reasoning remain supported", () => {
-  assert.equal(DEFAULT_CHAT_MODEL_PREFERENCE.thinking, false);
+test("new model preferences enable high-effort thinking by default", () => {
+  assert.deepEqual(DEFAULT_CHAT_MODEL_PREFERENCE.model, { provider: "deepseek", model: "deepseek-v4-flash" });
+  assert.equal(DEFAULT_CHAT_MODEL_PREFERENCE.thinking, true);
+  assert.equal(DEFAULT_CHAT_MODEL_PREFERENCE.reasoningEffort, "high");
   assert.equal(parseChatModelPreference({
     model: "deepseek-v4-flash",
     thinking: true,
@@ -95,7 +97,7 @@ test("new model preferences disable thinking while saved and required reasoning 
     defaultReasoningEffort: "medium",
     reasoningRequired: false,
   };
-  assert.equal(normalizeModelPreference({ ...DEFAULT_CHAT_MODEL_PREFERENCE, model: metadata.ref }, metadata).thinking, false);
+  assert.equal(normalizeModelPreference({ ...DEFAULT_CHAT_MODEL_PREFERENCE, model: metadata.ref }, metadata).thinking, true);
   assert.equal(normalizeModelPreference({ ...DEFAULT_CHAT_MODEL_PREFERENCE, model: metadata.ref, thinking: true }, metadata).thinking, true);
   assert.equal(normalizeModelPreference({ ...DEFAULT_CHAT_MODEL_PREFERENCE, model: metadata.ref }, { ...metadata, reasoningRequired: true }).thinking, true);
 });
