@@ -92,11 +92,12 @@ test("Qwen summary adapter preserves retryable upstream status", async () => {
   }
 });
 
-test("summary integration remains server-only and hidden from chat protocol surfaces", async () => {
-  const [migration, service, route, protocol, history] = await Promise.all([
+test("summary integration remains server-only and is owned by the worker", async () => {
+  const [migration, service, route, worker, protocol, history] = await Promise.all([
     source("supabase/migrations/20260728000000_chat_summaries.sql"),
     source("app/server/chat/chat-summary-service.ts"),
     source("app/api/chat/route.ts"),
+    source("scripts/background-worker.ts"),
     source("lib/chat-protocol.ts"),
     source("lib/chat-history.ts"),
   ]);
@@ -106,8 +107,8 @@ test("summary integration remains server-only and hidden from chat protocol surf
   assert.match(migration, /chat_summary/);
   assert.match(service, /processChatSummaryForCompletedJob/);
   assert.match(service, /requestKind: "chat_summary"/);
-  assert.match(route, /after\(\(\) => completion\)/);
-  assert.match(route, /processChatSummaryForCompletedJob/);
+  assert.doesNotMatch(route, /after\(|processChatSummaryForCompletedJob/);
+  assert.match(worker, /processChatSummaryForCompletedJob/);
   assert.doesNotMatch(protocol, /ChatSummary/);
   assert.doesNotMatch(history, /ChatSummary|conversationSummary|durableFacts/);
 });

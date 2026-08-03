@@ -41,6 +41,23 @@ async function errorFor(response: Response) {
  return error as Error & { failedStage?: DocumentIngestionStage };
 }
 
+async function waitForDocumentJob(milliseconds: number, signal: AbortSignal): Promise<void> {
+  if (milliseconds <= 0) return;
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }, milliseconds);
+    const abort = () => {
+      clearTimeout(timeout);
+      signal.removeEventListener("abort", abort);
+      reject(Object.assign(new Error("Document preparation was cancelled."), { name: "AbortError" }));
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+  });
+}
+
 export async function uploadChatDocument(input: {
  conversationId:string;
  userMessageId:string;
@@ -57,8 +74,22 @@ export async function uploadChatDocument(input: {
   input.onStageChange?.("uploading");
   const uploaded=await timing.measure(DOCUMENT_INGESTION_STAGES.APPLICATION_UPLOAD,async()=>{const response=await authFetch("/api/chat/documents/upload",{method:"POST",headers:{"content-type":contentType,"x-conversation-id":input.conversationId,"x-document-id":input.document.id,"x-file-name":input.document.file.name},signal:input.signal,body:input.document.file}); if(!response.ok)throw await errorFor(response); return await response.json() as {storageObjectId:string};});
   input.onStageChange?.("parsing");
-  const document=await timing.measure(DOCUMENT_INGESTION_STAGES.FINALIZE_REQUEST,async()=>{const response=await authFetch("/api/chat/documents/finalize",{method:"POST",headers,signal:input.signal,body:JSON.stringify({conversationId:input.conversationId,documentId:input.document.id,storageObjectId:uploaded.storageObjectId,userMessageId:input.userMessageId,jobId:input.jobId,contentType})}); if(!response.ok)throw await errorFor(response); return (await response.json() as {document:ChatDocumentAttachment}).document;});
-  timing.updateMetadata({ pageCount: document.pageCount, ocrPageCount: document.analyzedImageCount ?? 0 });
+   const queued=await timing.measure(DOCUMENT_INGESTION_STAGES.FINALIZE_REQUEST,async()=>{const response=await authFetch("/api/chat/documents/finalize",{method:"POST",headers,signal:input.signal,body:JSON.stringify({conversationId:input.conversationId,documentId:input.document.id,storageObjectId:uploaded.storageObjectId,userMessageId:input.userMessageId,jobId:input.jobId,contentType,filename:input.document.file.name})}); if(!response.ok)throw await errorFor(response); return await response.json() as {processingJobId:string;status:string;document?:ChatDocumentAttachment};});
+   let document=queued.document;
+   let pollDelay=250;
+   while (!document) {
+    await waitForDocumentJob(pollDelay, input.signal);
+    const response=await authFetch(`/api/chat/documents/jobs/${encodeURIComponent(input.conversationId)}/${encodeURIComponent(queued.processingJobId)}`,{signal:input.signal});
+    if(!response.ok)throw await errorFor(response);
+    const snapshot=await response.json() as {status:string;error?:string|null;progress?:{stage?:string};document?:ChatDocumentAttachment};
+    if(snapshot.status === "completed" && snapshot.document) { document=snapshot.document; break; }
+    if(snapshot.status === "failed" || snapshot.status === "cancelled") {
+      const error=Object.assign(new Error(snapshot.error ?? "The document could not be processed."), snapshot.progress?.stage ? { failedStage: snapshot.progress.stage } : {});
+      throw error;
+    }
+    pollDelay=Math.min(2000,Math.round(pollDelay*1.5));
+   }
+   timing.updateMetadata({ pageCount: document.pageCount, ocrPageCount: document.analyzedImageCount ?? 0 });
   timing.finish();
   timing.log((entry)=>console.info(entry));
   return document;

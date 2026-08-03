@@ -11,6 +11,7 @@ const authOwnerId = "supabase-auth-owner";
 const owner = databaseOwnerId(authOwnerId);
 const testPrefix = `db-it-${randomUUID()}`;
 const conversationIds = new Set();
+const storageObjectIds = new Set();
 
 function requestFor(conversationId, jobId, index = 0) {
   return {
@@ -52,6 +53,9 @@ async function claim(conversationId, jobId, token, leaseMs = 6_000) {
 }
 
 test.after(async () => {
+  for (const objectId of storageObjectIds) {
+    await query("delete from app_storage_objects where owner_id=$1 and object_id=$2::uuid", [owner, objectId]);
+  }
   for (const conversationId of conversationIds) {
     await query("delete from chat_jobs where owner_id=$1 and conversation_id=$2", [owner, conversationId]);
     await query("delete from chat_conversations where owner_id=$1 and conversation_id=$2", [owner, conversationId]);
@@ -61,7 +65,7 @@ test.after(async () => {
 
 test("local migrations, atomic chat jobs, document registration, and leased summaries work against real PostgreSQL", async () => {
   const migrationRows = await query("select version from schema_migrations order by version");
-  assert.deepEqual(migrationRows.map((row) => row.version), ["001_initial_schema", "002_seed_catalog", "003_atomic_functions", "004_owner_auth"]);
+  assert.deepEqual(migrationRows.map((row) => row.version), ["001_initial_schema", "002_seed_catalog", "003_atomic_functions", "004_owner_auth", "005_local_filesystem_storage", "006_durable_worker_queue"]);
 
   const conversationId = `${testPrefix}-chat`;
   const jobId = `${testPrefix}-job`;
@@ -102,6 +106,27 @@ test("local migrations, atomic chat jobs, document registration, and leased summ
   assert.equal(claims.filter((value) => value.claimed).length, 1);
   assert.equal(claims.filter((value) => !value.claimed).length, 1);
 
+  const recoveryConversation = `${testPrefix}-recovery`;
+  const recoveryJob = `${testPrefix}-recovery-job`;
+  await submit(requestFor(recoveryConversation, recoveryJob, 3));
+  const recoveryToken = randomUUID();
+  const firstRecoveryClaim = await claim(recoveryConversation, recoveryJob, recoveryToken);
+  assert.equal(firstRecoveryClaim.claimed, true);
+  await query("select append_chat_job_events($1,$2,$3,$4::uuid,$5::jsonb) as inserted", [
+    owner,
+    recoveryConversation,
+    recoveryJob,
+    recoveryToken,
+    jsonb([{ eventId: `${recoveryJob}:1`, eventIndex: 1, event: { type: "text", text: "before restart" } }]),
+  ]);
+  await query("update chat_jobs set lease_expires_at=now()-interval '1 second' where owner_id=$1 and conversation_id=$2 and job_id=$3", [owner, recoveryConversation, recoveryJob]);
+  const [recovered] = await query("select claim_next_chat_job($1,$2::uuid,$3,$4) as result", [owner, randomUUID(), 6_000, 3]);
+  assert.equal(recovered.result.claimed, true);
+  assert.equal(recovered.result.jobId, recoveryJob);
+  assert.equal(recovered.result.attemptCount, 2);
+  assert.equal(recovered.result.nextEventIndex, 2);
+  await query("select cancel_chat_job_and_finalize_message($1,$2,$3) as result", [owner, recoveryConversation, recoveryJob]);
+
   const cancelledConversation = `${testPrefix}-cancel`;
   const cancelledJob = `${testPrefix}-cancel-job`;
   await submit(requestFor(cancelledConversation, cancelledJob, 2));
@@ -125,6 +150,43 @@ test("local migrations, atomic chat jobs, document registration, and leased summ
   assert.equal(registered.result.status, "complete");
   const [document] = await query("select storage_path,status from chat_documents where owner_id=$1 and conversation_id=$2 and document_id=$3", [owner, documentConversation, documentId]);
   assert.deepEqual(document, { storage_path: `${authOwnerId}/${documentConversation}/${documentId}.pdf`, status: "complete" });
+
+  const processingConversation = `${testPrefix}-document-queue`;
+  const processingDocument = `${testPrefix}-queued-pdf`;
+  const processingObject = randomUUID();
+  const processingJob = `${testPrefix}-document-job`;
+  conversationIds.add(processingConversation);
+  storageObjectIds.add(processingObject);
+  await query("insert into chat_conversations(owner_id,conversation_id) values($1,$2)", [owner, processingConversation]);
+  await query("insert into app_storage_objects(object_id,owner_id,conversation_id,document_id,kind,object_key,original_filename,content_type,size,sha256,state,completed_at) values($1::uuid,$2,$3,$4,'document',$5,$6,$7,$8,$9,'complete',now())", [
+    processingObject,
+    owner,
+    processingConversation,
+    processingDocument,
+    `objects/${processingObject}`,
+    "queued.pdf",
+    "application/pdf",
+    10,
+    "a".repeat(64),
+  ]);
+  const processingRequest = { documentId: processingDocument, storageObjectId: processingObject, filename: "queued.pdf", contentType: "application/pdf", userMessageId: null, sourceJobId: null };
+  const [enqueued] = await query("select enqueue_document_processing_job($1,$2,$3,$4,$5,$6::uuid,$7::jsonb) as result", [owner, processingConversation, processingJob, `${processingDocument}:${processingObject}`, processingDocument, processingObject, jsonb(processingRequest)]);
+  assert.equal(enqueued.result.status, "queued");
+  const [idempotent] = await query("select enqueue_document_processing_job($1,$2,$3,$4,$5,$6::uuid,$7::jsonb) as result", [owner, processingConversation, `${processingJob}-retry`, `${processingDocument}:${processingObject}`, processingDocument, processingObject, jsonb(processingRequest)]);
+  assert.equal(idempotent.result.jobId, processingJob);
+  const documentClaims = await Promise.all([
+    query("select claim_next_document_processing_job($1,$2::uuid,$3,$4) as result", [owner, randomUUID(), 15_000, 3]),
+    query("select claim_next_document_processing_job($1,$2::uuid,$3,$4) as result", [owner, randomUUID(), 15_000, 3]),
+  ]);
+  const claimedDocuments = documentClaims.map(([row]) => row.result).filter((result) => result.claimed);
+  assert.equal(claimedDocuments.length, 1);
+  const documentClaim = claimedDocuments[0];
+  assert.equal(documentClaim.jobId, processingJob);
+  const [heartbeat] = await query("select heartbeat_document_processing_job($1,$2,$3,$4::uuid,$5,$6::jsonb) as result", [owner, processingConversation, processingJob, documentClaim.leaseToken, 15_000, jsonb({ stage: "native-parsing", completed: 1, total: 1 })]);
+  assert.equal(heartbeat.result.active, true);
+  await query("select cancel_document_processing_job($1,$2,$3) as result", [owner, processingConversation, processingJob]);
+  const [cancelledDocument] = await query("select status from document_processing_jobs where owner_id=$1 and conversation_id=$2 and job_id=$3", [owner, processingConversation, processingJob]);
+  assert.equal(cancelledDocument.status, "cancelled");
 
   await enqueueChatSummaryTask({ ownerId: authOwnerId, conversationId, sourceJobId: jobId, sourceTurnId: request.persistence.turnId, sourceVersionId: request.persistence.versionId, sourcePosition: 0, mode: "incremental" });
   const tasks = await Promise.all([claimNextChatSummaryTask(authOwnerId, conversationId), claimNextChatSummaryTask(authOwnerId, conversationId)]);

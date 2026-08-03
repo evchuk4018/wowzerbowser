@@ -2,6 +2,7 @@ import { after, NextResponse } from "next/server";
 import { authorizeOwnerSession } from "../../../../auth/owner-auth-service";
 import { DOCUMENT_CONTENT_TYPES } from "../../../../../lib/chat-document";
 import { deleteDocument } from "../../../../server/chat/chat-document-store";
+import { deleteDocumentProcessingJobsForDocument } from "../../../../server/chat/document-processing-job-store";
 import { cleanupEmptyChatConversation } from "../../../../server/chat/chat-conversation-service";
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -14,7 +15,7 @@ function scheduleCleanup(task: () => Promise<unknown>): void {
   }
 }
 
-export function createDeleteHandler(deps = { authorizeOwnerSession, deleteDocument, cleanupEmptyChatConversation }) {
+export function createDeleteHandler(deps = { authorizeOwnerSession, deleteDocument, deleteDocumentProcessingJobsForDocument, cleanupEmptyChatConversation }) {
   return async (request: Request) => {
     const owner = await deps.authorizeOwnerSession(request);
     if (!owner) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
@@ -32,6 +33,7 @@ export function createDeleteHandler(deps = { authorizeOwnerSession, deleteDocume
     }
 
     try {
+      await deps.deleteDocumentProcessingJobsForDocument?.(owner.id, body.conversationId, body.documentId);
       await deps.deleteDocument({
         ownerId: owner.id,
         conversationId: body.conversationId,

@@ -203,10 +203,10 @@ test("agent memory tools keep server-owned provenance and expose all requested o
 });
 
 test("post-chat dreaming remains isolated from normal response delivery", async () => {
-  const route = await source("app/api/chat/route.ts");
-  assert.match(route, /await completion/);
-  assert.match(route, /processChatSummaryForCompletedJob/);
-  assert.match(route, /processDreamingForCompletedJob/);
-  assert.match(route, /user-memory-dreaming-background-failed/);
-  assert.match(route, /chat-summary-background-failed/);
+  const [route, worker] = await Promise.all([source("app/api/chat/route.ts"), source("scripts/background-worker.ts")]);
+  assert.doesNotMatch(route, /after\(|processChatSummaryForCompletedJob|processDreamingForCompletedJob/);
+  assert.match(worker, /processChatSummaryForCompletedJob/);
+  assert.match(worker, /processDreamingForCompletedJob/);
+  assert.match(worker, /user-memory-dreaming-worker-failed/);
+  assert.match(worker, /chat-summary-worker-failed/);
 });

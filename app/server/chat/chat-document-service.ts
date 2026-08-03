@@ -32,6 +32,7 @@ async function processSelectedPdfPages(input: {
   signal?: AbortSignal;
   timing: DocumentIngestionTiming;
   visionModel?: string | null;
+  onProgress?: (progress: { stage: string; completed: number; total: number; pageNumber?: number }) => void;
 }): Promise<ChatDocumentPage[]> {
   const results = new Map<number, ChatDocumentPage>();
   for (const page of input.pages) {
@@ -39,10 +40,20 @@ async function processSelectedPdfPages(input: {
   }
   const selected = input.pages.filter((page) => page.needsOcr);
   const batchSize = getPdfOcrConcurrency();
+  let completed = 0;
   for (let start = 0; start < selected.length; start += batchSize) {
     const batch = selected.slice(start, start + batchSize);
+    input.onProgress?.({ stage: DOCUMENT_INGESTION_STAGES.PAGE_RENDERING, completed, total: selected.length });
     const rendered = await input.timing.measure(DOCUMENT_INGESTION_STAGES.PAGE_RENDERING, () => renderPdfPagesSettled(input.bytes, batch.map((page) => page.pageNumber), { signal: input.signal }));
-    const processed = await input.timing.measure(DOCUMENT_INGESTION_STAGES.OCR, () => ocrPdfPages({ pages: batch, renderedPages: rendered.renderedPages, renderFailures: rendered.failures, signal: input.signal, ocrPage: async (page, options) => (await import("../../providers/openrouter/openrouter-image-adapter")).askOpenRouterToOcrPdfPage(page.bytes, { ...options, model: input.visionModel }).then((answer) => answer.content) }));
+    const processed = await input.timing.measure(DOCUMENT_INGESTION_STAGES.OCR, () => ocrPdfPages({
+      pages: batch,
+      renderedPages: rendered.renderedPages,
+      renderFailures: rendered.failures,
+      signal: input.signal,
+      onProgress: ({ completed: batchCompleted, total, page }) => input.onProgress?.({ stage: DOCUMENT_INGESTION_STAGES.OCR, completed: completed + batchCompleted, total: selected.length || total, pageNumber: page.pageNumber }),
+      ocrPage: async (page, options) => (await import("../../providers/openrouter/openrouter-image-adapter")).askOpenRouterToOcrPdfPage(page.bytes, { ...options, model: input.visionModel }).then((answer) => answer.content),
+    }));
+    completed += batch.length;
     for (const page of processed) results.set(page.pageNumber, page);
   }
   return input.pages.slice().sort((left, right) => left.pageNumber - right.pageNumber).map((page) => results.get(page.pageNumber) ?? { pageNumber: page.pageNumber, text: page.nativeText, extractionMethod: page.nativeText.trim() ? "native" : "blank" });
@@ -60,6 +71,7 @@ export type PdfIngestionInput = {
   alreadyUploaded?: boolean;
   signal?: AbortSignal;
   timing?: DocumentIngestionTiming;
+  onProgress?: (progress: { stage: string; completed?: number; total?: number; pageNumber?: number }) => void;
   projectId?: string; revisionId?: string; parentRevisionId?: string | null; origin?: "generated" | "uploaded"; editable?: boolean; sourceCompleteness?: "complete" | "entrypoint-only";
 };
 
@@ -171,7 +183,7 @@ export function createPdfIngestor(overrides: Partial<PdfIngestionDependencies> =
       const pagesNeedingOcr = ocrInputs.filter((page) => page.needsOcr).map((page) => page.pageNumber);
       let pages: ChatDocumentPage[];
       if (pagesNeedingOcr.length > 0) {
-        pages = await processSelectedPdfPages({ bytes: input.bytes, pages: ocrInputs, signal: input.signal, timing, visionModel });
+        pages = await processSelectedPdfPages({ bytes: input.bytes, pages: ocrInputs, signal: input.signal, timing, visionModel, onProgress: input.onProgress });
         if (pages.some((page) => page.failure)) timing.markFailed(DOCUMENT_INGESTION_STAGES.OCR);
       } else {
         pages = ocrInputs.map((page) => ({ pageNumber: page.pageNumber, text: page.nativeText, extractionMethod: page.nativeText.trim() ? "native" : "blank" }));
@@ -192,13 +204,40 @@ export function createPdfIngestor(overrides: Partial<PdfIngestionDependencies> =
 
 export const ingestPdf = createPdfIngestor();
 
-export async function ingestDocx(input: { ownerId: string; conversationId: string; documentId: string; filename: string; bytes: Uint8Array; storageObjectId?: string; userMessageId?: string; jobId?: string; alreadyUploaded?: boolean; signal?: AbortSignal; timing?: DocumentIngestionTiming; projectId?: string; revisionId?: string; parentRevisionId?: string | null; origin?: "generated" | "uploaded"; editable?: boolean; sourceCompleteness?: "complete" | "entrypoint-only" }): Promise<ChatDocumentAttachment> {
+async function analyzeDocxImagesBounded(
+  images: Awaited<ReturnType<typeof parseDocx>>["images"],
+  concurrency: number,
+  analyze: (image: (typeof images)[number]) => Promise<{ imageNumber: number; visibleText: string | null; mainVisuals: string | null }>,
+  onProgress?: (progress: { stage: string; completed: number; total: number; pageNumber?: number }) => void,
+): Promise<PromiseSettledResult<{ imageNumber: number; visibleText: string | null; mainVisuals: string | null }>[]> {
+  const results: PromiseSettledResult<{ imageNumber: number; visibleText: string | null; mainVisuals: string | null }>[] = [];
+  let next = 0;
+  let completed = 0;
+  const worker = async () => {
+    while (true) {
+      const index = next++;
+      if (index >= images.length) return;
+      try {
+        results[index] = { status: "fulfilled", value: await analyze(images[index]) };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      } finally {
+        completed += 1;
+        onProgress?.({ stage: DOCUMENT_INGESTION_STAGES.DOCX_IMAGE_ANALYSIS, completed, total: images.length, pageNumber: images[index].imageNumber });
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), Math.max(1, images.length)) }, () => worker()));
+  return results;
+}
+
+export async function ingestDocx(input: { ownerId: string; conversationId: string; documentId: string; filename: string; bytes: Uint8Array; storageObjectId?: string; userMessageId?: string; jobId?: string; alreadyUploaded?: boolean; signal?: AbortSignal; timing?: DocumentIngestionTiming; onProgress?: (progress: { stage: string; completed?: number; total?: number; pageNumber?: number }) => void; projectId?: string; revisionId?: string; parentRevisionId?: string | null; origin?: "generated" | "uploaded"; editable?: boolean; sourceCompleteness?: "complete" | "entrypoint-only" }): Promise<ChatDocumentAttachment> {
   const timing = createTiming({ documentType: DOCX_CONTENT_TYPE, byteSize: input.bytes.length, alreadyUploaded: input.alreadyUploaded, timing: input.timing });
   const ownsTiming = !input.timing;
   try {
     const visionModel = await configuredVisionModel(input.ownerId).catch(() => null);
     const parsed = await timing.measure(DOCUMENT_INGESTION_STAGES.NATIVE_PARSING, () => {
-      if (input.bytes.length > MAX_PDF_BYTES) throw new Error("Documents must be 25 MiB or smaller.");
+      if (input.bytes.length > MAX_PDF_BYTES) throw new ChatDocumentError("document_too_large", "Documents must be 25 MiB or smaller.", 413);
       return parseDocx(input.bytes);
     });
     timing.updateMetadata({ pageCount: parsed.pages.length });
@@ -206,7 +245,12 @@ export async function ingestDocx(input: { ownerId: string; conversationId: strin
       ? (input.storageObjectId ? await getStorageObjectById({ ownerId: input.ownerId, objectId: input.storageObjectId, conversationId: input.conversationId, state: "complete" }) : null)
       : await timing.measure(DOCUMENT_INGESTION_STAGES.STORAGE_UPLOAD, () => uploadDocumentBytes({ ownerId: input.ownerId, conversationId: input.conversationId, documentId: input.documentId, filename: input.filename, bytes: input.bytes, contentType: DOCX_CONTENT_TYPE, projectId: input.projectId, revisionId: input.revisionId }));
     if (!object || object.kind !== "document" || (object.documentId !== null && object.documentId !== input.documentId) || object.contentType !== DOCX_CONTENT_TYPE || object.size !== input.bytes.byteLength) throw new ChatDocumentError("document_storage_invalid", "The uploaded document object is invalid.", 409);
-    const settled = await timing.measure(DOCUMENT_INGESTION_STAGES.DOCX_IMAGE_ANALYSIS, () => Promise.allSettled(parsed.images.map((image) => analyzeDocumentImage(image.bytes, image.contentType, input.signal, visionModel).then((analysis) => ({ imageNumber: image.imageNumber, ...analysis })))));
+    const settled = await timing.measure(DOCUMENT_INGESTION_STAGES.DOCX_IMAGE_ANALYSIS, () => analyzeDocxImagesBounded(
+      parsed.images,
+      getPdfOcrConcurrency(),
+      (image) => analyzeDocumentImage(image.bytes, image.contentType, input.signal, visionModel).then((analysis) => ({ imageNumber: image.imageNumber, ...analysis })),
+      input.onProgress,
+    ));
     if (settled.some((result) => result.status === "rejected")) timing.markFailed(DOCUMENT_INGESTION_STAGES.DOCX_IMAGE_ANALYSIS);
     const imageAnalyses = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
     const ocrPageCount = imageAnalyses.filter((analysis) => Boolean(analysis.visibleText?.trim())).length;

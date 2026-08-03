@@ -65,8 +65,8 @@ test("attachment preparation failures clean up only message-free conversations a
 
   assert.match(images, /cleanupEmptyChatConversation/);
   assert.match(images, /scheduleCleanup\(\(\) => dependencies\.cleanupEmptyChatConversation/);
-  assert.match(finalize, /cleanupEmptyChatConversation/);
-  assert.match(finalize, /scheduleCleanup\(\(\) => dependencies\.cleanupEmptyChatConversation/);
+  assert.doesNotMatch(finalize, /cleanupEmptyChatConversation/);
+  assert.doesNotMatch(finalize, /after\(/);
   assert.match(documents, /cleanupEmptyChatConversation/);
   assert.match(documents, /scheduleCleanup\(\(\) => deps\.cleanupEmptyChatConversation/);
 });

@@ -7,7 +7,6 @@ import { createFinalizeHandler, maxDuration, runtime } from "../app/api/chat/doc
 import nextConfig from "../next.config.ts";
 
 const objectId = "11111111-1111-4111-8111-111111111111";
-const document = { id: "document", name: "a.pdf", contentType: "application/pdf", size: 8, pageCount: 1, tokenEstimate: 1, hasImages: false, imageCount: 0, analyzedImageCount: 0, imageAnalyses: [] };
 const storageObject = { objectId, ownerId: "owner", conversationId: "conversation", documentId: "document", messageId: null, projectId: null, revisionId: null, kind: "document", objectKey: `objects/${objectId}`, originalFilename: "a.pdf", contentType: "application/pdf", size: 8, sha256: "a".repeat(64), state: "complete", createdAt: new Date().toISOString(), completedAt: new Date().toISOString() };
 
 test("document upload route rejects unauthorized calls before reading bytes", async () => {
@@ -57,48 +56,37 @@ test("finalize route uses the Node runtime and long duration required for PDF in
   assert.equal(maxDuration, 300);
 });
 
-test("Next traces native canvas for both PDF execution routes", () => {
+test("the worker owns the native PDF runtime while web routes keep the external packages available", () => {
   assert.deepEqual(nextConfig.serverExternalPackages, ["@napi-rs/canvas", "pdfjs-dist"]);
-  const includes = nextConfig.outputFileTracingIncludes;
-  for (const route of ["/api/chat", "/api/chat/documents/finalize"]) {
-    assert.ok(includes?.[route]?.some((entry) => entry.includes("pdfjs-dist")));
-    assert.ok(includes?.[route]?.some((entry) => entry.includes("@napi-rs/canvas-linux-x64-gnu")));
-    assert.ok(includes?.[route]?.some((entry) => entry.includes("@napi-rs/canvas-linux-x64-musl")));
-    assert.ok(includes?.[route]?.some((entry) => entry.includes("@napi-rs/canvas-linux-arm64-gnu")));
-    assert.ok(includes?.[route]?.some((entry) => entry.includes("@napi-rs/canvas-linux-arm64-musl")));
-  }
+  assert.equal(nextConfig.outputFileTracingIncludes, undefined);
 });
 
-test("finalize route reads the owner-scoped object and never accepts a URL", async () => {
-  let ingestInput;
+test("finalize route only enqueues owner-scoped processing and never parses in the web request", async () => {
+  let enqueueInput;
   const handler = createFinalizeHandler({
     authorizeOwnerSession: async () => ({ id: "owner" }),
     ensureChatDocumentSchema: async () => undefined,
-    readPendingDocumentUpload: async () => ({ object: storageObject, bytes: new Uint8Array(8) }),
-    ingestPdf: async (input) => { ingestInput = input; return document; },
-    ingestDocx: async () => { throw new Error("not called"); },
-    cleanupEmptyChatConversation: async () => undefined,
+    enqueueDocumentProcessingJob: async (input) => {
+      enqueueInput = input;
+      return { jobId: "processing-job", documentId: input.documentId, status: "queued", error: null, progress: {}, document: null, createdAt: "", updatedAt: "" };
+    },
   });
   const response = await handler(new Request("http://test", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: "conversation", documentId: "document", storageObjectId: objectId, userMessageId: "message", jobId: "job", contentType: "application/pdf" }) }));
-  assert.equal(response.status, 200);
-  assert.equal(ingestInput.storageObjectId, objectId);
-  assert.equal(ingestInput.alreadyUploaded, true);
-  assert.equal(ingestInput.downloadUrl, undefined);
+  assert.equal(response.status, 202);
+  assert.equal((await response.json()).processingJobId, "processing-job");
+  assert.equal(enqueueInput.storageObjectId, objectId);
+  assert.equal(enqueueInput.sourceJobId, "job");
 });
 
-test("finalize route redacts storage/parser failures", async () => {
+test("finalize route redacts queue failures", async () => {
   const handler = createFinalizeHandler({
     authorizeOwnerSession: async () => ({ id: "owner" }),
     ensureChatDocumentSchema: async () => undefined,
-    readPendingDocumentUpload: async () => { throw new ChatDocumentError("document_storage_invalid", "secret-download-token", 502); },
-    ingestPdf: async () => { throw new Error("not called"); },
-    ingestDocx: async () => { throw new Error("not called"); },
-    cleanupEmptyChatConversation: async () => undefined,
+    enqueueDocumentProcessingJob: async () => { throw new Error("secret-provider-token"); },
   });
   const response = await handler(new Request("http://test", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: "conversation", documentId: "document", storageObjectId: objectId, userMessageId: "message", jobId: "job", contentType: "application/pdf" }) }));
   const payload = await response.json();
-  assert.equal(response.status, 502);
-  assert.equal(payload.failedStage, "storage-read");
-  assert.equal(payload.error, "The document could not be read.");
-  assert.doesNotMatch(JSON.stringify(payload), /secret-download-token/);
+  assert.equal(response.status, 503);
+  assert.equal(payload.error, "The document could not be queued for background processing.");
+  assert.doesNotMatch(JSON.stringify(payload), /secret-provider-token/);
 });

@@ -36,7 +36,10 @@ test("document preparation uploads and finalizes immediately for PDF/DOCX flows"
       return new Response(JSON.stringify({ storageObjectId: "11111111-1111-4111-8111-111111111111" }), { status: 200 });
     }
     if (String(url).endsWith("/finalize")) {
-      return new Response(JSON.stringify({ document: attachment }), { status: 200 });
+      return new Response(JSON.stringify({ processingJobId: "processing-job", status: "queued" }), { status: 202 });
+    }
+    if (String(url).includes("/api/chat/documents/jobs/")) {
+      return new Response(JSON.stringify({ jobId: "processing-job", status: "completed", progress: { stage: "completed" }, document: attachment }), { status: 200 });
     }
     throw new Error(`Unexpected request: ${url}`);
   };
@@ -55,6 +58,7 @@ test("document preparation uploads and finalizes immediately for PDF/DOCX flows"
     assert.deepEqual(calls.map(({ url, method }) => [url, method]), [
       ["/api/chat/documents/upload", "POST"],
       ["/api/chat/documents/finalize", "POST"],
+      ["/api/chat/documents/jobs/conversation-1/processing-job", "GET"],
     ]);
     assert.deepEqual(stages, ["uploading", "parsing"]);
   } finally {

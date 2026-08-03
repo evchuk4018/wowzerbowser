@@ -35,9 +35,9 @@ test("chat submission is durable, idempotent, and uses per-job event ordinals", 
   assert.match(runner, /options\.onEvent/);
   assert.match(runner, /await eventWriter\.drain\(\)/);
   assert.match(store, /CHAT_JOB_LEASE_MS/);
-  assert.match(route, /after\(\(\) => completion\)/);
+  assert.match(route, /streamChatJob/);
   assert.match(route, /text\/event-stream/);
-  assert.doesNotMatch(route, /request\.signal/);
+  assert.doesNotMatch(route, /runChatJob|generateChatResponse/);
   assert.match(atomicSql, /lease_expires_at/);
   assert.match(atomicSql, /heartbeat_at/);
   assert.match(atomicSql, /attempt_count/);

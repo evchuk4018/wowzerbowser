@@ -341,7 +341,8 @@ test("keeps DeepSeek access server-side and uses the V4 thinking contract", asyn
   assert.match(messages, /role: "system"/);
   assert.match(messages, /tool_call_id/);
   assert.match(route, /authorizeOwnerSession/);
-  assert.match(route, /after\(\(\) => completion\)/);
+  assert.match(route, /streamChatJob/);
+  assert.doesNotMatch(route, /after\(|runChatJob|generateChatResponse/);
   assert.match(route, /text\/event-stream/);
   assert.match(modelsRoute, /composerChatModels/);
   assert.match(modelsRoute, /discoverChatModels/);

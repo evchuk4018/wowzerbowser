@@ -43,10 +43,17 @@ test("startup is guarded by the host mount check and container isolation check",
   assert.match(entrypoint, /\/srv\/storage\/media/);
 });
 
-test("background worker runs bounded local-storage maintenance", async () => {
-  const worker = await read("scripts/background-worker.mjs");
-  assert.match(worker, /mode: "local-storage-maintenance"/);
+test("background worker runs the PostgreSQL queue with bounded maintenance", async () => {
+  const worker = await read("scripts/background-worker.ts");
+  const wrapper = await read("scripts/background-worker.mjs");
+  assert.match(worker, /mode: "postgresql-durable-queue"/);
+  assert.match(worker, /claimNextChatJob/);
+  assert.match(worker, /claimNextDocumentProcessingJob/);
+  assert.match(worker, /runClaimedChatJob/);
+  assert.match(worker, /runClaimedDocumentProcessingJob/);
   assert.match(worker, /runStorageMaintenance/);
-  assert.match(worker, /storageMaintenanceIntervalMs/);
-  assert.match(worker, /--health/);
+  assert.match(worker, /chatConcurrency/);
+  assert.match(worker, /ocrConcurrency/);
+  assert.match(worker, /background-worker-queue-poll/);
+  assert.match(wrapper, /--health/);
 });

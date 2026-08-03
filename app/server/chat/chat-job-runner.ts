@@ -7,16 +7,22 @@ import type {
 } from "../../../lib/chat-protocol";
 import { generateChatResponse } from "../../chat/chat-server-service";
 import { recordUsage } from "../usage/usage-store";
-import { claimChatJob, createChatJobEventWriter, finishChatJob, renewChatJob } from "./chat-job-store";
+import { claimChatJob, createChatJobEventWriter, finishChatJob, renewChatJob, type ChatJobClaim } from "./chat-job-store";
 import { createChatEventCoalescer } from "./chat-event-coalescer";
 import { CHAT_JOB_HEARTBEAT_MS } from "./chat-job-lease";
 import type { ChatCitation, ChatSource } from "../../../lib/chat-citations";
 
 export type RunChatJobOptions = {
   onEvent?: (event: SequencedChatStreamEvent) => void;
+  /** Aborts provider work during graceful worker shutdown without cancelling the job. */
+  shutdownSignal?: AbortSignal;
 };
 
-/** Runs from Next's server-owned `after` lifecycle, never from the request signal. */
+/**
+ * The web process uses this as a small compatibility entrypoint for tests and
+ * maintenance tools. Production execution passes an already-claimed job from
+ * the PostgreSQL worker through runClaimedChatJob.
+ */
 export async function runChatJob(
   ownerId: string,
   conversationId: string,
@@ -25,9 +31,18 @@ export async function runChatJob(
 ): Promise<ChatJobTerminalResponse | null> {
   const claim = await claimChatJob(ownerId, conversationId, jobId);
   if (!claim) return null; // another route instance owns the active lease
+  return runClaimedChatJob(ownerId, claim, options);
+}
+
+/** Execute one lease that was atomically claimed by the background worker. */
+export async function runClaimedChatJob(
+  ownerId: string,
+  claim: ChatJobClaim,
+  options: RunChatJobOptions = {},
+): Promise<ChatJobTerminalResponse | null> {
   if (claim.status === "failed") {
     return {
-      jobId,
+      jobId: claim.jobId,
       status: "failed",
       error: claim.error ?? "The chat worker stopped before the job completed.",
       usage: null,
@@ -38,11 +53,15 @@ export async function runChatJob(
   if (!request) return null;
   const controller = new AbortController();
   const leaseToken = claim.leaseToken;
+  const onShutdown = () => {
+    controller.abort();
+  };
+  options.shutdownSignal?.addEventListener("abort", onShutdown, { once: true });
   let cancellationObserved = false;
   let heartbeatInFlight: Promise<void> | null = null;
   const heartbeat = setInterval(() => {
     if (heartbeatInFlight || controller.signal.aborted) return;
-    heartbeatInFlight = renewChatJob(ownerId, conversationId, jobId, leaseToken)
+    heartbeatInFlight = renewChatJob(ownerId, claim.conversationId, claim.jobId, leaseToken)
       .then((state) => {
         if (state.cancelled) {
           cancellationObserved = true;
@@ -58,11 +77,11 @@ export async function runChatJob(
         heartbeatInFlight = null;
       });
   }, CHAT_JOB_HEARTBEAT_MS);
-  const eventWriter = createChatJobEventWriter(ownerId, conversationId, jobId, leaseToken);
+  const eventWriter = createChatJobEventWriter(ownerId, claim.conversationId, claim.jobId, leaseToken);
   let output = "";
   let usage: ChatUsage | null = null;
   let generationError: string | null = null;
-  let nextEventIndex = 1;
+  let nextEventIndex = Math.max(1, claim.nextEventIndex);
   let completedProviderOutputWindowMs = 0;
   let roundFirstOutputAt: number | null = null;
   let roundLastOutputAt: number | null = null;
@@ -73,7 +92,7 @@ export async function runChatJob(
     nextEventIndex += 1;
     eventWriter.enqueue({ eventIndex: sequence, event });
     try {
-      options.onEvent?.({ ...event, sequence, jobId });
+      options.onEvent?.({ ...event, sequence, jobId: claim.jobId });
     } catch {
       // Live delivery is best effort. Durable execution must survive a
       // closed or failed response stream.
@@ -117,7 +136,7 @@ export async function runChatJob(
       : Math.max(0, roundLastOutputAt - roundFirstOutputAt);
     const outputWindowMs = completedProviderOutputWindowMs + currentRoundWindowMs || null;
     return {
-      jobId,
+      jobId: claim.jobId,
       status,
       error,
       usage,
@@ -146,7 +165,7 @@ export async function runChatJob(
           provider,
           model,
           requestKind: "chat",
-          requestId: jobId,
+          requestId: claim.jobId,
           round,
           usage: recordedUsage,
           source: providerUsage ? "exact" : "estimated",
@@ -169,21 +188,21 @@ export async function runChatJob(
           provider,
           model,
           requestKind: "reasoning_summary",
-          requestId: jobId,
+          requestId: claim.jobId,
           round: phase * 100_000 + revision,
           usage: summaryUsage,
           source: "exact",
           exactCostUsd,
           unpriced: exactCostUsd === undefined,
-          conversationId,
-          jobId,
+          conversationId: claim.conversationId,
+          jobId: claim.jobId,
         });
       },
     );
     await drainEventPipelines();
     if (!controller.signal.aborted) {
       const status = generationError ? "failed" : "completed";
-      const applied = await finishChatJob(ownerId, conversationId, jobId, leaseToken, status, { error: generationError, usage, finalOutput: output });
+      const applied = await finishChatJob(ownerId, claim.conversationId, claim.jobId, leaseToken, status, { error: generationError, usage, finalOutput: output });
       return applied ? terminalResponse(status, generationError) : null;
     }
     return cancellationObserved ? terminalResponse("cancelled", null) : null;
@@ -193,10 +212,11 @@ export async function runChatJob(
     if (controller.signal.aborted) {
       return cancellationObserved ? terminalResponse("cancelled", null) : null;
     }
-    const applied = await finishChatJob(ownerId, conversationId, jobId, leaseToken, "failed", { error: message, usage, finalOutput: output });
+    const applied = await finishChatJob(ownerId, claim.conversationId, claim.jobId, leaseToken, "failed", { error: message, usage, finalOutput: output });
     return applied ? terminalResponse("failed", message) : null;
   } finally {
     await drainEventPipelines().catch(() => undefined);
     clearInterval(heartbeat);
+    options.shutdownSignal?.removeEventListener("abort", onShutdown);
   }
 }

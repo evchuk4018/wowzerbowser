@@ -19,6 +19,16 @@ export type PersistedChatJobEvent = {
   event: ChatStreamEvent;
 };
 
+export type ChatJobClaim = {
+  conversationId: string;
+  jobId: string;
+  status: ChatJobStatus;
+  request?: ChatRequest;
+  leaseToken: string;
+  error: string | null;
+  nextEventIndex: number;
+};
+
 export async function createOrGetChatJob(ownerId: string, request: ChatRequest) {
   const requestedAttachments = request.messages.at(-1)?.attachments?.length
     ? await authoritativeAttachmentsForSubmission(ownerId, request)
@@ -40,13 +50,45 @@ export async function claimChatJob(ownerId: string, conversationId: string, jobI
     "select claim_chat_job($1,$2,$3,$4::uuid,$5,$6) as result",
     [databaseOwnerId(ownerId), conversationId, jobId, workerToken, CHAT_JOB_LEASE_MS, CHAT_JOB_MAX_ATTEMPTS],
   ));
-  const claim = row.result as { claimed?: boolean; status?: ChatJobStatus | "missing"; request?: ChatRequest; leaseToken?: string; error?: string } | null;
+  const claim = row.result as { claimed?: boolean; status?: ChatJobStatus | "missing"; request?: ChatRequest; leaseToken?: string; error?: string; nextEventIndex?: number } | null;
   if (!claim?.claimed) return null;
   return {
+    conversationId,
+    jobId,
     status: claim.status as ChatJobStatus,
     request: claim.request as ChatRequest | undefined,
     leaseToken: claim.leaseToken ?? workerToken,
     error: claim.error ?? null,
+    nextEventIndex: Number(claim.nextEventIndex ?? 1),
+  };
+}
+
+/** Claim the oldest queued or expired chat atomically for the real worker. */
+export async function claimNextChatJob(ownerId: string): Promise<ChatJobClaim | null> {
+  const workerToken = randomUUID();
+  const [row] = await withChatPersistenceRetry(() => query<RpcRow>(
+    "select claim_next_chat_job($1,$2::uuid,$3,$4) as result",
+    [databaseOwnerId(ownerId), workerToken, CHAT_JOB_LEASE_MS, CHAT_JOB_MAX_ATTEMPTS],
+  ));
+  const claim = row.result as {
+    claimed?: boolean;
+    status?: ChatJobStatus | "empty" | "missing";
+    conversationId?: string;
+    jobId?: string;
+    request?: ChatRequest;
+    leaseToken?: string;
+    error?: string;
+    nextEventIndex?: number;
+  } | null;
+  if (!claim?.claimed || !claim.conversationId || !claim.jobId) return null;
+  return {
+    conversationId: claim.conversationId,
+    jobId: claim.jobId,
+    status: claim.status as ChatJobStatus,
+    request: claim.request,
+    leaseToken: claim.leaseToken ?? workerToken,
+    error: claim.error ?? null,
+    nextEventIndex: Number(claim.nextEventIndex ?? 1),
   };
 }
 
