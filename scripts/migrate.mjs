@@ -6,6 +6,7 @@ import postgres from "postgres";
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const migrationsDirectory = path.resolve(process.env.DATABASE_MIGRATIONS_DIR ?? path.join(projectRoot, "database", "migrations"));
 const command = process.argv[2] ?? "apply";
+const MIGRATION_LOCK_KEY = "743819264501";
 
 function connectionString() {
   const value = process.env.DATABASE_URL?.trim();
@@ -27,7 +28,10 @@ async function ensureMigrationTable(sql) {
 
 async function main() {
   const sql = postgres(connectionString(), { max: 1, connect_timeout: 10, idle_timeout: 10, prepare: true, onnotice: () => {} });
+  let migrationLockAcquired = false;
   try {
+    await sql.unsafe("select pg_advisory_lock($1::bigint)", [MIGRATION_LOCK_KEY]);
+    migrationLockAcquired = true;
     await ensureMigrationTable(sql);
     const files = await migrationFiles();
     const appliedRows = await sql.unsafe("select version, applied_at from public.schema_migrations order by version");
@@ -61,6 +65,7 @@ async function main() {
     }
     console.log(`migration-complete\tapplied=${appliedCount}\tcurrent=${files.at(-1)?.version ?? "none"}`);
   } finally {
+    if (migrationLockAcquired) await sql.unsafe("select pg_advisory_unlock($1::bigint)", [MIGRATION_LOCK_KEY]).catch(() => undefined);
     await sql.end({ timeout: 5 });
   }
 }
