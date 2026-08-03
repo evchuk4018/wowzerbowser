@@ -14,7 +14,7 @@ export async function assertChatDocumentTables(): Promise<void> {
     query("select has_images,image_count,analyzed_image_count,image_analyses from chat_documents limit 0"),
     query("select extraction_method,failure from chat_document_pages limit 0"),
     query("select documents from chat_messages limit 0"),
-    query("select storage_object_id from app_storage_objects limit 0"),
+    query("select object_id from app_storage_objects limit 0"),
   ]);
 }
 

@@ -1,4 +1,5 @@
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { ChatDocumentError } from "../lib/chat-document.ts";
 import { createUploadHandler } from "../app/api/chat/documents/upload/route.ts";
@@ -43,6 +44,12 @@ test("document upload route reports a missing local schema as a structured 503",
   const response = await handler(new Request("http://test", { method: "POST", headers: { "content-type": "application/pdf", "x-conversation-id": "conversation", "x-document-id": "document" }, body: new Uint8Array([1]) }));
   assert.equal(response.status, 503);
   assert.deepEqual(await response.json(), { error: "The document database schema is not ready." });
+});
+
+test("document schema validation checks the storage object primary key", async () => {
+  const source = await readFile(new URL("../app/server/chat/chat-document-store.ts", import.meta.url), "utf8");
+  assert.match(source, /select object_id from app_storage_objects limit 0/);
+  assert.doesNotMatch(source, /select storage_object_id from app_storage_objects limit 0/);
 });
 
 test("finalize route uses the Node runtime and long duration required for PDF ingestion", () => {
