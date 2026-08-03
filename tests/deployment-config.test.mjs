@@ -34,6 +34,8 @@ test("startup is guarded by the host mount check and container isolation check",
   const entrypoint = await read("docker/app-entrypoint.sh");
   assert.match(wrapper, /require-storage-mount\.sh/);
   assert.match(wrapper, /STORAGE_MOUNT_GUARD=verified/);
+  assert.match(wrapper, /deployment\.env/);
+  assert.match(wrapper, /--env-file/);
   assert.match(guard, /mountpoint -q/);
   assert.match(guard, /homelab-storage/);
   assert.match(guard, /root_source=\$\(findmnt/);

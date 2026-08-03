@@ -30,12 +30,13 @@ services:
       dockerfile: Dockerfile
       target: runner
     env_file:
-      - path: .env
+      - path: ${DEPLOYMENT_ENV_FILE:-.env}
         required: false
     environment:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
       PORT: 3000
+      NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://wowzerbowser.vercel.app}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-wowzerbowser}
@@ -81,7 +82,7 @@ services:
       dockerfile: Dockerfile
       target: runner
     env_file:
-      - path: .env
+      - path: ${DEPLOYMENT_ENV_FILE:-.env}
         required: false
     environment:
       NODE_ENV: production

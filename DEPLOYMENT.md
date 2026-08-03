@@ -80,11 +80,13 @@ docker version
 docker compose version
 ```
 
-From the repository checkout on the SSD:
+From the repository checkout on the SSD, keep the deployment environment file
+under the application-owned storage directory so the repository checkout
+contains no deployment secrets:
 
 ```bash
-cp .env.example .env
-chmod 600 .env
+cp .env.example /srv/storage/wowzerbowser/deployment.env
+chmod 600 /srv/storage/wowzerbowser/deployment.env
 ```
 
 Set `APP_UID` and `APP_GID` in `.env` to the deployment user's values from
@@ -101,14 +103,14 @@ repository, image, client-side variables, or issue comments.
 Validate the rendered Compose file:
 
 ```bash
-./docker/compose.sh config
+DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh config
 ```
 
 `config` is read-only and does not require the storage guard. Startup commands
 must use the wrapper:
 
 ```bash
-./docker/compose.sh up -d --build
+DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh up -d --build
 ```
 
 Running `docker compose up` directly leaves the guard unverified; the web and
@@ -119,18 +121,17 @@ worker entrypoints deliberately refuse that startup.
 ```bash
 # Status and health
 ./docker/compose.sh ps
-docker compose ps
 docker inspect --format '{{json .State.Health}}' wowzerbowser-web-1
 
 # Logs
-docker compose logs --tail=200 web postgres background-worker
-docker compose logs -f web
+./docker/compose.sh logs --tail=200 web postgres background-worker
+./docker/compose.sh logs -f web
 
 # Stop without touching persistent data
 ./docker/compose.sh down
 
 # Rebuild and restart after a code update
-./docker/compose.sh up -d --build
+DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh up -d --build
 
 # Inspect the PostgreSQL volume and container mounts
 docker volume inspect wowzerbowser-postgres
@@ -180,12 +181,12 @@ No router port forwarding or public ingress is part of this deployment.
 ## Updates and reboot recovery
 
 Pull only the intended `main` branch, inspect the diff, and preserve the
-`.env` file and Docker volume:
+deployment environment file and Docker volume:
 
 ```bash
 git pull --ff-only
-./docker/compose.sh up -d --build
-docker compose ps
+DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh up -d --build
+DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh ps
 ```
 
 After a host reboot, verify the mount before inspecting the stack. Docker's
@@ -194,7 +195,7 @@ retains its host configuration:
 
 ```bash
 findmnt -T /srv/storage
-docker compose ps
+./docker/compose.sh ps
 tailscale status --self
 tailscale serve status
 ```
@@ -206,8 +207,8 @@ the application checkout.
 ## Verification checklist
 
 ```bash
-docker compose config
-docker compose ps
+DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh config
+DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh ps
 docker inspect wowzerbowser-web-1 --format '{{json .Mounts}}'
 docker inspect wowzerbowser-background-worker-1 --format '{{json .Mounts}}'
 ss -ltnp
