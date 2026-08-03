@@ -46,8 +46,43 @@ test("Discord inbound parsing bounds attachments and restricts CDN origins", () 
   }), /at most 10 attachments/);
 });
 
+test("Discord commands and attachment retries preserve bounded, stable input", async () => {
+  const { parseDiscordCommand } = await import("../app/server/discord/discord-command.ts");
+  const { downloadDiscordAttachment } = await import("../app/server/discord/discord-attachment-adapter.ts");
+  assert.deepEqual(parseDiscordCommand("/new"), { requested: true, prompt: "" });
+  assert.deepEqual(parseDiscordCommand("/NEW summarize this"), { requested: true, prompt: "summarize this" });
+  assert.deepEqual(parseDiscordCommand("hello"), { requested: false, prompt: "hello" });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-length": "3" } });
+  try {
+    const downloaded = await downloadDiscordAttachment({
+      id: "5234567890",
+      filename: "photo.png",
+      contentType: "image/png",
+      size: 3,
+      url: "https://cdn.discordapp.com/attachments/x/y/photo.png",
+    });
+    assert.equal(downloaded.id, "5234567890");
+    assert.equal(downloaded.kind, "image");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Discord submission rejects an unauthorized user before persistence", async () => {
+  const previous = process.env.DISCORD_ALLOWED_USER_ID;
+  process.env.DISCORD_ALLOWED_USER_ID = validMessage.userId;
+  try {
+    const { submitDiscordMessage } = await import("../app/server/discord/discord-chat-service.ts");
+    await assert.rejects(() => submitDiscordMessage({ ...validMessage, messageId: "5234567891", userId: "9234567890" }), /not authorized/);
+  } finally {
+    if (previous === undefined) delete process.env.DISCORD_ALLOWED_USER_ID;
+    else process.env.DISCORD_ALLOWED_USER_ID = previous;
+  }
+});
+
 test("Discord responses are split within limits and link the final chunk", () => {
-  const link = "https://wowzerbowser.vercel.app/chat/conversation-id";
+  const link = "https://homelab.tail861ffd.ts.net/chat/conversation-id";
   const chunks = splitDiscordMessage("word ".repeat(1_200), link);
   assert.ok(chunks.length > 1);
   assert.ok(chunks.every((chunk) => chunk.length <= DISCORD_MESSAGE_CONTENT_LIMIT));
@@ -75,20 +110,27 @@ test("Discord automation delivery acknowledgements require valid message coordin
 test("Discord internal routes enforce server authentication and stay thin", async () => {
   const route = await readFile(new URL("../app/api/internal/discord/messages/route.ts", import.meta.url), "utf8");
   const statusRoute = await readFile(new URL("../app/api/internal/discord/messages/[messageId]/route.ts", import.meta.url), "utf8");
+  const service = await readFile(new URL("../app/server/discord/discord-chat-service.ts", import.meta.url), "utf8");
   assert.match(route, /authorizeDiscordInternalRequest/);
   assert.match(route, /submitDiscordMessage/);
-  assert.match(route, /after\(/);
+  assert.doesNotMatch(route, /after\(|runChatJob|generateChatResponse/);
   assert.match(statusRoute, /authorizeDiscordInternalRequest/);
   assert.match(statusRoute, /discordSubmission/);
   assert.doesNotMatch(route, /getServerClient|runChatJob|fetch\(/);
+  assert.match(service, /processPendingDiscordMessage/);
+  assert.match(service, /finishDiscordMessagePreparation/);
+  assert.doesNotMatch(service, /runChatJob/);
 });
 
 test("Discord migration keeps mapping and idempotency state server-only", async () => {
-  const migration = await readFile(new URL("../supabase/migrations/20260730150000_discord_dm_integration.sql", import.meta.url), "utf8");
+  const [migration, integrationMigration] = await Promise.all([
+    readFile(new URL("../database/migrations/001_initial_schema.sql", import.meta.url), "utf8"),
+    readFile(new URL("../database/migrations/009_local_integration_state.sql", import.meta.url), "utf8"),
+  ]);
   assert.match(migration, /primary key \(owner_id, discord_message_id\)/);
   assert.match(migration, /active_conversation_id/);
-  assert.match(migration, /enable row level security/g);
-  assert.doesNotMatch(migration, /create policy/i);
+  assert.match(integrationMigration, /claim_pending_discord_messages/);
+  assert.match(integrationMigration, /processing_lease_token/);
 });
 
 test("Discord worker proactively polls, opens a DM, and activates delivered conversations", async () => {
@@ -97,10 +139,31 @@ test("Discord worker proactively polls, opens a DM, and activates delivered conv
     readFile(new URL("../app/server/discord/discord-automation-service.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/internal/discord/automation-notifications/route.ts", import.meta.url), "utf8"),
   ]);
+  assert.match(worker, /DISCORD_APP_URL/);
+  assert.match(worker, /internalAppUrl/);
+  assert.match(worker, /SUBMISSION_POLL_INTERVAL_MS/);
   assert.match(worker, /client\.users\.fetch\(allowedUserId\)/);
   assert.match(worker, /user\.createDM\(\)/);
   assert.match(worker, /AUTOMATION_POLL_INTERVAL_MS/);
   assert.match(service, /setActiveDiscordConversation/);
   assert.match(route, /authorizeDiscordInternalRequest/);
   assert.doesNotMatch(route, /getServerClient|client\.users|createDM/);
+});
+
+test("Discord Gateway is optional and uses the local Compose network", async () => {
+  const [compose, dockerfile, worker] = await Promise.all([
+    readFile(new URL("../compose.yaml", import.meta.url), "utf8"),
+    readFile(new URL("../Dockerfile", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/background-worker.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(compose, /discord:/);
+  assert.match(compose, /profiles:\s*\["discord"\]/);
+  assert.match(compose, /DISCORD_APP_URL: http:\/\/web:3000/);
+  assert.match(compose, /worker\/discord-worker\.mjs/);
+  assert.match(compose, /entrypoint: \["node"\]/);
+  const discordBlock = compose.slice(compose.indexOf("  discord:"), compose.indexOf("volumes:"));
+  assert.doesNotMatch(discordBlock, /ports:/);
+  assert.match(dockerfile, /build:discord-worker/);
+  assert.match(dockerfile, /\.next\/worker \.\/worker/);
+  assert.match(worker, /processPendingDiscordMessage/);
 });

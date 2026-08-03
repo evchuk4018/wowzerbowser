@@ -13,8 +13,16 @@ requires_storage_guard=0
 if [ "$#" -eq 0 ]; then
   requires_storage_guard=1
 else
+  skip_option_value=0
   for argument in "$@"; do
+    if [ "$skip_option_value" -eq 1 ]; then
+      skip_option_value=0
+      continue
+    fi
     case "$argument" in
+      --profile|--env-file|--project-name|--file)
+        skip_option_value=1
+        ;;
       --*) ;;
       up|start|restart|run|create)
         requires_storage_guard=1

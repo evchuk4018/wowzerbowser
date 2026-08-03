@@ -5,6 +5,14 @@ import { closeDatabase, databaseOwnerId, jsonb, query } from "../app/server/data
 import { claimNextChatSummaryTask, completeChatSummaryTask, enqueueChatSummaryTask, replaceChatSummaryIfCurrent } from "../app/server/chat/chat-summary-store.ts";
 import { claimDueAutomationRuns, finishAutomationRun } from "../app/server/automations/automation-repository.ts";
 import { nextFutureAutomationRun } from "../app/server/automations/automation-schedule.ts";
+import {
+  claimDiscordMessage,
+  claimPendingDiscordMessage,
+  finishDiscordMessagePreparation,
+  getDiscordSubmission,
+  markDiscordDelivered,
+  updateDiscordSubmission,
+} from "../app/server/discord/discord-repository.ts";
 
 if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required for database integration tests.");
 if (!process.env.APP_OWNER_ID) throw new Error("APP_OWNER_ID is required for database integration tests.");
@@ -15,6 +23,7 @@ const testPrefix = `db-it-${randomUUID()}`;
 const conversationIds = new Set();
 const storageObjectIds = new Set();
 const automationIds = new Set();
+const discordMessageIds = new Set();
 
 function requestFor(conversationId, jobId, index = 0) {
   return {
@@ -63,6 +72,9 @@ test.after(async () => {
     await query("delete from automation_runs where owner_id=$1 and automation_id=$2", [owner, automationId]);
     await query("delete from automations where owner_id=$1 and id=$2", [owner, automationId]);
   }
+  for (const messageId of discordMessageIds) {
+    await query("delete from discord_dm_messages where owner_id=$1 and discord_message_id=$2", [owner, messageId]);
+  }
   for (const conversationId of conversationIds) {
     await query("delete from chat_jobs where owner_id=$1 and conversation_id=$2", [owner, conversationId]);
     await query("delete from chat_conversations where owner_id=$1 and conversation_id=$2", [owner, conversationId]);
@@ -70,9 +82,47 @@ test.after(async () => {
   await closeDatabase();
 });
 
+test("Discord messages are idempotent and recover a preparation lease", async () => {
+  const messageId = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+  discordMessageIds.add(messageId);
+  const input = {
+    messageId,
+    channelId: "2234567890",
+    userId: "3234567890",
+    responseMessageId: "4234567890",
+    content: "/new",
+    attachments: [],
+  };
+  const first = await claimDiscordMessage(authOwnerId, input);
+  assert.equal(first.claimed, true);
+  assert.equal(first.submission.status, "processing");
+  const duplicate = await claimDiscordMessage(authOwnerId, { ...input, content: "should not replace the first delivery" });
+  assert.equal(duplicate.claimed, false);
+  assert.equal(duplicate.submission.status, "processing");
+
+  const claimed = await claimPendingDiscordMessage(authOwnerId);
+  assert.ok(claimed);
+  assert.equal(claimed.message.content, "/new");
+  assert.equal(await claimPendingDiscordMessage(authOwnerId), null);
+  const conversationId = `${testPrefix}-discord-new`;
+  await updateDiscordSubmission(authOwnerId, messageId, { conversationId });
+  await query("update discord_dm_messages set processing_lease_expires_at=now()-interval '1 second' where owner_id=$1 and discord_message_id=$2", [owner, messageId]);
+
+  const recovered = await claimPendingDiscordMessage(authOwnerId);
+  assert.ok(recovered);
+  assert.equal(recovered.conversationId, conversationId);
+  assert.notEqual(recovered.leaseToken, claimed.leaseToken);
+  assert.equal(await finishDiscordMessagePreparation({ ownerId: authOwnerId, messageId, leaseToken: recovered.leaseToken, conversationId, jobId: null, status: "completed", output: "Started a new conversation." }), true);
+  const completed = await getDiscordSubmission(authOwnerId, messageId);
+  assert.deepEqual(completed, { messageId, channelId: input.channelId, responseMessageId: input.responseMessageId, conversationId, jobId: null, status: "completed", error: null, output: "Started a new conversation." });
+  await markDiscordDelivered(authOwnerId, messageId);
+  const [delivered] = await query("select delivered_at is not null as delivered from discord_dm_messages where owner_id=$1 and discord_message_id=$2", [owner, messageId]);
+  assert.equal(delivered.delivered, true);
+});
+
 test("local migrations, atomic chat jobs, document registration, and leased summaries work against real PostgreSQL", async () => {
   const migrationRows = await query("select version from schema_migrations order by version");
-  assert.deepEqual(migrationRows.map((row) => row.version), ["001_initial_schema", "002_seed_catalog", "003_atomic_functions", "004_owner_auth", "005_local_filesystem_storage", "006_durable_worker_queue", "007_durable_image_processing_queue", "008_background_scheduler"]);
+  assert.deepEqual(migrationRows.map((row) => row.version), ["001_initial_schema", "002_seed_catalog", "003_atomic_functions", "004_owner_auth", "005_local_filesystem_storage", "006_durable_worker_queue", "007_durable_image_processing_queue", "008_background_scheduler", "009_local_integration_state"]);
 
   const conversationId = `${testPrefix}-chat`;
   const jobId = `${testPrefix}-job`;

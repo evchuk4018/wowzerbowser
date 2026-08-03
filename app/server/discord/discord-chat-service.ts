@@ -15,16 +15,17 @@ import { configuredOwner } from "../../auth/owner-auth-service";
 import { analyzeAndStoreChatImages } from "../chat/chat-image-service";
 import { ingestDocx, ingestPdf } from "../chat/chat-document-service";
 import { createOrGetChatJob, getChatJob } from "../chat/chat-job-store";
-import { runChatJob } from "../chat/chat-job-runner";
+import { getAuthorizedDocument } from "../chat/chat-document-store";
 import { getChatConversation } from "../chat/chat-history-store";
-import { generateAndPersistChatTitle } from "../chat/chat-title-service";
-import { processChatSummaryForCompletedJob } from "../chat/chat-summary-service";
 import { getChatUserPreferences } from "../chat/chat-user-preferences-store";
-import { processDreamingForCompletedJob } from "../memory/dreaming-service";
 import { downloadDiscordAttachment } from "./discord-attachment-adapter";
+import { parseDiscordCommand } from "./discord-command";
 import {
   activeDiscordConversation,
   claimDiscordMessage,
+  claimPendingDiscordMessage,
+  failDiscordMessagePreparation,
+  finishDiscordMessagePreparation,
   getDiscordSubmission,
   listPendingDiscordSubmissions,
   markDiscordDelivered,
@@ -49,11 +50,6 @@ function activeMessages(conversation: ChatConversation | null) {
   });
 }
 
-function newCommand(content: string): { requested: boolean; prompt: string } {
-  const match = /^\/new(?:\s+([\s\S]*))?$/i.exec(content.trim());
-  return match ? { requested: true, prompt: match[1]?.trim() ?? "" } : { requested: false, prompt: content.trim() };
-}
-
 async function prepareAttachments(input: {
   ownerId: string;
   conversationId: string;
@@ -76,6 +72,11 @@ async function prepareAttachments(input: {
     : [];
   const documents: ChatDocumentAttachment[] = [];
   for (const document of downloaded.filter((item) => item.kind === "document")) {
+    const existing = await getAuthorizedDocument(input.ownerId, input.conversationId, document.id);
+    if (existing && existing.size === document.bytes.byteLength && existing.contentType === document.contentType) {
+      documents.push(existing);
+      continue;
+    }
     if (document.contentType === "application/pdf") {
       documents.push(await ingestPdf({
         ownerId: input.ownerId,
@@ -101,14 +102,21 @@ async function prepareAttachments(input: {
   return { images, documents };
 }
 
-async function executeDiscordMessage(ownerId: string, message: DiscordInboundMessage): Promise<void> {
-  const command = newCommand(message.content);
+async function executeDiscordMessage(ownerId: string, message: DiscordInboundMessage, leaseToken: string, persistedConversationId: string | null): Promise<void> {
+  const command = parseDiscordCommand(message.content);
   const existingConversationId = await activeDiscordConversation(ownerId, message.userId, message.channelId);
-  const conversationId = command.requested || !existingConversationId ? randomUUID() : existingConversationId;
+  const conversationId = persistedConversationId ?? (command.requested || !existingConversationId ? randomUUID() : existingConversationId);
+  // Persist the conversation before attachment work so a worker restart retries
+  // the same /new conversation and the same idempotent chat job.
+  await updateDiscordSubmission(ownerId, message.messageId, { conversationId });
   await setActiveDiscordConversation(ownerId, message.userId, message.channelId, conversationId);
   if (command.requested && !command.prompt && !message.attachments.length) {
-    await updateDiscordSubmission(ownerId, message.messageId, {
+    await finishDiscordMessagePreparation({
+      ownerId,
+      messageId: message.messageId,
+      leaseToken,
       conversationId,
+      jobId: null,
       status: "completed",
       output: "Started a new conversation.",
     });
@@ -159,21 +167,15 @@ async function executeDiscordMessage(ownerId: string, message: DiscordInboundMes
     jobId: created.jobId,
     status: "running",
   });
-  const terminal = await runChatJob(ownerId, conversationId, created.jobId);
-  const persisted = await getChatJob(ownerId, conversationId, created.jobId);
-  const completed = terminal ?? persisted;
-  if (!completed || completed.status !== "completed") {
-    throw new Error(completed?.error || "Discord chat generation did not complete.");
-  }
-  await updateDiscordSubmission(ownerId, message.messageId, {
-    status: "completed",
-    output: completed.finalOutput ?? "",
+  const handedOff = await finishDiscordMessagePreparation({
+    ownerId,
+    messageId: message.messageId,
+    leaseToken,
+    conversationId,
+    jobId: created.jobId,
+    status: "running",
   });
-  if (!conversation?.turns.length) {
-    await generateAndPersistChatTitle(ownerId, conversationId, prompt).catch(() => undefined);
-  }
-  await processChatSummaryForCompletedJob(ownerId, conversationId, created.jobId).catch(() => undefined);
-  await processDreamingForCompletedJob(ownerId, conversationId, created.jobId).catch(() => undefined);
+  if (!handedOff) throw new Error("Discord chat preparation lease was lost.");
 }
 
 export async function submitDiscordMessage(message: DiscordInboundMessage): Promise<{
@@ -184,13 +186,28 @@ export async function submitDiscordMessage(message: DiscordInboundMessage): Prom
   const owner = await configuredOwner();
   const claimed = await claimDiscordMessage(owner.id, message);
   if (!claimed.claimed) return { submission: claimed.submission, completion: null };
-  const completion = executeDiscordMessage(owner.id, message).catch(async (error) => {
-    await updateDiscordSubmission(owner.id, message.messageId, {
-      status: "failed",
-      error: error instanceof Error ? error.message : "Discord chat failed.",
+  // The local background-worker claims the preparation lease and hands the
+  // resulting chat job to the durable PostgreSQL queue. The web request must
+  // not execute a provider or own a long-lived Discord job.
+  return { submission: claimed.submission, completion: null };
+}
+
+/** Prepare one persisted Discord message in the background worker. */
+export async function processPendingDiscordMessage(ownerId: string): Promise<boolean> {
+  const claimed = await claimPendingDiscordMessage(ownerId);
+  if (!claimed) return false;
+  try {
+    if (claimed.message.userId !== allowedDiscordUser()) throw new Error("Discord user is not authorized.");
+    await executeDiscordMessage(ownerId, claimed.message, claimed.leaseToken, claimed.conversationId);
+  } catch (error) {
+    await failDiscordMessagePreparation({
+      ownerId,
+      messageId: claimed.message.messageId,
+      leaseToken: claimed.leaseToken,
+      error: error instanceof Error ? error.message : "Discord chat preparation failed.",
     }).catch(() => undefined);
-  });
-  return { submission: claimed.submission, completion };
+  }
+  return true;
 }
 
 export async function discordSubmission(messageId: string): Promise<DiscordSubmission | null> {
@@ -198,7 +215,7 @@ export async function discordSubmission(messageId: string): Promise<DiscordSubmi
   const current = await getDiscordSubmission(owner.id, messageId);
   if (!current?.conversationId || !current.jobId || current.status !== "running") return current;
   const job = await getChatJob(owner.id, current.conversationId, current.jobId);
-  if (!job || job.status === "queued" || job.status === "running") return current;
+  if (!job || job.status === "queued" || job.status === "running" || job.status === "awaiting_approval") return current;
   const status = job.status === "completed" ? "completed" : "failed";
   await updateDiscordSubmission(owner.id, messageId, {
     status,

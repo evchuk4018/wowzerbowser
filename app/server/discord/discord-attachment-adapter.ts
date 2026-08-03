@@ -58,7 +58,10 @@ export async function downloadDiscordAttachment(
       throw new Error("Discord attachment size did not match its metadata.");
     }
     return {
-      id: crypto.randomUUID(),
+      // Discord attachment IDs are stable across Gateway redelivery. Keeping
+      // them as the application attachment IDs makes worker retry recovery
+      // idempotent instead of creating a second local object.
+      id: attachment.id,
       filename: attachment.filename,
       contentType,
       bytes,

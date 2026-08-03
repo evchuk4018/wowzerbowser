@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { authorizeOwnerSession } from "../../../../auth/owner-auth-service";
 import { connectGoogleCalendar } from "../../../../server/calendar/google-calendar-service";
+import { integrationCallbackUrl } from "../../../../server/integration-site-url";
 import {
   exchangeGoogleCalendarCode, GOOGLE_CALENDAR_STATE_COOKIE, verifyGoogleCalendarState,
 } from "../../../../server/calendar/google-calendar-oauth";
 
 function destination(status: "connected" | "error") {
-  const url = new URL("/", process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000");
+  const url = new URL(integrationCallbackUrl("/"));
   url.searchParams.set("googleCalendar", status);
   return url;
 }

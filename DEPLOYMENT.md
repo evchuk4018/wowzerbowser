@@ -11,11 +11,14 @@ host Tailscale Serve -> 127.0.0.1:3000 -> web
                                       |\
                                       | postgres (private Compose network)
                                       ` background-worker
+                                      ` discord (optional profile)
 ```
 
 The Compose stack has exactly three core services: `web`, `postgres`, and
-`background-worker`. PostgreSQL uses the named `wowzerbowser-postgres` volume
-and has no host-published port. The web port is bound to loopback only.
+`background-worker`. The optional `discord` profile adds the local Discord
+Gateway process without adding a host port or a storage mount. PostgreSQL uses
+the named `wowzerbowser-postgres` volume and has no host-published port. The web
+port is bound to loopback only.
 
 ## Storage safety
 
@@ -166,8 +169,30 @@ PostgreSQL; no external scheduler or per-automation host cron is required.
 The scheduler intervals and bounded batch sizes are configured in
 `deployment.env` with `AUTOMATION_SCHEDULER_INTERVAL_MS`,
 `AUTOMATION_SCHEDULER_BATCH`, `MEMORY_SCHEDULER_INTERVAL_MS`,
-`STORAGE_MAINTENANCE_INTERVAL_MS`, and `WORKER_MAINTENANCE_LIMIT`. Keep the
-worker concurrency limits conservative on this host.
+`STORAGE_MAINTENANCE_INTERVAL_MS`, `DISCORD_PROCESSING_INTERVAL_MS`, and
+`WORKER_MAINTENANCE_LIMIT`. Keep the worker concurrency limits conservative on
+this host.
+
+## Optional Discord Gateway
+
+The Discord Gateway worker is local to the Compose network. Its internal API
+requests always target `http://web:3000`; `NEXT_PUBLIC_SITE_URL` is used only
+for links shown to the Discord user. Add `DISCORD_BOT_TOKEN`,
+`DISCORD_ALLOWED_USER_ID`, and a matching random `DISCORD_INTERNAL_SECRET` to
+`/srv/storage/wowzerbowser/deployment.env`, then start it with:
+
+```bash
+DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh --profile discord up -d --build
+```
+
+Check the optional service with `./docker/compose.sh --profile discord ps` and
+inspect its JSON readiness logs. Discord attachment URLs are submitted to the
+authenticated internal web route; the local background worker downloads and
+ingests them through the web service below `/srv/storage/wowzerbowser/files`.
+The Gateway container does not receive access to `/srv/storage/media`.
+
+If Discord is not configured, omit the profile. The core stack does not require
+Discord credentials or a Discord Gateway connection.
 
 ## Tailscale Serve
 

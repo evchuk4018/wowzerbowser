@@ -1,4 +1,3 @@
-import { after } from "next/server";
 import { NextResponse } from "next/server";
 import { parseDiscordInboundMessage } from "../../../../../lib/discord-protocol";
 import { authorizeDiscordInternalRequest } from "../../../../server/discord/discord-auth";
@@ -17,8 +16,8 @@ export async function POST(request: Request) {
   }
   try {
     const result = await submitDiscordMessage(parseDiscordInboundMessage(await request.json()));
-    if (result.completion) after(() => result.completion!);
-    return NextResponse.json(result.submission, { status: result.completion ? 202 : 200 });
+    const pending = result.submission.status === "processing" || result.submission.status === "running";
+    return NextResponse.json(result.submission, { status: pending ? 202 : 200 });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Discord submission failed." },

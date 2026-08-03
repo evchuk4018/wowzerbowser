@@ -2,6 +2,13 @@ import "server-only";
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
+export type EncryptedConnectorValue = {
+  ciphertext: string;
+  nonce: string;
+  authTag: string;
+  fingerprint: string;
+};
+
 function key(): Buffer {
   const raw = process.env.CONNECTOR_CREDENTIAL_ENCRYPTION_KEY?.trim();
   if (!raw) throw new Error("Connector credential encryption is not configured.");
@@ -10,7 +17,7 @@ function key(): Buffer {
   return value;
 }
 
-export function encryptConnectorCredentials(value: Record<string, unknown>) {
+function encryptRecord(value: Record<string, unknown>): EncryptedConnectorValue {
   const nonce = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", key(), nonce);
   const ciphertext = Buffer.concat([cipher.update(JSON.stringify(value), "utf8"), cipher.final()]);
@@ -23,15 +30,53 @@ export function encryptConnectorCredentials(value: Record<string, unknown>) {
   };
 }
 
-export function decryptConnectorCredentials(row: { credentials_ciphertext?: string | null; credentials_nonce?: string | null; credentials_auth_tag?: string | null }): Record<string, unknown> {
-  if (!row.credentials_ciphertext || !row.credentials_nonce || !row.credentials_auth_tag) return {};
-  const decipher = createDecipheriv("aes-256-gcm", key(), Buffer.from(row.credentials_nonce, "base64url"));
-  decipher.setAuthTag(Buffer.from(row.credentials_auth_tag, "base64url"));
+function decryptRecord(
+  row: { ciphertext?: string | null; nonce?: string | null; authTag?: string | null },
+): Record<string, unknown> {
+  if (!row.ciphertext || !row.nonce || !row.authTag) return {};
+  const decipher = createDecipheriv("aes-256-gcm", key(), Buffer.from(row.nonce, "base64url"));
+  decipher.setAuthTag(Buffer.from(row.authTag, "base64url"));
   const clear = Buffer.concat([
-    decipher.update(Buffer.from(row.credentials_ciphertext, "base64url")),
+    decipher.update(Buffer.from(row.ciphertext, "base64url")),
     decipher.final(),
   ]).toString("utf8");
   const value = JSON.parse(clear) as unknown;
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Connector credentials are invalid.");
   return value as Record<string, unknown>;
+}
+
+export function encryptConnectorCredentials(value: Record<string, unknown>): EncryptedConnectorValue {
+  return encryptRecord(value);
+}
+
+export function decryptConnectorCredentials(row: {
+  credentials_ciphertext?: string | null;
+  credentials_nonce?: string | null;
+  credentials_auth_tag?: string | null;
+}): Record<string, unknown> {
+  return decryptRecord({
+    ciphertext: row.credentials_ciphertext,
+    nonce: row.credentials_nonce,
+    authTag: row.credentials_auth_tag,
+  });
+}
+
+export function encryptConnectorMetadata(value: Record<string, unknown>): EncryptedConnectorValue {
+  return encryptRecord(value);
+}
+
+export function decryptConnectorMetadata(row: {
+  metadata_ciphertext?: string | null;
+  metadata_nonce?: string | null;
+  metadata_auth_tag?: string | null;
+  metadata?: Record<string, unknown> | null;
+}): Record<string, unknown> {
+  if (row.metadata_ciphertext && row.metadata_nonce && row.metadata_auth_tag) {
+    return decryptRecord({
+      ciphertext: row.metadata_ciphertext,
+      nonce: row.metadata_nonce,
+      authTag: row.metadata_auth_tag,
+    });
+  }
+  return row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata) ? row.metadata : {};
 }

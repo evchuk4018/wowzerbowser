@@ -4,6 +4,7 @@ import type { ConnectorManifest } from "../../../../lib/connector-protocol";
 import type { ConnectorProvider, ConnectorProviderContext, ConnectionSession } from "../connector-types";
 import { redactConnectorError } from "../connector-redaction";
 import { classifyConnectorToolAccess } from "../mcp/mcp-tool-discovery";
+import { integrationCallbackUrl } from "../../integration-site-url";
 
 function baseUrl(): string {
   const value = process.env.PIPEDREAM_CONNECT_BASE_URL?.trim();
@@ -32,7 +33,7 @@ export class ManagedConnectorProvider implements ConnectorProvider {
     const clientId = process.env.PIPEDREAM_CONNECT_CLIENT_ID?.trim();
     if (!clientId) throw new Error("Managed connector OAuth is not configured.");
     const value = await request<{authorization_url?: string; authorizationUrl?: string; state?: string}>(`/accounts/${encodeURIComponent(context.connectorId)}/oauth/start`, {
-      method: "POST", body: JSON.stringify({ ownerId: context.ownerId, clientId, redirectUri: `${process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"}/api/connectors/callback`, state: context.metadata?.state }),
+      method: "POST", body: JSON.stringify({ ownerId: context.ownerId, clientId, redirectUri: integrationCallbackUrl("/api/connectors/callback"), state: context.metadata?.state }),
     });
     const authorizationUrl = value.authorization_url ?? value.authorizationUrl;
     if (!authorizationUrl || !value.state) throw new Error("Managed connector returned an invalid authorization session.");

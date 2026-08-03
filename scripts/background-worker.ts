@@ -13,6 +13,7 @@ import { processDreamingForCompletedJob, processScheduledMemoryWork } from "../a
 import { runAutomationSchedulerTickForOwner } from "../app/server/automations/automation-scheduler";
 import { runAbandonedUploadMaintenance, runIncompleteFileMaintenance as runStorageMaintenance, runStaleChatMaintenance } from "../app/server/maintenance/maintenance-service";
 import { describeBackgroundError, logBackgroundTaskFailure } from "../app/server/observability/background-error";
+import { processPendingDiscordMessage } from "../app/server/discord/discord-chat-service";
 
 function boundedInteger(value: string | undefined, fallback: number, minimum: number, maximum: number): number {
   const parsed = Number.parseInt(value ?? "", 10);
@@ -27,12 +28,14 @@ const pollIntervalMs = boundedInteger(process.env.WORKER_POLL_INTERVAL_MS, 1_000
 const maintenanceIntervalMs = boundedInteger(process.env.STORAGE_MAINTENANCE_INTERVAL_MS, 60_000, 10_000, 3_600_000);
 const automationSchedulerIntervalMs = boundedInteger(process.env.AUTOMATION_SCHEDULER_INTERVAL_MS, 30_000, 5_000, 3_600_000);
 const memorySchedulerIntervalMs = boundedInteger(process.env.MEMORY_SCHEDULER_INTERVAL_MS, 60_000, 10_000, 3_600_000);
+const discordProcessingIntervalMs = boundedInteger(process.env.DISCORD_PROCESSING_INTERVAL_MS, 1_000, 1_000, 60_000);
 const schedulerBatch = boundedInteger(process.env.AUTOMATION_SCHEDULER_BATCH, 1, 1, 4);
 const maintenanceLimit = boundedInteger(process.env.WORKER_MAINTENANCE_LIMIT, 50, 1, 50);
 const chatConcurrency = boundedInteger(process.env.WORKER_CHAT_CONCURRENCY, 1, 1, 1);
 const documentConcurrency = boundedInteger(process.env.WORKER_DOCUMENT_CONCURRENCY, 1, 1, 1);
 const imageConcurrency = boundedInteger(process.env.WORKER_IMAGE_CONCURRENCY, 1, 1, 1);
 const ocrConcurrency = boundedInteger(process.env.WORKER_OCR_CONCURRENCY, 2, 1, 2);
+const discordProcessingEnabled = Boolean(process.env.DISCORD_ALLOWED_USER_ID?.trim());
 process.env.PDF_OCR_CONCURRENCY = String(ocrConcurrency);
 
 function writeHeartbeat(): void {
@@ -170,6 +173,11 @@ const loop = new BackgroundWorkerLoop({
       intervalMs: maintenanceIntervalMs,
       run: schedulerTask("incomplete-file", async () => ({ cleaned: await runStorageMaintenance({ ownerId, limit: maintenanceLimit }) })),
     },
+    ...(discordProcessingEnabled ? [{
+      name: "discord-message",
+      intervalMs: discordProcessingIntervalMs,
+      run: schedulerTask("discord-message", async () => ({ processed: await processPendingDiscordMessage(ownerId) })),
+    }] : []),
   ],
   onTaskError: (kind, error) => {
     if (kind === "scheduler") {
@@ -192,6 +200,8 @@ console.log(JSON.stringify({
   pollIntervalMs,
   automationSchedulerIntervalMs,
   memorySchedulerIntervalMs,
+  discordProcessingEnabled,
+  discordProcessingIntervalMs,
   maintenanceIntervalMs,
   schedulerBatch,
   leaseRecovery: true,

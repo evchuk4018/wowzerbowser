@@ -1,62 +1,15 @@
 # Local Chat UI
 
-A private chat workspace built with Next.js and ready for Vercel deployment.
+A private, single-owner chat workspace built with Next.js and Docker Compose.
+The production deployment is reached through the private Tailscale HTTPS origin
+`https://homelab.tail861ffd.ts.net`; PostgreSQL and application files stay on
+the homelab.
 
 ## Recurring automations
 
-The local migration runner creates the recurring-automation tables. Set a random
-`AUTOMATION_DISPATCH_SECRET` in the application environment, and store the same
-value plus the production app URL in Supabase Vault. Configure one Supabase Cron
-job to use `pg_net` to `POST /api/internal/automations/dispatch` every five
-minutes with `Authorization: Bearer <secret>`. The dispatcher atomically leases
-due work; do not create one cron job per user automation.
-
-After enabling the Supabase Cron and Vault integrations, the production setup is:
-
-```sql
-select vault.create_secret('https://wowzerbowser.vercel.app', 'automation_app_url');
-select vault.create_secret('the-same-random-secret-as-vercel', 'automation_dispatch_secret');
-
-select cron.schedule(
-  'dispatch-recurring-automations',
-  '*/5 * * * *',
-  $cron$
-  select net.http_post(
-    url := (select decrypted_secret from vault.decrypted_secrets where name = 'automation_app_url')
-      || '/api/internal/automations/dispatch',
-    headers := jsonb_build_object(
-      'Content-Type', 'application/json',
-      'Authorization', 'Bearer ' ||
-        (select decrypted_secret from vault.decrypted_secrets where name = 'automation_dispatch_secret')
-    ),
-    body := '{}'::jsonb
-  );
-  $cron$
-);
-```
-
-Use the same Vault secret to schedule bounded cleanup of abandoned, message-free
-chat conversations. This maintenance route is separate from chat bootstrap and
-deletes at most 50 conversations older than 24 hours per run:
-
-```sql
-select cron.schedule(
-  'cleanup-stale-chat-conversations',
-  '17 * * * *',
-  $cron$
-  select net.http_post(
-    url := (select decrypted_secret from vault.decrypted_secrets where name = 'automation_app_url')
-      || '/api/internal/chat/maintenance',
-    headers := jsonb_build_object(
-      'Content-Type', 'application/json',
-      'Authorization', 'Bearer ' ||
-        (select decrypted_secret from vault.decrypted_secrets where name = 'automation_dispatch_secret')
-    ),
-    body := '{}'::jsonb
-  );
-  $cron$
-);
-```
+Recurring automations, memory work, cleanup, and durable chat/document/image
+jobs run in the local `background-worker` against PostgreSQL. No Supabase Cron,
+Vault, `pg_net`, Redis, or hosted scheduler is required.
 
 Automation runs default to `qwen/qwen3.7-flash`, require the OpenRouter key, and
 have a user-configurable model in Settings → Configurables.
@@ -82,7 +35,7 @@ HDD mount is present before any application container is started.
 
 - edit site code under `app/`
 - Next.js API routes live under `app/api/`
-- Vercel uses the standard Next.js build and start commands
+- Docker Compose runs `web`, private PostgreSQL, and `background-worker`
 
 ## Authentication
 
@@ -129,7 +82,7 @@ connected account's primary calendar.
 3. Create an OAuth 2.0 client with application type **Web application**.
 4. Add the applicable authorized redirect URIs:
    - `http://localhost:3000/api/integrations/google-calendar/callback`
-   - `https://wowzerbowser.vercel.app/api/integrations/google-calendar/callback`
+   - `https://homelab.tail861ffd.ts.net/api/integrations/google-calendar/callback`
 5. Configure:
 
    ```dotenv
@@ -158,9 +111,9 @@ DMs continue it, and `/new` (or `/new <prompt>`) starts another.
 Answers link back to the persisted `/chat/{conversationId}` page. Images, PDF,
 and DOCX attachments use the existing private attachment ingestion paths.
 
-The Next.js app remains on Vercel. Ordinary DMs require Discord's persistent
-Gateway connection, so `scripts/discord-worker.mjs` runs separately as an
-always-on Railway service.
+The Discord Gateway connection runs as an optional local Compose service. The
+Gateway container calls `http://web:3000` over the private Compose network;
+user-facing links still use `NEXT_PUBLIC_SITE_URL`.
 
 1. Apply the local PostgreSQL migrations before starting the worker.
 2. In the Discord Developer Portal, create an application and bot. Enable the
@@ -169,27 +122,32 @@ always-on Railway service.
    guild messages.
 3. Copy the owner's Discord user ID and generate a random internal secret of at
    least 32 characters.
-4. Configure Vercel:
+4. Add the shared values to `/srv/storage/wowzerbowser/deployment.env`:
 
    ```dotenv
    DISCORD_ALLOWED_USER_ID=the-owner-discord-user-id
    DISCORD_INTERNAL_SECRET=the-shared-random-secret
    ```
 
-5. Create a Railway service from this repository. `railway.json` starts
-   `npm run discord:worker`. Configure:
+5. Add the bot token to the same deployment environment and start the optional
+   profile from the repository checkout:
 
    ```dotenv
-   NEXT_PUBLIC_SITE_URL=https://wowzerbowser.vercel.app
+   NEXT_PUBLIC_SITE_URL=https://homelab.tail861ffd.ts.net
    DISCORD_BOT_TOKEN=the-private-bot-token
    DISCORD_ALLOWED_USER_ID=the-same-owner-discord-user-id
    DISCORD_INTERNAL_SECRET=the-same-shared-random-secret
    ```
 
-The bot token belongs only on Railway. Never prefix any Discord secret with
-`NEXT_PUBLIC_`. Internal app routes require the shared bearer secret, Discord
-message IDs provide idempotency, and undelivered jobs are recovered when the
-worker reconnects.
+   ```bash
+   DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh --profile discord up -d --build
+   ```
+
+The bot token belongs only in the private deployment environment. Never prefix
+any Discord secret with `NEXT_PUBLIC_`. Internal app routes require the shared
+bearer secret, Discord message IDs provide idempotency, and undelivered jobs
+are recovered when the Gateway reconnects. Disable the profile to run the core
+stack without Discord.
 
 ## Python tool
 
@@ -247,14 +205,13 @@ then returns a clear "not configured" result.
 ## Learn More
 
 - [Next.js Documentation](https://nextjs.org/docs)
-- [Vercel Documentation](https://vercel.com/docs)
 
 ### Document attachments
 PDF and DOCX documents (up to 25 MiB) stream from the authenticated browser route into the local application filesystem. PostgreSQL records the UUID object key and document association; finalization reads only through the owner- and conversation-scoped storage service. PDF text uses local PDF.js extraction and bounded OCR first, with the free OpenRouter parser as a recovery path and Qwen3.7 Flash as a paid fallback when the free quota is exhausted. DOCX text is extracted locally with Mammoth and divided into bounded logical pages that do not claim to match Word's rendered pages. Embedded DOCX images use the free OpenRouter image analyzer with the same Qwen3.7 Flash quota fallback. Configure `OPENROUTER_API_KEY` for Qwen background text tasks, vision, OCR, PDF parsing, and user-memory dreaming; configure `DEEPSEEK_API_KEY` only when using the built-in foreground DeepSeek chat models. Apply the local PostgreSQL migrations. Small documents are included verbatim in context, while large documents are available through gated `search_document` and `read_document_pages` tools.
 
 Durable user memory is stored as a private, audited `User Profile` folder tree. Hidden chat summaries are consolidated after every three completed generations by Qwen3.7 Flash with reasoning disabled; repeated turns from one conversation contribute only its newest summary. The main agent can browse and maintain the same profile through server-side memory tools, and chat-history recall uses the same Qwen model. Dreaming is enabled by default when the schema and provider keys are configured and uses Qwen reasoning; it can be disabled with `USER_MEMORY_DREAMING_ENABLED=false`. Provider or persistence failures are isolated from normal chat delivery.
 
-PDF finalization runs on the Node.js runtime because PDF.js and `@napi-rs/canvas` require native server dependencies. The production build runs `npm run verify:pdf-runtime` before Next.js build output is generated and inspects both emitted function traces afterward; a missing native canvas package must fail the deployment rather than first appearing as a document-upload 500. After changing native dependencies, deploy with a clean dependency install and verify the emitted Vercel function trace contains the Linux canvas package. The configured 300-second duration remains subject to the active Vercel plan's maximum.
+PDF finalization runs on the Node.js runtime because PDF.js and `@napi-rs/canvas` require native server dependencies. The production build runs `npm run verify:pdf-runtime` before Next.js build output is generated and inspects the emitted server traces; a missing native canvas package must fail the deployment rather than first appearing as a document-upload 500. The local Docker image includes the native runtime dependencies and the web container keeps the 300-second document-processing limit.
 
 The document and binary-object metadata schema is included in the local
 PostgreSQL migrations and is applied by `scripts/migrate.mjs`. The filesystem

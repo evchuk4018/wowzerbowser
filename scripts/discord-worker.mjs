@@ -1,21 +1,56 @@
-import {
-  Client,
-  GatewayIntentBits,
-  Partials,
-} from "discord.js";
+import { existsSync, statSync, writeFileSync } from "node:fs";
+
+const heartbeatFile = process.env.DISCORD_HEARTBEAT_FILE || "/tmp/wowzerbowser-discord-worker.heartbeat";
+const heartbeatMaxAgeMs = boundedInteger(process.env.DISCORD_HEARTBEAT_MAX_AGE_MS, 90_000, 5_000, 300_000);
+
+function boundedInteger(value, fallback, minimum, maximum) {
+  const parsed = Number.parseInt(value || "", 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(maximum, Math.max(minimum, parsed));
+}
+
+if (process.argv.includes("--health")) {
+  try {
+    if (!existsSync(heartbeatFile) || Date.now() - statSync(heartbeatFile).mtimeMs > heartbeatMaxAgeMs) process.exit(1);
+    process.exit(0);
+  } catch {
+    process.exit(1);
+  }
+}
+
+const { Client, GatewayIntentBits, Partials } = await import("discord.js");
 
 const token = required("DISCORD_BOT_TOKEN");
 const allowedUserId = required("DISCORD_ALLOWED_USER_ID");
 const internalSecret = required("DISCORD_INTERNAL_SECRET");
-const appUrl = new URL(required("NEXT_PUBLIC_SITE_URL")).origin;
+const internalAppUrl = new URL(required("DISCORD_APP_URL")).origin;
+const publicAppUrl = new URL(required("NEXT_PUBLIC_SITE_URL")).origin;
 const activeDeliveries = new Set();
 const activeAutomationDeliveries = new Set();
 const AUTOMATION_POLL_INTERVAL_MS = 5_000;
+const SUBMISSION_POLL_INTERVAL_MS = 5_000;
+let heartbeatTimer;
 
 function required(name) {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required.`);
   return value;
+}
+
+function safeError(error) {
+  const value = error instanceof Error ? error.message : String(error);
+  return value
+    .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
+    .replace(/(api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|password|secret)\s*[:=]\s*\S+/gi, "$1=[redacted]")
+    .slice(0, 500);
+}
+
+function writeHeartbeat() {
+  try {
+    writeFileSync(heartbeatFile, `${new Date().toISOString()}\n`, "utf8");
+  } catch {
+    // Health checks will fail if the status file cannot be updated.
+  }
 }
 
 function headers(json = false) {
@@ -26,7 +61,7 @@ function headers(json = false) {
 }
 
 async function appRequest(path, init = {}) {
-  const response = await fetch(new URL(path, appUrl), {
+  const response = await fetch(new URL(path, internalAppUrl), {
     ...init,
     headers: { ...headers(Boolean(init.body)), ...init.headers },
   });
@@ -36,7 +71,7 @@ async function appRequest(path, init = {}) {
 }
 
 function conversationLink(conversationId) {
-  return conversationId ? new URL(`/chat/${conversationId}`, appUrl).toString() : appUrl;
+  return conversationId ? new URL(`/chat/${conversationId}`, publicAppUrl).toString() : publicAppUrl;
 }
 
 function splitResponse(content, link) {
@@ -116,7 +151,7 @@ async function deliverAutomationNotification(notification) {
       messageId: firstMessage.id,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = safeError(error);
     await acknowledgeAutomationDelivery(notification.id, {
       status: "failed",
       error: message,
@@ -124,7 +159,7 @@ async function deliverAutomationNotification(notification) {
       console.error({
         event: "discord-automation-failure-acknowledgement-failed",
         notificationId: notification.id,
-        error: acknowledgementError instanceof Error ? acknowledgementError.message : String(acknowledgementError),
+        error: safeError(acknowledgementError),
       });
     });
     throw error;
@@ -140,18 +175,33 @@ async function pollAutomationNotifications() {
       try {
         await deliverAutomationNotification(notification);
       } catch (error) {
-        console.error({
-          event: "discord-automation-delivery-failed",
-          notificationId: notification.id,
-          error: error instanceof Error ? error.message : String(error),
+      console.error({
+        event: "discord-automation-delivery-failed",
+        notificationId: notification.id,
+        error: safeError(error),
         });
       }
     }));
   } catch (error) {
     console.error({
       event: "discord-automation-poll-failed",
-      error: error instanceof Error ? error.message : String(error),
+      error: safeError(error),
     });
+  }
+}
+
+async function pollPendingSubmissions() {
+  try {
+    const { submissions } = await appRequest("/api/internal/discord/messages");
+    await Promise.allSettled((submissions ?? []).map(async (submission) => {
+      try {
+        await deliver(submission);
+      } catch (error) {
+        console.error({ event: "discord-recovery-failed", messageId: submission.messageId, error: safeError(error) });
+      }
+    }));
+  } catch (error) {
+    console.error({ event: "discord-recovery-list-failed", error: safeError(error) });
   }
 }
 
@@ -186,33 +236,30 @@ client.on("messageCreate", async (message) => {
       }),
     });
     void deliver(submission, placeholder).catch((error) => {
-      console.error({ event: "discord-delivery-failed", messageId: message.id, error: error.message });
+      console.error({ event: "discord-delivery-failed", messageId: message.id, error: safeError(error) });
     });
   } catch (error) {
-    const content = `I couldn't submit that request: ${error instanceof Error ? error.message : "Unknown error."}`;
+    const content = `I couldn't submit that request: ${safeError(error)}`;
     if (placeholder) await placeholder.edit({ content, allowedMentions: { parse: [] } }).catch(() => undefined);
     else await message.reply({ content, allowedMentions: { parse: [], repliedUser: false } }).catch(() => undefined);
   }
 });
 
 client.once("ready", async () => {
-  console.log(`Discord worker connected as ${client.user.tag}.`);
-  try {
-    const { submissions } = await appRequest("/api/internal/discord/messages");
-    for (const submission of submissions ?? []) {
-      void deliver(submission).catch((error) => {
-        console.error({ event: "discord-recovery-failed", messageId: submission.messageId, error: error.message });
-      });
-    }
-  } catch (error) {
-    console.error({ event: "discord-recovery-list-failed", error: error instanceof Error ? error.message : String(error) });
-  }
+  writeHeartbeat();
+  heartbeatTimer = setInterval(writeHeartbeat, Math.min(heartbeatMaxAgeMs / 3, 30_000));
+  heartbeatTimer.unref();
+  console.log(JSON.stringify({ event: "discord-worker-ready", user: client.user.tag, internalAppUrl, reconnectRecovery: true }));
+  await pollPendingSubmissions();
   await pollAutomationNotifications();
+  setInterval(() => {
+    void pollPendingSubmissions();
+  }, SUBMISSION_POLL_INTERVAL_MS).unref();
   setInterval(() => {
     void pollAutomationNotifications();
   }, AUTOMATION_POLL_INTERVAL_MS).unref();
 });
 
-client.on("error", (error) => console.error({ event: "discord-client-error", error: error.message }));
+client.on("error", (error) => console.error({ event: "discord-client-error", error: safeError(error) }));
 
 await client.login(token);

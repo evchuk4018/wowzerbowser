@@ -61,3 +61,33 @@ test("MCP results and errors redact secrets", () => {
   assert.equal(redactConnectorValue({ access_token: "secret", value: "safe" }).access_token, "[redacted]");
   assert.doesNotMatch(redactConnectorError(new Error("authorization: secret-token")), /secret-token/);
 });
+
+test("connector credentials and integration metadata use server-side encryption", async () => {
+  const previous = process.env.CONNECTOR_CREDENTIAL_ENCRYPTION_KEY;
+  process.env.CONNECTOR_CREDENTIAL_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
+  try {
+    const {
+      decryptConnectorCredentials,
+      decryptConnectorMetadata,
+      encryptConnectorCredentials,
+      encryptConnectorMetadata,
+    } = await import("../app/server/connectors/connector-crypto.ts");
+    const credentials = encryptConnectorCredentials({ access_token: "credential-secret" });
+    const metadata = encryptConnectorMetadata({ accountId: "account-123", providerSecret: "metadata-secret" });
+    assert.doesNotMatch(credentials.ciphertext, /credential-secret/);
+    assert.doesNotMatch(metadata.ciphertext, /metadata-secret/);
+    assert.deepEqual(decryptConnectorCredentials({
+      credentials_ciphertext: credentials.ciphertext,
+      credentials_nonce: credentials.nonce,
+      credentials_auth_tag: credentials.authTag,
+    }), { access_token: "credential-secret" });
+    assert.deepEqual(decryptConnectorMetadata({
+      metadata_ciphertext: metadata.ciphertext,
+      metadata_nonce: metadata.nonce,
+      metadata_auth_tag: metadata.authTag,
+    }), { accountId: "account-123", providerSecret: "metadata-secret" });
+  } finally {
+    if (previous === undefined) delete process.env.CONNECTOR_CREDENTIAL_ENCRYPTION_KEY;
+    else process.env.CONNECTOR_CREDENTIAL_ENCRYPTION_KEY = previous;
+  }
+});

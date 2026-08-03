@@ -1,14 +1,24 @@
 import "server-only";
 
-import type { DiscordInboundMessage, DiscordSubmission } from "../../../lib/discord-protocol";
+import { parseDiscordInboundMessage, type DiscordInboundMessage, type DiscordSubmission } from "../../../lib/discord-protocol";
 import { databaseOwnerId, jsonb, query } from "../database/database";
+
+export type DiscordProcessingMessage = {
+  message: DiscordInboundMessage;
+  leaseToken: string;
+  conversationId: string | null;
+};
 
 type DiscordMessageRow = {
   discord_message_id: string;
+  discord_user_id?: string;
   discord_channel_id: string;
   response_message_id: string;
   conversation_id: string | null;
   job_id: string | null;
+  content?: string;
+  attachments?: unknown;
+  processing_lease_token?: string | null;
   status: DiscordSubmission["status"];
   error: string | null;
   output: string | null;
@@ -40,6 +50,62 @@ export async function claimDiscordMessage(
   const existing = await getDiscordSubmission(ownerId, input.messageId);
   if (!existing) throw new Error("Discord submission already exists but could not be loaded.");
   return { claimed: false, submission: existing };
+}
+
+export async function claimPendingDiscordMessage(ownerId: string): Promise<DiscordProcessingMessage | null> {
+  const [row] = await query<DiscordMessageRow>(
+    `select discord_message_id,discord_user_id,discord_channel_id,response_message_id,conversation_id,content,attachments,processing_lease_token
+       from claim_pending_discord_messages($1,1,300000)`,
+    [databaseOwnerId(ownerId)],
+  );
+  if (!row || typeof row.processing_lease_token !== "string" || typeof row.discord_user_id !== "string" || typeof row.content !== "string") return null;
+  return {
+    leaseToken: row.processing_lease_token,
+    conversationId: row.conversation_id,
+    message: parseDiscordInboundMessage({
+      messageId: row.discord_message_id,
+      channelId: row.discord_channel_id,
+      userId: row.discord_user_id,
+      responseMessageId: row.response_message_id,
+      content: row.content,
+      attachments: row.attachments,
+    }),
+  };
+}
+
+export async function finishDiscordMessagePreparation(input: {
+  ownerId: string;
+  messageId: string;
+  leaseToken: string;
+  conversationId: string;
+  jobId: string | null;
+  status: "running" | "completed";
+  output?: string | null;
+}): Promise<boolean> {
+  const rows = await query(
+    `update discord_dm_messages
+        set conversation_id=$4,job_id=$5,status=$6,output=coalesce($7,output),processing_lease_token=null,processing_lease_expires_at=null,updated_at=$8
+      where owner_id=$1 and discord_message_id=$2 and status='processing' and processing_lease_token=$3::uuid
+      returning discord_message_id`,
+    [databaseOwnerId(input.ownerId), input.messageId, input.leaseToken, input.conversationId, input.jobId, input.status, input.output ?? null, new Date().toISOString()],
+  );
+  return rows.length > 0;
+}
+
+export async function failDiscordMessagePreparation(input: {
+  ownerId: string;
+  messageId: string;
+  leaseToken: string;
+  error: string;
+}): Promise<boolean> {
+  const rows = await query(
+    `update discord_dm_messages
+        set status='failed',error=$4,processing_lease_token=null,processing_lease_expires_at=null,updated_at=$5
+      where owner_id=$1 and discord_message_id=$2 and status='processing' and processing_lease_token=$3::uuid
+      returning discord_message_id`,
+    [databaseOwnerId(input.ownerId), input.messageId, input.leaseToken, input.error.slice(0, 2_000), new Date().toISOString()],
+  );
+  return rows.length > 0;
 }
 
 export async function activeDiscordConversation(
@@ -74,6 +140,7 @@ export async function updateDiscordSubmission(
   if ("error" in values) row.error = values.error;
   if ("output" in values) row.output = values.output;
   const fields = Object.entries(row).filter(([key]) => key !== "updated_at");
+  if (!fields.length) return;
   const params = [databaseOwnerId(ownerId), messageId, ...fields.map(([, value]) => value), row.updated_at];
   const set = fields.map(([key], index) => `${key}=$${index + 3}`).join(",");
   await query(`update discord_dm_messages set ${set},updated_at=$${params.length} where owner_id=$1 and discord_message_id=$2`, params);

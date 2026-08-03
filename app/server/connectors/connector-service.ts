@@ -2,7 +2,7 @@ import "server-only";
 
 import type { ChatToolResult } from "../../../lib/chat-protocol";
 import type { ConnectorCatalogItem, ConnectorConnection, ConnectorManifest, ConnectorTool } from "../../../lib/connector-protocol";
-import { decryptConnectorCredentials, encryptConnectorCredentials } from "./connector-crypto";
+import { decryptConnectorCredentials, decryptConnectorMetadata, encryptConnectorCredentials, encryptConnectorMetadata } from "./connector-crypto";
 import { redactConnectorError, redactConnectorValue } from "./connector-redaction";
 import { connectorManifest, MANAGED_CONNECTOR_MANIFESTS, namespaceConnectorTool, normalizeConnectorId } from "./connector-registry";
 import { ManagedConnectorProvider } from "./providers/managed-provider";
@@ -71,17 +71,18 @@ export async function completeManagedConnection(ownerId: string, connectorId: st
 
 export async function createConnection(ownerId: string, manifest: ConnectorManifest, credentials: Record<string, unknown>, accountLabel?: string, accountEmail?: string, metadata?: Record<string, unknown>): Promise<string> {
   const encrypted = encryptConnectorCredentials(credentials);
+  const encryptedMetadata = encryptConnectorMetadata(metadata ?? {});
   const { insertConnection } = await import("./connector-repository");
   if (manifest.provider === "managed") await ensureManagedDefinition(manifest);
   await ensureInstallation(ownerId, manifest.id);
-  return insertConnection(ownerId, { connectorId: manifest.id, accountLabel, accountEmail, credentials: encrypted, metadata });
+  return insertConnection(ownerId, { connectorId: manifest.id, accountLabel, accountEmail, credentials: encrypted, encryptedMetadata });
 }
 
 export async function disconnectConnectorConnection(ownerId: string, connectorId: string, connectionId: string): Promise<void> {
   const manifest = await getConnectorManifestForOwner(ownerId, connectorId);
   const connection = await getConnection(ownerId, connectionId);
   if (!manifest || !connection || connection.connector_id !== connectorId) return;
-  await provider(manifest).disconnect({ ownerId, connectorId, connectionId, credentials: decryptConnectorCredentials(connection), metadata: connection.metadata });
+  await provider(manifest).disconnect({ ownerId, connectorId, connectionId, credentials: decryptConnectorCredentials(connection), metadata: decryptConnectorMetadata(connection) });
   await deleteConnection(ownerId, connectionId);
 }
 
@@ -101,7 +102,8 @@ export async function discoverConnectorTools(ownerId: string, connectorId: strin
   const connection = connectionId ? await getConnection(ownerId, connectionId) : await getDefaultConnection(ownerId, connectorId);
   if (!connection || connection.connector_id !== connectorId || connection.status !== "connected") throw new Error("Connect an account before discovering connector tools.");
   try {
-    const context: ConnectorProviderContext = { ownerId, connectorId, connectionId: connection.id, credentials: decryptConnectorCredentials(connection), metadata: { ...connection.metadata, endpointUrl: connection.metadata.endpointUrl, version: manifest.version } };
+    const metadata = decryptConnectorMetadata(connection);
+    const context: ConnectorProviderContext = { ownerId, connectorId, connectionId: connection.id, credentials: decryptConnectorCredentials(connection), metadata: { ...metadata, endpointUrl: metadata.endpointUrl, version: manifest.version } };
     const discovered = await provider(manifest).listTools(context);
     const tools = discovered.map((tool) => ({ ...tool, namespacedName: namespaceConnectorTool(connectorId, tool.name), access: tool.access ?? "read" as const }));
     await upsertTools(ownerId, connectorId, connection.id, tools.map((tool) => ({ name: tool.name, description: tool.description, input_schema: tool.inputSchema, access: tool.access, enabled: true, connector_version: manifest.version, discovered_at: tool.discoveredAt })));

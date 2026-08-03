@@ -11,6 +11,7 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 RUN npm run build:worker
+RUN npm run build:discord-worker
 
 FROM node:22-bookworm-slim AS runner
 

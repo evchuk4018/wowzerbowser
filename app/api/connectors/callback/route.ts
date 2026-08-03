@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { authorizeOwnerSession } from "../../../auth/owner-auth-service";
 import { completeManagedConnection } from "../../../server/connectors/connector-service";
 import { CONNECTOR_STATE_COOKIE, verifyConnectorOAuthState } from "../../../server/connectors/connector-oauth";
+import { integrationCallbackUrl } from "../../../server/integration-site-url";
 
-function destination(status: "connected" | "error") { const url = new URL("/", process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"); url.searchParams.set("connectors", status); url.searchParams.set("settings", "connectors"); return url; }
+function destination(status: "connected" | "error") { const url = new URL(integrationCallbackUrl("/")); url.searchParams.set("connectors", status); url.searchParams.set("settings", "connectors"); return url; }
 
 export async function GET(request: Request) {
   const url = new URL(request.url);

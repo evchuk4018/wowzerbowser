@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { integrationCallbackUrl } from "../integration-site-url";
 
 export const GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events";
 export const GOOGLE_CALENDAR_STATE_COOKIE = "google_calendar_oauth_state";
@@ -13,7 +14,7 @@ function required(name: "GOOGLE_OAUTH_CLIENT_ID" | "GOOGLE_OAUTH_CLIENT_SECRET" 
 }
 
 export function googleCalendarRedirectUri(): string {
-  return new URL("/api/integrations/google-calendar/callback", process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000").toString();
+  return integrationCallbackUrl("/api/integrations/google-calendar/callback");
 }
 
 function signature(payload: string): string {

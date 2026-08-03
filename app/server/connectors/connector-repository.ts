@@ -11,7 +11,8 @@ export type ConnectorDefinitionRow = {
 export type ConnectorConnectionRow = {
   id: string; owner_id: string; connector_id: string; account_label: string | null; account_email: string | null;
   status: string; is_default: boolean; credentials_ciphertext: string | null; credentials_nonce: string | null;
-  credentials_auth_tag: string | null; credentials_fingerprint: string | null; metadata: Record<string, unknown>;
+  credentials_auth_tag: string | null; credentials_fingerprint: string | null;
+  metadata: Record<string, unknown>; metadata_ciphertext: string | null; metadata_nonce: string | null; metadata_auth_tag: string | null;
   connected_at: string; updated_at: string;
 };
 export type ConnectorToolRow = {
@@ -21,7 +22,7 @@ export type ConnectorToolRow = {
 };
 
 const definitionColumns = "id,owner_id,name,description,icon_url,version,provider,auth_type,capabilities,default_approval,endpoint_url,health_status";
-const connectionColumns = "id,owner_id,connector_id,account_label,account_email,status,is_default,credentials_ciphertext,credentials_nonce,credentials_auth_tag,credentials_fingerprint,metadata,connected_at,updated_at";
+const connectionColumns = "id,owner_id,connector_id,account_label,account_email,status,is_default,credentials_ciphertext,credentials_nonce,credentials_auth_tag,credentials_fingerprint,metadata,metadata_ciphertext,metadata_nonce,metadata_auth_tag,connected_at,updated_at";
 const toolColumns = "id,owner_id,connector_id,connection_id,name,description,input_schema,access,enabled,connector_version,discovered_at,updated_at";
 
 function connectionValue(row: ConnectorConnectionRow): ConnectorConnectionRow {
@@ -82,12 +83,29 @@ export async function getDefaultConnection(ownerId: string, connectorId: string)
 }
 
 export async function insertConnection(ownerId: string, values: {
-  connectorId: string; accountLabel?: string; accountEmail?: string; credentials: { ciphertext: string; nonce: string; authTag: string; fingerprint: string }; metadata?: Record<string, unknown>;
+  connectorId: string; accountLabel?: string; accountEmail?: string;
+  credentials: { ciphertext: string; nonce: string; authTag: string; fingerprint: string };
+  metadata?: Record<string, unknown>;
+  encryptedMetadata?: { ciphertext: string; nonce: string; authTag: string; fingerprint: string };
 }): Promise<string> {
   const owner = databaseOwnerId(ownerId);
   const existing = await listConnections(ownerId, values.connectorId);
-  const [row] = await query<{ id: string }>(`insert into connector_connections(owner_id,connector_id,account_label,account_email,status,is_default,credentials_ciphertext,credentials_nonce,credentials_auth_tag,credentials_fingerprint,metadata)
-    values($1,$2,$3,$4,'connected',$5,$6,$7,$8,$9,$10::jsonb) returning id`, [owner, values.connectorId, values.accountLabel ?? null, values.accountEmail ?? null, existing.length === 0, values.credentials.ciphertext, values.credentials.nonce, values.credentials.authTag, values.credentials.fingerprint, jsonb(values.metadata ?? {})]);
+  const [row] = await query<{ id: string }>(`insert into connector_connections(owner_id,connector_id,account_label,account_email,status,is_default,credentials_ciphertext,credentials_nonce,credentials_auth_tag,credentials_fingerprint,metadata,metadata_ciphertext,metadata_nonce,metadata_auth_tag)
+    values($1,$2,$3,$4,'connected',$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13) returning id`, [
+    owner,
+    values.connectorId,
+    values.accountLabel ?? null,
+    values.accountEmail ?? null,
+    existing.length === 0,
+    values.credentials.ciphertext,
+    values.credentials.nonce,
+    values.credentials.authTag,
+    values.credentials.fingerprint,
+    jsonb(values.encryptedMetadata ? {} : values.metadata ?? {}),
+    values.encryptedMetadata?.ciphertext ?? null,
+    values.encryptedMetadata?.nonce ?? null,
+    values.encryptedMetadata?.authTag ?? null,
+  ]);
   return row.id;
 }
 
