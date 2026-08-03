@@ -87,6 +87,11 @@ cp .env.example .env
 chmod 600 .env
 ```
 
+Set `APP_UID` and `APP_GID` in `.env` to the deployment user's values from
+`id -u` and `id -g`; the web and worker containers run with that identity so
+the application bind mount remains writable without changing permissions
+outside `/srv/storage/wowzerbowser`.
+
 Set a new random `POSTGRES_PASSWORD`, update `DATABASE_URL` to match it, and
 set the existing provider/auth values required by the current application.
 For the private installation, set `NEXT_PUBLIC_SITE_URL` to the HTTPS URL

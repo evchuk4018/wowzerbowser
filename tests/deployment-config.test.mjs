@@ -16,6 +16,7 @@ test("Compose keeps the app port localhost-only and PostgreSQL unpublished", asy
   const compose = await read("compose.yaml");
   assert.match(compose, /127\.0\.0\.1:\$\{WEB_PORT:-3000\}:3000/);
   assert.match(compose, /postgres-data:\/var\/lib\/postgresql\/data/);
+  assert.match(compose, /user: "\$\{APP_UID:-1000\}:\$\{APP_GID:-1000\}"/);
   const postgresBlock = compose.slice(compose.indexOf("  postgres:"), compose.indexOf("  web:"));
   assert.doesNotMatch(postgresBlock, /^    ports:/m);
 });
