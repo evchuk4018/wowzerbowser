@@ -1,24 +1,24 @@
 import "server-only";
 import type { ChatModelInfo } from "../../../lib/chat-protocol";
 import type { OpenRouterProvider } from "../../providers/openrouter/openrouter-catalog-adapter";
-import { getServerClient } from "../../auth/supabase-server-adapter";
+import { databaseOwnerId, isoTimestamp, jsonb, query } from "../database/database";
 
 export type CatalogCache = { models: ChatModelInfo[]; providers: OpenRouterProvider[]; fetchedAt: string };
 export async function readCatalogCache(hash: string): Promise<CatalogCache | null> {
-  const { data, error } = await getServerClient().from("openrouter_catalog_query_cache").select("models,providers,fetched_at").eq("query_hash", hash).maybeSingle();
-  if (error) throw error;
-  return data ? { models: data.models as ChatModelInfo[], providers: data.providers as OpenRouterProvider[], fetchedAt: data.fetched_at as string } : null;
+  const [data] = await query<{ models: unknown; providers: unknown; fetched_at: unknown }>("select models,providers,fetched_at from openrouter_catalog_query_cache where query_hash = $1", [hash]);
+  return data ? { models: data.models as ChatModelInfo[], providers: data.providers as OpenRouterProvider[], fetchedAt: isoTimestamp(data.fetched_at) } : null;
 }
 export async function saveCatalogCache(hash: string, canonicalQuery: string, cache: CatalogCache): Promise<void> {
-  const { error } = await getServerClient().from("openrouter_catalog_query_cache").upsert({ query_hash: hash, canonical_query: canonicalQuery, models: cache.models, providers: cache.providers, fetched_at: cache.fetchedAt, updated_at: new Date().toISOString() });
-  if (error) throw error;
+  await query(`insert into openrouter_catalog_query_cache (query_hash,canonical_query,models,providers,fetched_at,updated_at)
+    values ($1,$2,$3::jsonb,$4::jsonb,$5,$6)
+    on conflict (query_hash) do update set canonical_query=excluded.canonical_query,models=excluded.models,providers=excluded.providers,fetched_at=excluded.fetched_at,updated_at=excluded.updated_at`,
+    [hash, canonicalQuery, jsonb(cache.models), jsonb(cache.providers), cache.fetchedAt, new Date().toISOString()]);
 }
 export async function listEnabledOpenRouterModels(ownerId: string): Promise<string[]> {
-  const { data, error } = await getServerClient().from("enabled_openrouter_models").select("model").eq("owner_id", ownerId).eq("enabled", true);
-  if (error) throw error;
-  return (data ?? []).map((row) => row.model as string);
+  const rows = await query<{ model: string }>("select model from enabled_openrouter_models where owner_id=$1 and enabled=true order by model", [databaseOwnerId(ownerId)]);
+  return rows.map((row) => row.model);
 }
 export async function setOpenRouterModelEnabled(ownerId: string, model: string, enabled: boolean): Promise<void> {
-  const { error } = await getServerClient().from("enabled_openrouter_models").upsert({ owner_id: ownerId, model, enabled, updated_at: new Date().toISOString() });
-  if (error) throw error;
+  await query(`insert into enabled_openrouter_models(owner_id,model,enabled,updated_at) values($1,$2,$3,$4)
+    on conflict(owner_id,model) do update set enabled=excluded.enabled,updated_at=excluded.updated_at`, [databaseOwnerId(ownerId), model, enabled, new Date().toISOString()]);
 }

@@ -22,10 +22,11 @@ test("conversation index RPC computes message flags with indexed exists checks",
   assert.match(migration, /where role = 'assistant' and status = 'streaming'/);
 });
 
-test("conversation listing uses one RPC and avoids an owner-wide message scan", async () => {
+test("conversation listing uses one local database function and avoids an owner-wide message scan", async () => {
   const history = await source("app/server/chat/chat-history-store.ts");
 
-  assert.match(history, /rpc\("list_chat_conversations_fast", \{[\s\S]*?p_owner_id: ownerId/);
+  assert.match(history, /list_chat_conversations_fast/);
+  assert.match(history, /databaseOwnerId\(ownerId\)/);
   assert.doesNotMatch(history, /from\("chat_messages"\)\.select\("conversation_id,role,status"\)/);
   assert.doesNotMatch(history, /messagesByConversation/);
 });

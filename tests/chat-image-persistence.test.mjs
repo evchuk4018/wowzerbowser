@@ -241,11 +241,10 @@ test("server image authorization uses upload rows and claim-token retries", asyn
     readFile(new URL("../app/server/chat/chat-history-store.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/chat-server-service.ts", import.meta.url), "utf8"),
   ]);
-  assert.match(store, /\.eq\("user_message_id", input\.userMessageId\)/);
-  assert.match(store, /\.eq\("job_id", input\.jobId\)/);
-  assert.match(store, /\.eq\("status", "failed"\)/);
-  assert.match(store, /\.is\("claim_token", null\)/);
-  assert.match(store, /\.eq\("claim_token", existing\.claimToken\)/);
+  assert.match(store, /where owner_id=\$1 and conversation_id=\$2 and user_message_id=\$3 and job_id=\$4/);
+  assert.match(store, /status='failed'/);
+  assert.match(store, /claim_token is null/);
+  assert.match(store, /claim_token is not distinct from/);
   assert.match(store, /existing\.status === "complete"/);
   assert.match(service, /for \(const \{ input, contentType, contentHash \} of prepared\)/);
   assert.doesNotMatch(service, /Promise\.all\(prepared\.map/);

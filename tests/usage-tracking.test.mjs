@@ -95,7 +95,8 @@ test("usage persistence and API keep provider data server-side and owner-scoped"
   assert.match(migration, /chat_usage_outbox/);
   assert.match(migration, /unique \(owner_id, provider, request_kind, request_id, round\)/);
   assert.match(migration, /alter table public\.chat_usage_records enable row level security/);
-  assert.match(store, /eq\("owner_id", ownerId\)/);
+  assert.match(store, /where owner_id=\$1/);
+  assert.match(store, /databaseOwnerId\(ownerId\)/);
   assert.match(store, /usage_source/);
   assert.match(store, /flushUsageOutbox/);
   assert.match(route, /authorizeOwnerSession/);

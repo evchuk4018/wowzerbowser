@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { SkillDefinition, SkillMutation } from "../../../lib/skill-protocol";
-import { getServerClient } from "../../auth/supabase-server-adapter";
+import { asIsoTimestamp, databaseOwnerId, query } from "../database/database";
 
 export type SkillRow = {
   id: string;
@@ -19,7 +19,6 @@ export type SkillRow = {
 };
 
 const columns = "id,owner_id,builtin_key,builtin_version,customized,name,normalized_name,summary,instructions,created_at,updated_at,deleted_at";
-const db = () => getServerClient();
 
 export function skillValue(row: SkillRow): SkillDefinition {
   return {
@@ -30,8 +29,8 @@ export function skillValue(row: SkillRow): SkillDefinition {
     instructions: row.instructions,
     source: row.builtin_key ? "builtin" : "custom",
     customized: row.customized,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    createdAt: asIsoTimestamp(row.created_at),
+    updatedAt: asIsoTimestamp(row.updated_at),
   };
 }
 
@@ -41,73 +40,40 @@ export async function upsertBuiltinSkillRow(ownerId: string, input: {
   values: SkillMutation;
   normalizedName: string;
 }): Promise<void> {
-  const existing = await db().from("user_skills").select(columns)
-    .eq("owner_id", ownerId).eq("builtin_key", input.key).maybeSingle();
-  if (existing.error) throw existing.error;
-  const row = existing.data as SkillRow | null;
+  const owner = databaseOwnerId(ownerId);
+  const [row] = await query<SkillRow>(`select ${columns} from user_skills where owner_id=$1 and builtin_key=$2`, [owner, input.key]);
   if (!row) {
-    const inserted = await db().from("user_skills").insert({
-      owner_id: ownerId,
-      builtin_key: input.key,
-      builtin_version: input.version,
-      customized: false,
-      name: input.values.name,
-      normalized_name: input.normalizedName,
-      summary: input.values.summary,
-      instructions: input.values.instructions,
-    });
-    if (inserted.error && inserted.error.code !== "23505") throw inserted.error;
+    try {
+      await query(`insert into user_skills(owner_id,builtin_key,builtin_version,customized,name,normalized_name,summary,instructions)
+        values($1,$2,$3,false,$4,$5,$6,$7)`, [owner, input.key, input.version, input.values.name, input.normalizedName, input.values.summary, input.values.instructions]);
+    } catch (error) {
+      if ((error as { code?: string }).code !== "23505") throw error;
+    }
     return;
   }
   if (row.customized || (row.builtin_version ?? 0) >= input.version) return;
-  const updated = await db().from("user_skills").update({
-    builtin_version: input.version,
-    name: input.values.name,
-    normalized_name: input.normalizedName,
-    summary: input.values.summary,
-    instructions: input.values.instructions,
-    updated_at: new Date().toISOString(),
-    deleted_at: null,
-  }).eq("owner_id", ownerId).eq("id", row.id);
-  if (updated.error) throw updated.error;
+  await query(`update user_skills set builtin_version=$1,name=$2,normalized_name=$3,summary=$4,instructions=$5,updated_at=$6,deleted_at=null
+    where owner_id=$7 and id=$8`, [input.version, input.values.name, input.normalizedName, input.values.summary, input.values.instructions, new Date().toISOString(), owner, row.id]);
 }
 
 export async function listSkillRows(ownerId: string): Promise<SkillRow[]> {
-  const result = await db().from("user_skills").select(columns)
-    .eq("owner_id", ownerId).is("deleted_at", null)
-    .order("builtin_key", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: true });
-  if (result.error) throw result.error;
-  return (result.data ?? []) as SkillRow[];
+  return query<SkillRow>(`select ${columns} from user_skills where owner_id=$1 and deleted_at is null order by builtin_key desc nulls last, created_at asc`, [databaseOwnerId(ownerId)]);
 }
 
 export async function getSkillRow(ownerId: string, skillId: string): Promise<SkillRow | null> {
-  const result = await db().from("user_skills").select(columns)
-    .eq("owner_id", ownerId).eq("id", skillId).is("deleted_at", null).maybeSingle();
-  if (result.error) throw result.error;
-  return result.data as SkillRow | null;
+  const [row] = await query<SkillRow>(`select ${columns} from user_skills where owner_id=$1 and id=$2 and deleted_at is null`, [databaseOwnerId(ownerId), skillId]);
+  return row ?? null;
 }
 
 export async function countCustomSkillRows(ownerId: string): Promise<number> {
-  const result = await db().from("user_skills").select("id", { count: "exact", head: true })
-    .eq("owner_id", ownerId).is("builtin_key", null).is("deleted_at", null);
-  if (result.error) throw result.error;
-  return result.count ?? 0;
+  const [row] = await query<{ count: number }>("select count(*)::int as count from user_skills where owner_id=$1 and builtin_key is null and deleted_at is null", [databaseOwnerId(ownerId)]);
+  return Number(row?.count ?? 0);
 }
 
 export async function insertCustomSkillRow(ownerId: string, values: SkillMutation, normalizedName: string): Promise<SkillRow> {
-  const result = await db().from("user_skills").insert({
-    owner_id: ownerId,
-    builtin_key: null,
-    builtin_version: null,
-    customized: true,
-    name: values.name,
-    normalized_name: normalizedName,
-    summary: values.summary,
-    instructions: values.instructions,
-  }).select(columns).single();
-  if (result.error) throw result.error;
-  return result.data as SkillRow;
+  const [row] = await query<SkillRow>(`insert into user_skills(owner_id,customized,name,normalized_name,summary,instructions)
+    values($1,true,$2,$3,$4,$5) returning ${columns}`, [databaseOwnerId(ownerId), values.name, normalizedName, values.summary, values.instructions]);
+  return row;
 }
 
 export async function updateSkillRow(
@@ -116,16 +82,9 @@ export async function updateSkillRow(
   values: SkillMutation,
   normalizedName: string,
 ): Promise<SkillRow | null> {
-  const result = await db().from("user_skills").update({
-    name: values.name,
-    normalized_name: normalizedName,
-    summary: values.summary,
-    instructions: values.instructions,
-    customized: true,
-    updated_at: new Date().toISOString(),
-  }).eq("owner_id", ownerId).eq("id", skillId).is("deleted_at", null).select(columns).maybeSingle();
-  if (result.error) throw result.error;
-  return result.data as SkillRow | null;
+  const [row] = await query<SkillRow>(`update user_skills set name=$1,normalized_name=$2,summary=$3,instructions=$4,customized=true,updated_at=$5
+    where owner_id=$6 and id=$7 and deleted_at is null returning ${columns}`, [values.name, normalizedName, values.summary, values.instructions, new Date().toISOString(), databaseOwnerId(ownerId), skillId]);
+  return row ?? null;
 }
 
 export async function resetBuiltinSkillRow(ownerId: string, skillId: string, input: {
@@ -134,25 +93,13 @@ export async function resetBuiltinSkillRow(ownerId: string, skillId: string, inp
   values: SkillMutation;
   normalizedName: string;
 }): Promise<SkillRow | null> {
-  const result = await db().from("user_skills").update({
-    builtin_version: input.version,
-    customized: false,
-    name: input.values.name,
-    normalized_name: input.normalizedName,
-    summary: input.values.summary,
-    instructions: input.values.instructions,
-    updated_at: new Date().toISOString(),
-    deleted_at: null,
-  }).eq("owner_id", ownerId).eq("id", skillId).eq("builtin_key", input.key).select(columns).maybeSingle();
-  if (result.error) throw result.error;
-  return result.data as SkillRow | null;
+  const [row] = await query<SkillRow>(`update user_skills set builtin_version=$1,customized=false,name=$2,normalized_name=$3,summary=$4,instructions=$5,updated_at=$6,deleted_at=null
+    where owner_id=$7 and id=$8 and builtin_key=$9 returning ${columns}`, [input.version, input.values.name, input.normalizedName, input.values.summary, input.values.instructions, new Date().toISOString(), databaseOwnerId(ownerId), skillId, input.key]);
+  return row ?? null;
 }
 
 export async function softDeleteCustomSkillRow(ownerId: string, skillId: string): Promise<boolean> {
-  const result = await db().from("user_skills").update({
-    deleted_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  }).eq("owner_id", ownerId).eq("id", skillId).is("builtin_key", null).is("deleted_at", null).select("id").maybeSingle();
-  if (result.error) throw result.error;
-  return Boolean(result.data);
+  const rows = await query<{ id: string }>(`update user_skills set deleted_at=$1,updated_at=$1
+    where owner_id=$2 and id=$3 and builtin_key is null and deleted_at is null returning id`, [new Date().toISOString(), databaseOwnerId(ownerId), skillId]);
+  return rows.length > 0;
 }

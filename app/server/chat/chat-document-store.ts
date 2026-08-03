@@ -1,10 +1,19 @@
 import "server-only";
 import { CHAT_DOCUMENT_BUCKET, DOCX_CONTENT_TYPE, ChatDocumentError, PDF_PAGE_EXTRACTION_METHODS, type ChatDocumentAttachment, type ChatDocumentPage, type ChatDocumentPageFailure } from "../../../lib/chat-document";
 import { getServerClient } from "../../auth/supabase-server-adapter";
+import { databaseOwnerId, jsonb, query } from "../database/database";
 import { DOCUMENT_INGESTION_STAGES, type DocumentIngestionTiming } from "./document-ingestion-timing";
 import { withChatPersistenceRetry } from "./chat-persistence-retry";
 
 export const CHAT_DOCUMENT_DOWNLOAD_URL_EXPIRATION_SECONDS = 60;
+
+export async function assertChatDocumentTables(): Promise<void> {
+  await Promise.all([
+    query(`select has_images,image_count,analyzed_image_count,image_analyses from chat_documents limit 0`),
+    query(`select extraction_method,failure from chat_document_pages limit 0`),
+    query(`select documents from chat_messages limit 0`),
+  ]);
+}
 
 function storedPageFailure(value: unknown): ChatDocumentPageFailure | undefined {
   if (!value || typeof value !== "object" || !("code" in value) || !("message" in value) || typeof value.code !== "string" || typeof value.message !== "string") return undefined;
@@ -67,15 +76,10 @@ export async function createSignedDocumentDownloadUrl(
 export async function registerDocument(input: { ownerId: string; conversationId: string; userMessageId: string | null; jobId: string | null; document: ChatDocumentAttachment; pages: ChatDocumentPage[]; timing?: DocumentIngestionTiming }) {
   const register = async () => {
     await withChatPersistenceRetry(async () => {
-      const { error } = await getServerClient().rpc("register_chat_document", {
-        p_owner_id: input.ownerId,
-        p_conversation_id: input.conversationId,
-        p_document: input.document,
-        p_user_message_id: input.userMessageId,
-        p_job_id: input.jobId,
-        p_pages: input.pages,
-      });
-      if (error) throw error;
+      await query(
+        "select register_chat_document($1,$2,$3::jsonb,$4,$5,$6::jsonb,$7) as result",
+        [databaseOwnerId(input.ownerId), input.conversationId, jsonb(input.document), input.userMessageId, input.jobId, jsonb(input.pages), documentStoragePath(input.ownerId, input.conversationId, input.document.id, input.document.contentType)],
+      );
     });
   };
   if (input.timing) await input.timing.measure(DOCUMENT_INGESTION_STAGES.DATABASE_REGISTRATION, register);
@@ -83,14 +87,13 @@ export async function registerDocument(input: { ownerId: string; conversationId:
 }
 
 export async function getAuthorizedDocument(ownerId: string, conversationId: string, pdfId: string): Promise<ChatDocumentAttachment | null> {
-  const { data, error } = await getServerClient().from("chat_documents").select("document_id,filename,content_type,size,page_count,token_estimate,has_images,image_count,analyzed_image_count,image_analyses,project_id,revision_id,parent_revision_id,origin,editable,source_completeness").eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("document_id", pdfId).eq("status", "complete").maybeSingle();
-  if (error) throw error; if (!data) return null;
-  return { id: data.document_id, name: data.filename, contentType: data.content_type as ChatDocumentAttachment["contentType"], size: Number(data.size), pageCount: Number(data.page_count), tokenEstimate: Number(data.token_estimate), hasImages: Boolean(data.has_images), imageCount: Number(data.image_count ?? 0), analyzedImageCount: Number(data.analyzed_image_count ?? 0), imageAnalyses: Array.isArray(data.image_analyses) ? data.image_analyses : [], ...(data.project_id ? { projectId: data.project_id, revisionId: data.revision_id, parentRevisionId: data.parent_revision_id ?? null, origin: data.origin, editable: Boolean(data.editable), sourceCompleteness: data.source_completeness ?? undefined } : {}) };
+  const [data] = await query<Record<string, unknown>>("select document_id,filename,content_type,size,page_count,token_estimate,has_images,image_count,analyzed_image_count,image_analyses,project_id,revision_id,parent_revision_id,origin,editable,source_completeness from chat_documents where owner_id=$1 and conversation_id=$2 and document_id=$3 and status='complete'", [databaseOwnerId(ownerId), conversationId, pdfId]);
+  if (!data) return null;
+  return { id: String(data.document_id), name: String(data.filename), contentType: data.content_type as ChatDocumentAttachment["contentType"], size: Number(data.size), pageCount: Number(data.page_count), tokenEstimate: Number(data.token_estimate), hasImages: Boolean(data.has_images), imageCount: Number(data.image_count ?? 0), analyzedImageCount: Number(data.analyzed_image_count ?? 0), imageAnalyses: Array.isArray(data.image_analyses) ? data.image_analyses : [], ...(data.project_id ? { projectId: String(data.project_id), revisionId: typeof data.revision_id === "string" ? data.revision_id : undefined, parentRevisionId: typeof data.parent_revision_id === "string" ? data.parent_revision_id : null, origin: data.origin as ChatDocumentAttachment["origin"], editable: Boolean(data.editable), sourceCompleteness: data.source_completeness as ChatDocumentAttachment["sourceCompleteness"] } : {}) };
 }
 
 export async function downloadAuthorizedDocumentBytes(ownerId: string, conversationId: string, documentId: string): Promise<Uint8Array | null> {
-  const { data, error } = await getServerClient().from("chat_documents").select("storage_path,content_type").eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("document_id", documentId).eq("status", "complete").maybeSingle();
-  if (error) throw error;
+  const [data] = await query<{ storage_path: string; content_type: string }>("select storage_path,content_type from chat_documents where owner_id=$1 and conversation_id=$2 and document_id=$3 and status='complete'", [databaseOwnerId(ownerId), conversationId, documentId]);
   if (!data?.storage_path) return null;
   const result = await getServerClient().storage.from(CHAT_DOCUMENT_BUCKET).download(data.storage_path);
   if (result.error) throw result.error;
@@ -98,8 +101,8 @@ export async function downloadAuthorizedDocumentBytes(ownerId: string, conversat
 }
 
 export async function getDocumentPages(ownerId: string, conversationId: string, pdfId: string, start = 1, end = 100000): Promise<ChatDocumentPage[]> {
-  const { data, error } = await getServerClient().from("chat_document_pages").select("page_number,text,extraction_method,failure").eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("document_id", pdfId).gte("page_number", start).lte("page_number", end).order("page_number");
-  if (error) throw error; return (data ?? []).map((p) => ({ pageNumber: Number(p.page_number), text: p.text, extractionMethod: storedPageMethod(p.extraction_method, p.text), ...(storedPageFailure(p.failure) ? { failure: storedPageFailure(p.failure) } : {}) }));
+  const data = await query<{ page_number: number; text: string; extraction_method: unknown; failure: unknown }>("select page_number,text,extraction_method,failure from chat_document_pages where owner_id=$1 and conversation_id=$2 and document_id=$3 and page_number >= $4 and page_number <= $5 order by page_number", [databaseOwnerId(ownerId), conversationId, pdfId, start, end]);
+  return data.map((p) => ({ pageNumber: Number(p.page_number), text: p.text, extractionMethod: storedPageMethod(p.extraction_method, p.text), ...(storedPageFailure(p.failure) ? { failure: storedPageFailure(p.failure) } : {}) }));
 }
 
 export async function uploadDocumentBytes(path: string, bytes: Uint8Array, contentType: ChatDocumentAttachment["contentType"]) {
@@ -113,23 +116,16 @@ export async function deleteDocument(input: {
   contentType: ChatDocumentAttachment["contentType"];
 }) {
   const db = getServerClient();
-  const { data: metadata, error: lookupError } = await db
-    .from("chat_documents")
-    .select("content_type")
-    .eq("owner_id", input.ownerId)
-    .eq("conversation_id", input.conversationId)
-    .eq("document_id", input.documentId)
-    .maybeSingle();
-  if (lookupError) throw lookupError;
+  const [metadata] = await query<{ content_type: string }>("select content_type from chat_documents where owner_id=$1 and conversation_id=$2 and document_id=$3", [databaseOwnerId(input.ownerId), input.conversationId, input.documentId]);
   const contentType = metadata?.content_type === DOCX_CONTENT_TYPE ? DOCX_CONTENT_TYPE : input.contentType;
   const path = documentStoragePath(input.ownerId, input.conversationId, input.documentId, contentType);
   const { error: storageError } = await db.storage.from(CHAT_DOCUMENT_BUCKET).remove([path]);
-  const { error: metadataError } = await db
-    .from("chat_documents")
-    .delete()
-    .eq("owner_id", input.ownerId)
-    .eq("conversation_id", input.conversationId)
-    .eq("document_id", input.documentId);
+  let metadataError: unknown = null;
+  try {
+    await query("delete from chat_documents where owner_id=$1 and conversation_id=$2 and document_id=$3", [databaseOwnerId(input.ownerId), input.conversationId, input.documentId]);
+  } catch (error) {
+    metadataError = error;
+  }
 
   // Metadata cleanup must still happen if an already-removed object caused the
   // storage call to fail. Surface the storage failure after the database work
@@ -141,12 +137,7 @@ export async function deleteDocument(input: {
 /** Remove registered document objects before their conversation row cascades. */
 export async function deleteChatDocumentsForConversation(ownerId: string, conversationId: string): Promise<void> {
   const db = getServerClient();
-  const { data, error } = await db
-    .from("chat_documents")
-    .select("storage_path")
-    .eq("owner_id", ownerId)
-    .eq("conversation_id", conversationId);
-  if (error) throw error;
+  const data = await query<{ storage_path: string }>("select storage_path from chat_documents where owner_id=$1 and conversation_id=$2", [databaseOwnerId(ownerId), conversationId]);
   const paths = (data ?? [])
     .map((row) => row.storage_path)
     .filter((path): path is string => typeof path === "string" && path.length > 0);

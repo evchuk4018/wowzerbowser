@@ -52,7 +52,8 @@ test("calendar credentials remain owner-scoped and server-only", () => {
   const repository = source("app/server/calendar/google-calendar-repository.ts");
   assert.match(migration, /owner_id uuid primary key references auth\.users/);
   assert.match(migration, /enable row level security/);
-  assert.match(repository, /\.eq\("owner_id", ownerId\)/);
+  assert.match(repository, /where owner_id=\$1/);
+  assert.match(repository, /databaseOwnerId\(ownerId\)/);
   assert.doesNotMatch(repository, /NEXT_PUBLIC.*SECRET|console\.(?:log|info)/);
 });
 

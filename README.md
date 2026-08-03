@@ -4,7 +4,7 @@ A private chat workspace built with Next.js and ready for Vercel deployment.
 
 ## Recurring automations
 
-Apply `supabase/migrations/20260730100000_recurring_automations.sql`, set a random
+The local migration runner creates the recurring-automation tables. Set a random
 `AUTOMATION_DISPATCH_SECRET` in the application environment, and store the same
 value plus the production app URL in Supabase Vault. Configure one Supabase Cron
 job to use `pg_net` to `POST /api/internal/automations/dispatch` every five
@@ -137,7 +137,7 @@ connected account's primary calendar.
    `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
    `NEXT_PUBLIC_SITE_URL` must exactly match the origin used in the registered
    callback URI.
-6. Apply the Supabase migrations, deploy or restart the app, then open
+6. Apply the local PostgreSQL migrations, deploy or restart the app, then open
    **Settings → Tools → Google Calendar → Connect** and approve access.
 
 The OAuth request uses offline access and the narrow
@@ -156,7 +156,7 @@ The Next.js app remains on Vercel. Ordinary DMs require Discord's persistent
 Gateway connection, so `scripts/discord-worker.mjs` runs separately as an
 always-on Railway service.
 
-1. Apply `supabase/migrations/20260730150000_discord_dm_integration.sql`.
+1. Apply the local PostgreSQL migrations before starting the worker.
 2. In the Discord Developer Portal, create an application and bot. Enable the
    Message Content intent and install the bot for the owner account. The worker
    subscribes only to direct-message and message-content events and ignores
@@ -244,14 +244,13 @@ then returns a clear "not configured" result.
 - [Vercel Documentation](https://vercel.com/docs)
 
 ### Document attachments
-PDF and DOCX documents (up to 25 MiB) upload directly from the browser to the private `chat-documents` Supabase bucket through a signed upload URL. PDF text uses local PDF.js extraction and bounded OCR first, with the free OpenRouter parser as a recovery path and Qwen3.7 Flash as a paid fallback when the free quota is exhausted. DOCX text is extracted locally with Mammoth and divided into bounded logical pages that do not claim to match Word's rendered pages. Embedded DOCX images use the free OpenRouter image analyzer with the same Qwen3.7 Flash quota fallback. Configure `OPENROUTER_API_KEY` for Qwen background text tasks, vision, OCR, PDF parsing, and user-memory dreaming; configure `DEEPSEEK_API_KEY` only when using the built-in foreground DeepSeek chat models. Apply the Supabase migrations. Small documents are included verbatim in context, while large documents are available through gated `search_document` and `read_document_pages` tools.
+PDF and DOCX documents (up to 25 MiB) upload directly from the browser to the private `chat-documents` Supabase bucket through a signed upload URL. PDF text uses local PDF.js extraction and bounded OCR first, with the free OpenRouter parser as a recovery path and Qwen3.7 Flash as a paid fallback when the free quota is exhausted. DOCX text is extracted locally with Mammoth and divided into bounded logical pages that do not claim to match Word's rendered pages. Embedded DOCX images use the free OpenRouter image analyzer with the same Qwen3.7 Flash quota fallback. Configure `OPENROUTER_API_KEY` for Qwen background text tasks, vision, OCR, PDF parsing, and user-memory dreaming; configure `DEEPSEEK_API_KEY` only when using the built-in foreground DeepSeek chat models. Apply the local PostgreSQL migrations. Small documents are included verbatim in context, while large documents are available through gated `search_document` and `read_document_pages` tools.
 
 Durable user memory is stored as a private, audited `User Profile` folder tree. Hidden chat summaries are consolidated after every three completed generations by Qwen3.7 Flash with reasoning disabled; repeated turns from one conversation contribute only its newest summary. The main agent can browse and maintain the same profile through server-side memory tools, and chat-history recall uses the same Qwen model. Dreaming is enabled by default when the schema and provider keys are configured and uses Qwen reasoning; it can be disabled with `USER_MEMORY_DREAMING_ENABLED=false`. Provider or persistence failures are isolated from normal chat delivery.
 
 PDF finalization runs on the Node.js runtime because PDF.js and `@napi-rs/canvas` require native server dependencies. The production build runs `npm run verify:pdf-runtime` before Next.js build output is generated and inspects both emitted function traces afterward; a missing native canvas package must fail the deployment rather than first appearing as a document-upload 500. After changing native dependencies, deploy with a clean dependency install and verify the emitted Vercel function trace contains the Linux canvas package. The configured 300-second duration remains subject to the active Vercel plan's maximum.
 
-The document schema is deployed separately from the application. Apply these migrations to the production Supabase project before enabling document uploads, and refresh the PostgREST schema cache if the API reports stale columns:
-
-- `supabase/migrations/20260726090000_chat_documents.sql`
-- `supabase/migrations/20260726120000_docx_documents.sql`
-- `supabase/migrations/20260726130000_pdf_page_extraction.sql`
+The document metadata schema is included in the local PostgreSQL migrations and
+is applied by `scripts/migrate.mjs`. Supabase remains the private object-storage
+provider for the `chat-documents` bucket; keep that bucket configured and use
+the signed upload/download adapters in the server.

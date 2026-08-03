@@ -29,9 +29,9 @@ test("deletion exposes an authenticated idempotent API and coordinated cleanup",
   assert.match(service, /deleteChatConversationRecord/);
   assert.match(service, /deleteChatModelPreference/);
   assert.match(service, /deleteChatJobsForConversation/);
-  assert.match(history, /from\("chat_conversations"\)[\s\S]*?\.delete\(\)/);
-  assert.match(preferences, /from\("chat_model_preferences"\)[\s\S]*?\.delete\(\)/);
-  assert.match(jobs, /from\("chat_jobs"\)[\s\S]*?\.delete\(\)/);
+  assert.match(history, /delete from chat_conversations where owner_id=\$1/);
+  assert.match(preferences, /delete from chat_model_preferences where owner_id/);
+  assert.match(jobs, /delete from chat_jobs where owner_id=\$1/);
   assert.match(jobs, /cancel_chat_job_and_finalize_message/);
   assert.match(modal, /sandbox\.terminate\(\)/);
   assert.match(modal, /client\.volumes\.delete/);

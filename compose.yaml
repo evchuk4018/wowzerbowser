@@ -42,6 +42,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-wowzerbowser}
       POSTGRES_USER: ${POSTGRES_USER:-wowzerbowser}
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set in .env}
+      APP_OWNER_ID: ${APP_OWNER_ID:?APP_OWNER_ID must be set in the deployment environment}
       APP_STORAGE_ROOT: /srv/storage/wowzerbowser
       STORAGE_MOUNT_GUARD: ${STORAGE_MOUNT_GUARD:-unverified}
       WORKER_CHAT_CONCURRENCY: ${WORKER_CHAT_CONCURRENCY:-1}
@@ -91,6 +92,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-wowzerbowser}
       POSTGRES_USER: ${POSTGRES_USER:-wowzerbowser}
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set in .env}
+      APP_OWNER_ID: ${APP_OWNER_ID:?APP_OWNER_ID must be set in the deployment environment}
       APP_STORAGE_ROOT: /srv/storage/wowzerbowser
       STORAGE_MOUNT_GUARD: ${STORAGE_MOUNT_GUARD:-unverified}
       WORKER_CHAT_CONCURRENCY: ${WORKER_CHAT_CONCURRENCY:-1}

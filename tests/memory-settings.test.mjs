@@ -16,10 +16,12 @@ test("memory update protocol accepts content and rejects malformed payloads", ()
 test("memory summaries are owner-scoped, ordered, and exclude empty values", async () => {
   const repository = await source("app/server/chat/chat-summary-store.ts");
   assert.match(repository, /chat_conversation_summaries/);
-  assert.match(repository, /\.eq\("owner_id", ownerId\)/);
-  assert.match(repository, /\.order\("updated_at", \{ ascending: false \}\)/);
+  assert.match(repository, /chat_conversation_summaries/);
+  assert.match(repository, /where summaries\.owner_id=\$1/);
+  assert.match(repository, /order by summaries\.updated_at desc/);
+  assert.match(repository, /databaseOwnerId\(ownerId\)/);
   assert.match(repository, /row\.summary\.trim\(\)\.length > 0/);
-  assert.match(repository, /titleByConversation\.get\(row\.conversation_id\) \?\? "Conversation"/);
+  assert.match(repository, /title: row\.title \?\? "Conversation"/);
 });
 
 test("memory API routes authenticate owners and keep handlers thin", async () => {
@@ -44,7 +46,7 @@ test("Settings mutations preserve provenance and bypass revision auditing", asyn
   ]);
   assert.match(repository, /editUserMemoryFromSettings/);
   assert.match(repository, /deleteUserMemoryFromSettings/);
-  assert.match(repository, /content_fingerprint: fingerprint\(content\)/);
+  assert.match(repository, /content=\$1,content_fingerprint=\$2/);
   const editStart = repository.indexOf("export async function editUserMemoryFromSettings");
   const moveStart = repository.indexOf("export async function moveUserMemory", editStart);
   const deleteStart = repository.indexOf("export async function deleteUserMemoryFromSettings");

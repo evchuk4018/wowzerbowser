@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { CustomToolDefinition, CustomToolSummary, JsonSchema } from "../../../lib/custom-tool-protocol";
-import { getServerClient } from "../../auth/supabase-server-adapter";
+import { asIsoTimestamp, databaseOwnerId, jsonb, query } from "../database/database";
 
 type ToolRow = {
   id: string; owner_id: string; name: string; description: string; instructions: string;
@@ -17,7 +17,7 @@ function definition(row: ToolRow, secrets: SecretRow[]): CustomToolDefinition {
   return {
     id: row.id, name: row.name, description: row.description, instructions: row.instructions,
     inputSchema: row.input_schema, pythonSource: row.python_source, enabled: row.enabled,
-    createdAt: row.created_at, updatedAt: row.updated_at,
+    createdAt: asIsoTimestamp(row.created_at), updatedAt: asIsoTimestamp(row.updated_at),
     secrets: secrets.filter((item) => item.tool_id === row.id).map((item) => ({
       name: item.name, configured: true, fingerprint: item.fingerprint,
     })),
@@ -26,20 +26,12 @@ function definition(row: ToolRow, secrets: SecretRow[]): CustomToolDefinition {
 
 async function secretRows(ownerId: string, toolIds?: string[]): Promise<SecretRow[]> {
   if (toolIds && !toolIds.length) return [];
-  let query = getServerClient().from("custom_tool_secrets")
-    .select("tool_id,owner_id,name,ciphertext,nonce,auth_tag,fingerprint").eq("owner_id", ownerId);
-  if (toolIds) query = query.in("tool_id", toolIds);
-  const { data, error } = await query;
-  if (error) throw error;
-  return (data ?? []) as SecretRow[];
+  if (toolIds) return query<SecretRow>("select tool_id,owner_id,name,ciphertext,nonce,auth_tag,fingerprint from custom_tool_secrets where owner_id=$1 and tool_id=any($2::uuid[])", [databaseOwnerId(ownerId), toolIds]);
+  return query<SecretRow>("select tool_id,owner_id,name,ciphertext,nonce,auth_tag,fingerprint from custom_tool_secrets where owner_id=$1", [databaseOwnerId(ownerId)]);
 }
 
 export async function listCustomTools(ownerId: string): Promise<CustomToolSummary[]> {
-  const { data, error } = await getServerClient().from("custom_tools")
-    .select("id,owner_id,name,description,instructions,input_schema,python_source,enabled,created_at,updated_at")
-    .eq("owner_id", ownerId).order("updated_at", { ascending: false });
-  if (error) throw error;
-  const rows = (data ?? []) as ToolRow[];
+  const rows = await query<ToolRow>("select id,owner_id,name,description,instructions,input_schema,python_source,enabled,created_at,updated_at from custom_tools where owner_id=$1 order by updated_at desc", [databaseOwnerId(ownerId)]);
   const secrets = await secretRows(ownerId, rows.map((row) => row.id));
   return rows.map((row) => {
     const item = definition(row, secrets);
@@ -51,12 +43,9 @@ export async function listCustomTools(ownerId: string): Promise<CustomToolSummar
 }
 
 export async function getCustomTool(ownerId: string, toolId: string): Promise<CustomToolDefinition | null> {
-  const { data, error } = await getServerClient().from("custom_tools")
-    .select("id,owner_id,name,description,instructions,input_schema,python_source,enabled,created_at,updated_at")
-    .eq("owner_id", ownerId).eq("id", toolId).maybeSingle();
-  if (error) throw error;
-  if (!data) return null;
-  return definition(data as ToolRow, await secretRows(ownerId, [toolId]));
+  const [row] = await query<ToolRow>("select id,owner_id,name,description,instructions,input_schema,python_source,enabled,created_at,updated_at from custom_tools where owner_id=$1 and id=$2", [databaseOwnerId(ownerId), toolId]);
+  if (!row) return null;
+  return definition(row, await secretRows(ownerId, [toolId]));
 }
 
 export async function getExecutableCustomTool(ownerId: string, toolId: string): Promise<ExecutableCustomTool | null> {
@@ -65,53 +54,34 @@ export async function getExecutableCustomTool(ownerId: string, toolId: string): 
 }
 
 export async function listEnabledExecutableTools(ownerId: string): Promise<ExecutableCustomTool[]> {
-  const { data, error } = await getServerClient().from("custom_tools")
-    .select("id,owner_id,name,description,instructions,input_schema,python_source,enabled,created_at,updated_at")
-    .eq("owner_id", ownerId).eq("enabled", true).order("name");
-  if (error) throw error;
-  const rows = (data ?? []) as ToolRow[];
+  const rows = await query<ToolRow>("select id,owner_id,name,description,instructions,input_schema,python_source,enabled,created_at,updated_at from custom_tools where owner_id=$1 and enabled=true order by name", [databaseOwnerId(ownerId)]);
   const secrets = await secretRows(ownerId, rows.map((row) => row.id));
   return rows.map((row) => ({ ...definition(row, secrets), encryptedSecrets: secrets.filter((item) => item.tool_id === row.id) }));
 }
 
 export async function insertCustomTool(ownerId: string, values: Omit<ToolRow, "id" | "owner_id" | "created_at" | "updated_at">): Promise<string> {
-  const { data, error } = await getServerClient().from("custom_tools").insert({
-    owner_id: ownerId, name: values.name, description: values.description, instructions: values.instructions,
-    input_schema: values.input_schema, python_source: values.python_source, enabled: values.enabled,
-  }).select("id").single();
-  if (error) throw error;
-  return data.id as string;
+  const [row] = await query<{ id: string }>("insert into custom_tools(owner_id,name,description,instructions,input_schema,python_source,enabled) values($1,$2,$3,$4,$5::jsonb,$6,$7) returning id", [databaseOwnerId(ownerId), values.name, values.description, values.instructions, jsonb(values.input_schema), values.python_source, values.enabled]);
+  return row.id;
 }
 
 export async function updateCustomToolRow(ownerId: string, toolId: string, values: Omit<ToolRow, "id" | "owner_id" | "created_at" | "updated_at">): Promise<boolean> {
-  const { data, error } = await getServerClient().from("custom_tools").update({
-    name: values.name, description: values.description, instructions: values.instructions,
-    input_schema: values.input_schema, python_source: values.python_source, enabled: values.enabled,
-    updated_at: new Date().toISOString(),
-  }).eq("owner_id", ownerId).eq("id", toolId).select("id");
-  if (error) throw error;
-  return Boolean(data?.length);
+  const rows = await query<{ id: string }>("update custom_tools set name=$1,description=$2,instructions=$3,input_schema=$4::jsonb,python_source=$5,enabled=$6,updated_at=$7 where owner_id=$8 and id=$9 returning id", [values.name, values.description, values.instructions, jsonb(values.input_schema), values.python_source, values.enabled, new Date().toISOString(), databaseOwnerId(ownerId), toolId]);
+  return rows.length > 0;
 }
 
 export async function upsertCustomToolSecrets(ownerId: string, toolId: string, rows: Omit<SecretRow, "tool_id" | "owner_id">[]): Promise<void> {
   if (!rows.length) return;
-  const { error } = await getServerClient().from("custom_tool_secrets").upsert(rows.map((row) => ({
-    tool_id: toolId, owner_id: ownerId, name: row.name, ciphertext: row.ciphertext,
-    nonce: row.nonce, auth_tag: row.auth_tag, fingerprint: row.fingerprint, updated_at: new Date().toISOString(),
-  })), { onConflict: "tool_id,name" });
-  if (error) throw error;
+  const owner = databaseOwnerId(ownerId);
+  for (const row of rows) await query(`insert into custom_tool_secrets(tool_id,owner_id,name,ciphertext,nonce,auth_tag,fingerprint,updated_at)
+    values($1,$2,$3,$4,$5,$6,$7,$8) on conflict(tool_id,name) do update set owner_id=excluded.owner_id,ciphertext=excluded.ciphertext,nonce=excluded.nonce,auth_tag=excluded.auth_tag,fingerprint=excluded.fingerprint,updated_at=excluded.updated_at`, [toolId, owner, row.name, row.ciphertext, row.nonce, row.auth_tag, row.fingerprint, new Date().toISOString()]);
 }
 
 export async function removeCustomToolSecrets(ownerId: string, toolId: string, names: string[]): Promise<void> {
   if (!names.length) return;
-  const { error } = await getServerClient().from("custom_tool_secrets").delete()
-    .eq("owner_id", ownerId).eq("tool_id", toolId).in("name", names);
-  if (error) throw error;
+  await query("delete from custom_tool_secrets where owner_id=$1 and tool_id=$2 and name=any($3::text[])", [databaseOwnerId(ownerId), toolId, names]);
 }
 
 export async function deleteCustomToolRow(ownerId: string, toolId: string): Promise<boolean> {
-  const { data, error } = await getServerClient().from("custom_tools").delete()
-    .eq("owner_id", ownerId).eq("id", toolId).select("id");
-  if (error) throw error;
-  return Boolean(data?.length);
+  const rows = await query<{ id: string }>("delete from custom_tools where owner_id=$1 and id=$2 returning id", [databaseOwnerId(ownerId), toolId]);
+  return rows.length > 0;
 }

@@ -24,7 +24,8 @@ test("persistence and dispatcher are owner scoped and leased", async () => {
   const [migration, repository, route] = await Promise.all([source("supabase/migrations/20260730100000_recurring_automations.sql"), source("app/server/automations/automation-repository.ts"), source("app/api/internal/automations/dispatch/route.ts")]);
   assert.match(migration, /for update skip locked/);
   assert.match(migration, /lease_expires_at/);
-  assert.match(repository, /eq\("owner_id", ownerId\)/);
+  assert.match(repository, /where owner_id=\$1/);
+  assert.match(repository, /databaseOwnerId\(ownerId\)/);
   assert.match(route, /AUTOMATION_DISPATCH_SECRET/);
 });
 
@@ -123,5 +124,5 @@ test("Discord automation delivery is durable, leased, and idempotent per run", a
   assert.match(migration, /lease_expires_at/);
   assert.match(migration, /enable row level security/);
   assert.doesNotMatch(migration, /create policy/i);
-  assert.match(repository, /ignoreDuplicates: true/);
+  assert.match(repository, /on conflict\(owner_id,automation_run_id\) do nothing/);
 });

@@ -34,7 +34,7 @@ test("chat submission is durable, idempotent, and uses per-job event ordinals", 
   assert.match(runner, /eventWriter\.enqueue/);
   assert.match(runner, /options\.onEvent/);
   assert.match(runner, /await eventWriter\.drain\(\)/);
-  assert.match(store, /p_lease_ms: CHAT_JOB_LEASE_MS/);
+  assert.match(store, /CHAT_JOB_LEASE_MS/);
   assert.match(route, /after\(\(\) => completion\)/);
   assert.match(route, /text\/event-stream/);
   assert.doesNotMatch(route, /request\.signal/);
@@ -75,8 +75,9 @@ test("attachment-free submission and claim use one atomic RPC", async () => {
 
 test("replay is ordered, exclusive, and owner isolated", async () => {
   const store = await source("app/server/chat/chat-job-store.ts");
-  assert.match(store, /eq\("owner_id", ownerId\)/);
-  assert.match(store, /gt\("event_index", after\)\.order\("event_index"\)/);
+  assert.match(store, /where owner_id=\$1/);
+  assert.match(store, /event_index>\$4 order by event_index/);
+  assert.match(store, /databaseOwnerId\(ownerId\)/);
   assert.match(store, /CHAT_EVENT_PAGE_SIZE \+ 1/);
   assert.match(store, /hasMore/);
   const endpoint = await source("app/api/chat/jobs/[conversationId]/[jobId]/route.ts");

@@ -3,9 +3,7 @@ import "server-only";
 import type { UsagePricing, UsageRecord, UsageRecordInput } from "../../../lib/usage-protocol";
 import { calculateUsageCost, normalizeUsage } from "../../../lib/usage-pricing";
 import { DEFAULT_DEEPSEEK_USAGE_PRICING } from "../../providers/deepseek/deepseek-pricing";
-import { getServerClient } from "../../auth/supabase-server-adapter";
-
-const table = () => getServerClient();
+import { databaseOwnerId, isoTimestamp, jsonb, query } from "../database/database";
 
 function numberValue(value: unknown): number {
   const parsed = typeof value === "number" ? value : Number(value);
@@ -26,13 +24,8 @@ function pricingFromRow(row: Record<string, unknown>): UsagePricing {
 }
 
 export async function listUsagePricing(): Promise<UsagePricing[]> {
-  const { data, error } = await table()
-    .from("chat_model_pricing")
-    .select("provider,model,label,input_usd_per_million,cached_input_usd_per_million,output_usd_per_million")
-    .order("provider")
-    .order("model");
-  if (error) throw error;
-  return (data ?? []).map((row) => pricingFromRow(row as Record<string, unknown>));
+  const rows = await query<Record<string, unknown>>("select provider,model,label,input_usd_per_million,cached_input_usd_per_million,output_usd_per_million from chat_model_pricing order by provider,model");
+  return rows.map((row) => pricingFromRow(row));
 }
 
 function usageColumns(input: UsageRecordInput) {
@@ -54,19 +47,11 @@ function usageColumns(input: UsageRecordInput) {
 }
 
 export async function queueUsage(input: UsageRecordInput): Promise<void> {
-  const { error } = await table().from("chat_usage_outbox").upsert({
-    owner_id: input.ownerId,
-    provider: input.provider,
-    model: input.model,
-    request_kind: input.requestKind,
-    request_id: input.requestId,
-    round: input.round,
-    ...usageColumns(input),
-  }, {
-    onConflict: "owner_id,provider,request_kind,request_id,round",
-    ignoreDuplicates: true,
-  });
-  if (error) throw error;
+  const values = usageColumns(input);
+  await query(`insert into chat_usage_outbox(owner_id,provider,model,request_kind,request_id,round,prompt_tokens,completion_tokens,total_tokens,cached_prompt_tokens,reasoning_tokens,usage_source,recorded_at,conversation_id,job_id,exact_cost_usd,pricing_snapshot,unpriced)
+    values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18)
+    on conflict(owner_id,provider,request_kind,request_id,round) do nothing`,
+    [databaseOwnerId(input.ownerId), input.provider, input.model, input.requestKind, input.requestId, input.round, values.prompt_tokens, values.completion_tokens, values.total_tokens, values.cached_prompt_tokens, values.reasoning_tokens, values.usage_source, values.recorded_at, values.conversation_id, values.job_id, values.exact_cost_usd, values.pricing_snapshot == null ? null : jsonb(values.pricing_snapshot), values.unpriced]);
 }
 
 async function writeUsageRecord(input: UsageRecordInput): Promise<void> {
@@ -77,47 +62,17 @@ async function writeUsageRecord(input: UsageRecordInput): Promise<void> {
   const usage = normalizeUsage(input.usage);
   const effectivePricing = input.pricingSnapshot ?? pricing;
   const costUsd = input.exactCostUsd ?? calculateUsageCost(usage, effectivePricing);
-  const { error } = await table().from("chat_usage_records").upsert({
-    owner_id: input.ownerId,
-    provider: input.provider,
-    model: input.model,
-    request_kind: input.requestKind,
-    request_id: input.requestId,
-    round: input.round,
-    ...(input.recordedAt ? { recorded_at: input.recordedAt } : {}),
-    conversation_id: input.conversationId ?? null,
-    job_id: input.jobId ?? null,
-    prompt_tokens: usage.promptTokens ?? 0,
-    completion_tokens: usage.completionTokens ?? 0,
-    total_tokens: usage.totalTokens ?? 0,
-    cached_prompt_tokens: usage.cachedPromptTokens ?? 0,
-    reasoning_tokens: usage.reasoningTokens ?? 0,
-    cost_usd: costUsd,
-    usage_source: input.source,
-    exact_cost_usd: input.exactCostUsd ?? null,
-    pricing_snapshot: effectivePricing,
-    unpriced: input.unpriced ?? (costUsd === null),
-    input_usd_per_million: effectivePricing?.inputUsdPerMillion ?? null,
-    cached_input_usd_per_million: effectivePricing?.cachedInputUsdPerMillion ?? null,
-    output_usd_per_million: effectivePricing?.outputUsdPerMillion ?? null,
-    pricing_label: effectivePricing?.label ?? null,
-  }, {
-    onConflict: "owner_id,provider,request_kind,request_id,round",
-    ignoreDuplicates: true,
-  });
-  if (error) throw error;
+  await query(`insert into chat_usage_records(owner_id,provider,model,request_kind,request_id,round,recorded_at,conversation_id,job_id,prompt_tokens,completion_tokens,total_tokens,cached_prompt_tokens,reasoning_tokens,cost_usd,usage_source,exact_cost_usd,pricing_snapshot,unpriced,input_usd_per_million,cached_input_usd_per_million,output_usd_per_million,pricing_label)
+    values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19,$20,$21,$22,$23)
+    on conflict(owner_id,provider,request_kind,request_id,round) do nothing`,
+    [databaseOwnerId(input.ownerId), input.provider, input.model, input.requestKind, input.requestId, input.round, input.recordedAt ?? new Date().toISOString(), input.conversationId ?? null, input.jobId ?? null, usage.promptTokens ?? 0, usage.completionTokens ?? 0, usage.totalTokens ?? 0, usage.cachedPromptTokens ?? 0, usage.reasoningTokens ?? 0, costUsd, input.source, effectivePricing == null ? null : jsonb(effectivePricing), input.unpriced ?? (costUsd === null), effectivePricing?.inputUsdPerMillion ?? null, effectivePricing?.cachedInputUsdPerMillion ?? null, effectivePricing?.outputUsdPerMillion ?? null, effectivePricing?.label ?? null]);
 }
 
 export async function flushUsageOutbox(ownerId: string): Promise<void> {
+  const databaseOwner = databaseOwnerId(ownerId);
   while (true) {
-    const { data, error } = await table()
-      .from("chat_usage_outbox")
-      .select("id,provider,model,request_kind,request_id,round,prompt_tokens,completion_tokens,total_tokens,cached_prompt_tokens,reasoning_tokens,usage_source,recorded_at,conversation_id,job_id,exact_cost_usd,pricing_snapshot,unpriced")
-      .eq("owner_id", ownerId)
-      .order("id")
-      .limit(100);
-    if (error) throw error;
-    if (!data?.length) return;
+    const data = await query<Record<string, unknown>>("select id,provider,model,request_kind,request_id,round,prompt_tokens,completion_tokens,total_tokens,cached_prompt_tokens,reasoning_tokens,usage_source,recorded_at,conversation_id,job_id,exact_cost_usd,pricing_snapshot,unpriced from chat_usage_outbox where owner_id=$1 order by id limit 100", [databaseOwner]);
+    if (!data.length) return;
     let deleted = 0;
     for (const row of data) {
     const value = row as Record<string, unknown>;
@@ -136,7 +91,7 @@ export async function flushUsageOutbox(ownerId: string): Promise<void> {
         reasoningTokens: numberValue(value.reasoning_tokens),
       },
       source: value.usage_source as UsageRecordInput["source"],
-      recordedAt: String(value.recorded_at),
+      recordedAt: isoTimestamp(value.recorded_at),
       conversationId: typeof value.conversation_id === "string" ? value.conversation_id : undefined,
       jobId: typeof value.job_id === "string" ? value.job_id : undefined,
       exactCostUsd: value.exact_cost_usd === null ? null : numberValue(value.exact_cost_usd),
@@ -145,8 +100,7 @@ export async function flushUsageOutbox(ownerId: string): Promise<void> {
     };
     try {
       await writeUsageRecord(input);
-      const { error: deleteError } = await table().from("chat_usage_outbox").delete().eq("owner_id", ownerId).eq("id", value.id);
-      if (deleteError) throw deleteError;
+      await query("delete from chat_usage_outbox where owner_id=$1 and id=$2", [databaseOwner, value.id]);
       deleted += 1;
     } catch {
       // Leave the row queued for the next usage report or request.
@@ -166,18 +120,18 @@ export async function listUsageRecords(
   window?: { start: string; end: string },
 ): Promise<UsageRecord[]> {
   const rows: Record<string, unknown>[] = [];
+  const databaseOwner = databaseOwnerId(ownerId);
   const pageSize = 1_000;
   for (let offset = 0; ; offset += pageSize) {
-    let query = table()
-      .from("chat_usage_records")
-      .select("provider,model,request_kind,request_id,round,recorded_at,prompt_tokens,completion_tokens,total_tokens,cached_prompt_tokens,reasoning_tokens,cost_usd,usage_source,input_usd_per_million,cached_input_usd_per_million,output_usd_per_million,pricing_label")
-      .eq("owner_id", ownerId)
-      .order("recorded_at", { ascending: true })
-      .range(offset, offset + pageSize - 1);
-    if (window) query = query.gte("recorded_at", window.start).lt("recorded_at", window.end);
-    const { data, error } = await query;
-    if (error) throw error;
-    const page = (data ?? []) as Record<string, unknown>[];
+    const parameters: unknown[] = [databaseOwner];
+    let statement = "select provider,model,request_kind,request_id,round,recorded_at,prompt_tokens,completion_tokens,total_tokens,cached_prompt_tokens,reasoning_tokens,cost_usd,usage_source,input_usd_per_million,cached_input_usd_per_million,output_usd_per_million,pricing_label from chat_usage_records where owner_id=$1";
+    if (window) {
+      parameters.push(window.start, window.end);
+      statement += " and recorded_at >= $2 and recorded_at < $3";
+    }
+    parameters.push(pageSize, offset);
+    statement += ` order by recorded_at asc limit $${parameters.length - 1} offset $${parameters.length}`;
+    const page = await query<Record<string, unknown>>(statement, parameters);
     rows.push(...page);
     if (page.length < pageSize) break;
   }
@@ -201,7 +155,7 @@ export async function listUsageRecords(
       requestKind: value.request_kind as UsageRecord["requestKind"],
       requestId: String(value.request_id),
       round: numberValue(value.round),
-      recordedAt: String(value.recorded_at),
+      recordedAt: isoTimestamp(value.recorded_at),
       promptTokens: numberValue(value.prompt_tokens),
       completionTokens: numberValue(value.completion_tokens),
       totalTokens: numberValue(value.total_tokens),

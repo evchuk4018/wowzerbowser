@@ -17,4 +17,11 @@ if [ -e /srv/storage/media ]; then
   exit 66
 fi
 
+if [ "${SKIP_DATABASE_MIGRATION_CHECK:-0}" != "1" ]; then
+  if ! node /app/scripts/migrate.mjs --check; then
+    echo "Refusing to start: local PostgreSQL migrations are not current." >&2
+    exit 67
+  fi
+fi
+
 exec "$@"

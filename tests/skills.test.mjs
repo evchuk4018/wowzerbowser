@@ -94,9 +94,10 @@ test("skill persistence and routes remain owner-scoped and server-only", async (
   assert.match(migration, /owner_id uuid not null references auth\.users\(id\) on delete cascade/);
   assert.match(migration, /enable row level security/);
   assert.match(migration, /where deleted_at is null/);
-  assert.match(repository, /\.eq\("owner_id", ownerId\)/);
-  assert.match(repository, /is\("deleted_at", null\)/);
-  assert.match(repository, /deleted_at: new Date\(\)\.toISOString\(\)/);
+  assert.match(repository, /where owner_id=\$1/);
+  assert.match(repository, /databaseOwnerId\(ownerId\)/);
+  assert.match(repository, /deleted_at is null/);
+  assert.match(repository, /deleted_at=\$1/);
   for (const value of [route, itemRoute, resetRoute]) {
     assert.match(value, /authorizeOwnerSession/);
     assert.match(value, /status: 401/);

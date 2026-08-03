@@ -12,7 +12,7 @@ import {
   type ChatHistoryMessage,
   type ChatMessageStatus,
 } from "../../../lib/chat-history";
-import { getServerClient } from "../../auth/supabase-server-adapter";
+import { databaseOwnerId, isoTimestamp, jsonb, query } from "../database/database";
 import { attachmentFromUploadRecord, listChatImageUploadRecords } from "./chat-image-store";
 import type { ChatSearchResult } from "../../../lib/chat-search";
 import type { TodoList } from "../../../lib/todo-protocol";
@@ -42,30 +42,14 @@ type MessageRow = {
   todos: unknown;
 };
 
-function client() {
-  return getServerClient();
-}
-
 export async function chatConversationExists(ownerId: string, conversationId: string): Promise<boolean> {
-  const { data, error } = await client()
-    .from("chat_conversations")
-    .select("conversation_id")
-    .eq("owner_id", ownerId)
-    .eq("conversation_id", conversationId)
-    .maybeSingle();
-  if (error) throw error;
-  return Boolean(data);
+  const [row] = await query("select conversation_id from chat_conversations where owner_id=$1 and conversation_id=$2", [databaseOwnerId(ownerId), conversationId]);
+  return Boolean(row);
 }
 
 export async function chatConversationHasMessages(ownerId: string, conversationId: string): Promise<boolean> {
-  const { data, error } = await client()
-    .from("chat_messages")
-    .select("message_id")
-    .eq("owner_id", ownerId)
-    .eq("conversation_id", conversationId)
-    .limit(1);
-  if (error) throw error;
-  return Boolean(data?.length);
+  const [row] = await query("select message_id from chat_messages where owner_id=$1 and conversation_id=$2 limit 1", [databaseOwnerId(ownerId), conversationId]);
+  return Boolean(row);
 }
 
 function arrayValue<T>(value: unknown): T[] {
@@ -137,8 +121,15 @@ function messageRow(
 }
 
 async function insertIfAbsent(tableName: "chat_conversations" | "chat_turns" | "chat_message_versions" | "chat_messages", row: Record<string, unknown>) {
-  const { error } = await client().from(tableName).insert(row);
-  if (error && error.code !== "23505") throw error;
+  const entries = Object.entries(row);
+  const jsonColumns = new Set(["attachments", "documents", "activities", "artifacts", "annotations", "sources", "todos"]);
+  const values = entries.map(([key, value]) => jsonColumns.has(key) ? jsonb(value) : value);
+  const placeholders = entries.map(([key], index) => jsonColumns.has(key) ? `$${index + 1}::jsonb` : `$${index + 1}`);
+  try {
+    await query(`insert into ${tableName} (${entries.map(([key]) => key).join(",")}) values (${placeholders.join(",")}) on conflict do nothing`, values);
+  } catch (error) {
+    throw error;
+  }
 }
 
 export async function createCompletedAutomationConversation(input: {
@@ -154,11 +145,12 @@ export async function createCompletedAutomationConversation(input: {
   const turnId = `${input.runId}:turn`;
   const versionId = `${input.runId}:version`;
   const now = new Date().toISOString();
-  await insertIfAbsent("chat_conversations", { owner_id: input.ownerId, conversation_id: conversationId, title: input.title.slice(0, 160), created_at: now, updated_at: now });
-  await insertIfAbsent("chat_turns", { owner_id: input.ownerId, conversation_id: conversationId, turn_id: turnId, position: 0, active_version: 0, created_at: now, updated_at: now });
-  await insertIfAbsent("chat_message_versions", { owner_id: input.ownerId, conversation_id: conversationId, turn_id: turnId, version_id: versionId, version_index: 0, created_at: now });
-  await insertIfAbsent("chat_messages", messageRow(input.ownerId, conversationId, turnId, versionId, { id: `${input.runId}:user`, role: "user", content: input.prompt }));
-  await insertIfAbsent("chat_messages", messageRow(input.ownerId, conversationId, turnId, versionId, { id: `${input.runId}:assistant`, role: "assistant", content: input.output, ...(input.reasoning ? { reasoning: input.reasoning } : {}), ...(input.thinkingEnabled !== undefined ? { thinkingEnabled: input.thinkingEnabled } : {}), status: "complete" }));
+  const owner = databaseOwnerId(input.ownerId);
+  await insertIfAbsent("chat_conversations", { owner_id: owner, conversation_id: conversationId, title: input.title.slice(0, 160), created_at: now, updated_at: now });
+  await insertIfAbsent("chat_turns", { owner_id: owner, conversation_id: conversationId, turn_id: turnId, position: 0, active_version: 0, created_at: now, updated_at: now });
+  await insertIfAbsent("chat_message_versions", { owner_id: owner, conversation_id: conversationId, turn_id: turnId, version_id: versionId, version_index: 0, created_at: now });
+  await insertIfAbsent("chat_messages", messageRow(owner, conversationId, turnId, versionId, { id: `${input.runId}:user`, role: "user", content: input.prompt }));
+  await insertIfAbsent("chat_messages", messageRow(owner, conversationId, turnId, versionId, { id: `${input.runId}:assistant`, role: "assistant", content: input.output, ...(input.reasoning ? { reasoning: input.reasoning } : {}), ...(input.thinkingEnabled !== undefined ? { thinkingEnabled: input.thinkingEnabled } : {}), status: "complete" }));
   return conversationId;
 }
 
@@ -172,23 +164,14 @@ async function materializePersistedLineage(
   conversationId: string,
   targetPosition: number,
 ): Promise<string | null> {
-  const db = client();
+  const owner = databaseOwnerId(ownerId);
   const [turnsResult, versionsResult] = await Promise.all([
-    db.from("chat_turns")
-      .select("turn_id,position,active_version")
-      .eq("owner_id", ownerId)
-      .eq("conversation_id", conversationId)
-      .order("position"),
-    db.from("chat_message_versions")
-      .select("turn_id,version_id,version_index,parent_version_id")
-      .eq("owner_id", ownerId)
-      .eq("conversation_id", conversationId),
+    query<{ turn_id: string; position: number; active_version: number }>("select turn_id,position,active_version from chat_turns where owner_id=$1 and conversation_id=$2 order by position", [owner, conversationId]),
+    query<{ turn_id: string; version_id: string; version_index: number; parent_version_id: string | null }>("select turn_id,version_id,version_index,parent_version_id from chat_message_versions where owner_id=$1 and conversation_id=$2", [owner, conversationId]),
   ]);
-  if (turnsResult.error) throw turnsResult.error;
-  if (versionsResult.error) throw versionsResult.error;
 
   const versionsByTurn = new Map<string, Array<{ id: string; index: number; parentVersionId?: string }>>();
-  for (const row of versionsResult.data ?? []) {
+  for (const row of versionsResult) {
     const versions = versionsByTurn.get(row.turn_id) ?? [];
     versions.push({
       id: row.version_id,
@@ -201,7 +184,7 @@ async function materializePersistedLineage(
   let parentVersionId: string | null = null;
   let targetParentVersionId: string | null = null;
   let targetSeen = false;
-  for (const turn of turnsResult.data ?? []) {
+  for (const turn of turnsResult) {
     const position = Number(turn.position);
     const active = versionsByTurn.get(turn.turn_id)?.find(
       (version) => version.index === Number(turn.active_version),
@@ -214,14 +197,7 @@ async function materializePersistedLineage(
       targetParentVersionId = parentVersionId;
       targetSeen = true;
     }
-    const { error } = await db
-      .from("chat_message_versions")
-      .update({ parent_version_id: parentVersionId })
-      .eq("owner_id", ownerId)
-      .eq("conversation_id", conversationId)
-      .eq("turn_id", turn.turn_id)
-      .is("parent_version_id", null);
-    if (error) throw error;
+    await query("update chat_message_versions set parent_version_id=$1 where owner_id=$2 and conversation_id=$3 and turn_id=$4 and parent_version_id is null", [parentVersionId, owner, conversationId, turn.turn_id]);
     parentVersionId = active?.id ?? parentVersionId;
   }
   return targetSeen ? targetParentVersionId : parentVersionId;
@@ -304,27 +280,14 @@ function requestUserImageRefs(request: ChatRequest): Array<{ userIndex: number; 
 }
 
 async function activeImageMessages(ownerId: string, conversationId: string): Promise<ActiveImageMessage[]> {
-  const db = client();
+  const owner = databaseOwnerId(ownerId);
   const [turnsResult, versionsResult, messagesResult] = await Promise.all([
-    db.from("chat_turns")
-      .select("turn_id,position,active_version")
-      .eq("owner_id", ownerId)
-      .eq("conversation_id", conversationId)
-      .order("position"),
-    db.from("chat_message_versions")
-      .select("turn_id,version_id,version_index,parent_version_id")
-      .eq("owner_id", ownerId)
-      .eq("conversation_id", conversationId),
-    db.from("chat_messages")
-      .select("message_id,turn_id,version_id,role,content,job_id,attachments")
-      .eq("owner_id", ownerId)
-      .eq("conversation_id", conversationId),
+    query<{ turn_id: string; position: number; active_version: number }>("select turn_id,position,active_version from chat_turns where owner_id=$1 and conversation_id=$2 order by position", [owner, conversationId]),
+    query<{ turn_id: string; version_id: string; version_index: number; parent_version_id: string | null }>("select turn_id,version_id,version_index,parent_version_id from chat_message_versions where owner_id=$1 and conversation_id=$2", [owner, conversationId]),
+    query<{ message_id: string; turn_id: string; version_id: string; role: "user" | "assistant"; content: string; job_id: string | null; attachments: unknown }>("select message_id,turn_id,version_id,role,content,job_id,attachments from chat_messages where owner_id=$1 and conversation_id=$2", [owner, conversationId]),
   ]);
-  if (turnsResult.error || versionsResult.error || messagesResult.error) {
-    throw new ChatImageError("storage", "Chat image metadata is unavailable.", 503);
-  }
   const versionsByTurn = new Map<string, Array<{ id: string; index: number; parentVersionId?: string }>>();
-  for (const row of versionsResult.data ?? []) {
+  for (const row of versionsResult) {
     const versions = versionsByTurn.get(row.turn_id) ?? [];
     versions.push({
       id: row.version_id,
@@ -333,7 +296,7 @@ async function activeImageMessages(ownerId: string, conversationId: string): Pro
     });
     versionsByTurn.set(row.turn_id, versions);
   }
-  const messages = (messagesResult.data ?? []) as Array<{
+  const messages = messagesResult as Array<{
     message_id: string;
     turn_id: string;
     version_id: string;
@@ -347,7 +310,7 @@ async function activeImageMessages(ownerId: string, conversationId: string): Pro
   );
   let parentVersionId: string | null = null;
   const activeMessages: ActiveImageMessage[] = [];
-  for (const turn of turnsResult.data ?? []) {
+  for (const turn of turnsResult) {
     const candidates = versionsByTurn.get(turn.turn_id)?.filter((version) =>
       !hasLineage || (version.parentVersionId ?? null) === parentVersionId,
     ) ?? [];
@@ -378,25 +341,13 @@ export async function getAuthoritativeChatImageIdsForRequest(ownerId: string, re
   const imageRefs = requestUserImageRefs(request);
   if (!conversationId || !jobId || !persistence || !imageRefs.length) return [];
 
-  const db = client();
+  const owner = databaseOwnerId(ownerId);
   const [jobResult, messageResult] = await Promise.all([
-    db.from("chat_jobs")
-      .select("request")
-      .eq("owner_id", ownerId)
-      .eq("conversation_id", conversationId)
-      .eq("job_id", jobId)
-      .maybeSingle(),
-    db.from("chat_messages")
-      .select("turn_id,version_id")
-      .eq("owner_id", ownerId)
-      .eq("conversation_id", conversationId)
-      .eq("message_id", persistence.userMessageId)
-      .eq("role", "user")
-      .maybeSingle(),
+    query<{ request: unknown }>("select request from chat_jobs where owner_id=$1 and conversation_id=$2 and job_id=$3", [owner, conversationId, jobId]),
+    query<{ turn_id: string; version_id: string }>("select turn_id,version_id from chat_messages where owner_id=$1 and conversation_id=$2 and message_id=$3 and role='user'", [owner, conversationId, persistence.userMessageId]),
   ]);
-  if (jobResult.error || messageResult.error) throw new ChatImageError("storage", "Chat image metadata is unavailable.", 503);
-  const persistedRequest = jobResult.data?.request as ChatRequest | undefined;
-  const message = messageResult.data as { turn_id?: unknown; version_id?: unknown } | null;
+  const persistedRequest = jobResult[0]?.request as ChatRequest | undefined;
+  const message = messageResult[0] as { turn_id?: unknown; version_id?: unknown } | undefined;
   if (
     !persistedRequest
     || persistedRequest.conversationId !== conversationId
@@ -410,26 +361,14 @@ export async function getAuthoritativeChatImageIdsForRequest(ownerId: string, re
   ) return [];
 
   const [versionResult, turnResult] = await Promise.all([
-    db.from("chat_message_versions")
-      .select("version_index")
-      .eq("owner_id", ownerId)
-      .eq("conversation_id", conversationId)
-      .eq("turn_id", persistence.turnId)
-      .eq("version_id", persistence.versionId)
-      .maybeSingle(),
-    db.from("chat_turns")
-      .select("active_version")
-      .eq("owner_id", ownerId)
-      .eq("conversation_id", conversationId)
-      .eq("turn_id", persistence.turnId)
-      .maybeSingle(),
+    query<{ version_index: number }>("select version_index from chat_message_versions where owner_id=$1 and conversation_id=$2 and turn_id=$3 and version_id=$4", [owner, conversationId, persistence.turnId, persistence.versionId]),
+    query<{ active_version: number }>("select active_version from chat_turns where owner_id=$1 and conversation_id=$2 and turn_id=$3", [owner, conversationId, persistence.turnId]),
   ]);
-  if (versionResult.error || turnResult.error) throw new ChatImageError("storage", "Chat image metadata is unavailable.", 503);
   if (
-    !versionResult.data
-    || !turnResult.data
-    || Number(versionResult.data.version_index) !== persistence.versionIndex
-    || Number(turnResult.data.active_version) !== persistence.versionIndex
+    !versionResult[0]
+    || !turnResult[0]
+    || Number(versionResult[0].version_index) !== persistence.versionIndex
+    || Number(turnResult[0].active_version) !== persistence.versionIndex
   ) return [];
 
   const activeMessages = await activeImageMessages(ownerId, conversationId);
@@ -498,6 +437,7 @@ export async function ensureChatSubmission(ownerId: string, request: ChatRequest
   }
   /* Client attachment descriptors are only IDs at this boundary; all metadata comes from uploads. */
 
+  const owner = databaseOwnerId(ownerId);
   const now = new Date().toISOString();
   const parentVersionId = await materializePersistedLineage(
     ownerId,
@@ -505,13 +445,13 @@ export async function ensureChatSubmission(ownerId: string, request: ChatRequest
     persistence.turnIndex,
   );
   await insertIfAbsent("chat_conversations", {
-    owner_id: ownerId,
+    owner_id: owner,
     conversation_id: conversationId,
     title: "New conversation",
     updated_at: now,
   });
   await insertIfAbsent("chat_turns", {
-    owner_id: ownerId,
+    owner_id: owner,
     conversation_id: conversationId,
     turn_id: persistence.turnId,
     position: persistence.turnIndex,
@@ -519,7 +459,7 @@ export async function ensureChatSubmission(ownerId: string, request: ChatRequest
     updated_at: now,
   });
   await insertIfAbsent("chat_message_versions", {
-    owner_id: ownerId,
+    owner_id: owner,
     conversation_id: conversationId,
     turn_id: persistence.turnId,
     version_id: persistence.versionId,
@@ -546,22 +486,11 @@ export async function ensureChatSubmission(ownerId: string, request: ChatRequest
     jobId,
     lastSequence: 0,
   };
-  await insertIfAbsent("chat_messages", messageRow(ownerId, conversationId, persistence.turnId, persistence.versionId, userMessage));
-  await insertIfAbsent("chat_messages", messageRow(ownerId, conversationId, persistence.turnId, persistence.versionId, assistantMessage));
+  await insertIfAbsent("chat_messages", messageRow(owner, conversationId, persistence.turnId, persistence.versionId, userMessage));
+  await insertIfAbsent("chat_messages", messageRow(owner, conversationId, persistence.turnId, persistence.versionId, assistantMessage));
 
-  const { error: turnError } = await client()
-    .from("chat_turns")
-    .update({ active_version: persistence.versionIndex, updated_at: now })
-    .eq("owner_id", ownerId)
-    .eq("conversation_id", conversationId)
-    .eq("turn_id", persistence.turnId);
-  if (turnError) throw turnError;
-  const { error: conversationError } = await client()
-    .from("chat_conversations")
-    .update({ updated_at: now })
-    .eq("owner_id", ownerId)
-    .eq("conversation_id", conversationId);
-  if (conversationError) throw conversationError;
+  await query("update chat_turns set active_version=$1,updated_at=$2 where owner_id=$3 and conversation_id=$4 and turn_id=$5", [persistence.versionIndex, now, owner, conversationId, persistence.turnId]);
+  await query("update chat_conversations set updated_at=$1 where owner_id=$2 and conversation_id=$3", [now, owner, conversationId]);
 }
 
 export async function finalizeChatJobMessage(
@@ -571,35 +500,18 @@ export async function finalizeChatJobMessage(
   status: ChatMessageStatus,
   values: { error?: string | null; finalOutput?: string | null } = {},
 ): Promise<void> {
-  const { data, error } = await client()
-    .from("chat_messages")
-    .select("*")
-    .eq("owner_id", ownerId)
-    .eq("conversation_id", conversationId)
-    .eq("job_id", jobId)
-    .eq("role", "assistant")
-    .maybeSingle();
-  if (error) throw error;
+  const owner = databaseOwnerId(ownerId);
+  const [data] = await query<MessageRow>("select * from chat_messages where owner_id=$1 and conversation_id=$2 and job_id=$3 and role='assistant'", [owner, conversationId, jobId]);
   if (!data) return;
-  const row = data as MessageRow;
+  const row = data;
   const next = finalizeChatHistoryMessage(messageFromRow(row), status, values);
-  const { error: updateError } = await client()
-    .from("chat_messages")
-    .update(messageRow(ownerId, conversationId, row.turn_id, row.version_id, next))
-    .eq("owner_id", ownerId)
-    .eq("conversation_id", conversationId)
-    .eq("message_id", next.id);
-  if (updateError) throw updateError;
+  const replacement = messageRow(owner, conversationId, row.turn_id, row.version_id, next);
+  await query(`update chat_messages set content=$1,reasoning=$2,attachments=$3::jsonb,documents=$4::jsonb,activities=$5::jsonb,artifacts=$6::jsonb,thinking_enabled=$7,thinking_duration_ms=$8,status=$9,error=$10,job_id=$11,last_sequence=$12,trace_round=$13,annotations=$14::jsonb,sources=$15::jsonb,todos=$16::jsonb,updated_at=$17 where owner_id=$18 and conversation_id=$19 and message_id=$20`, [replacement.content, replacement.reasoning, jsonb(replacement.attachments), jsonb(replacement.documents), jsonb(replacement.activities), jsonb(replacement.artifacts), replacement.thinking_enabled, replacement.thinking_duration_ms, replacement.status, replacement.error, replacement.job_id, replacement.last_sequence, replacement.trace_round, jsonb(replacement.annotations), jsonb(replacement.sources), jsonb(replacement.todos), replacement.updated_at, owner, conversationId, next.id]);
   await touchConversation(ownerId, conversationId);
 }
 
 async function touchConversation(ownerId: string, conversationId: string): Promise<void> {
-  const { error } = await client()
-    .from("chat_conversations")
-    .update({ updated_at: new Date().toISOString() })
-    .eq("owner_id", ownerId)
-    .eq("conversation_id", conversationId);
-  if (error) throw error;
+  await query("update chat_conversations set updated_at=$1 where owner_id=$2 and conversation_id=$3", [new Date().toISOString(), databaseOwnerId(ownerId), conversationId]);
 }
 
 export type ChatConversationIndexRow = {
@@ -621,62 +533,50 @@ export function mapChatConversationSummaryRows(rows: ChatConversationIndexRow[])
 }
 
 export async function listChatConversations(ownerId: string): Promise<ChatConversationSummary[]> {
-  const { data, error } = await client().rpc("list_chat_conversations_fast", {
-    p_owner_id: ownerId,
-  });
-  if (error) throw error;
-  return mapChatConversationSummaryRows((data ?? []) as ChatConversationIndexRow[]);
+  const rows = await query<ChatConversationIndexRow>("select conversation_id,title,updated_at,has_messages,is_streaming from list_chat_conversations_fast($1)", [databaseOwnerId(ownerId)]);
+  return mapChatConversationSummaryRows(rows.map((row) => ({ ...row, updated_at: isoTimestamp(row.updated_at) })));
 }
 
-export async function searchChatConversations(ownerId: string, query: string): Promise<ChatSearchResult[]> {
-  const { data, error } = await client().rpc("search_chat_conversations", {
-    p_owner_id: ownerId,
-    p_query: query,
-  });
-  if (error) throw error;
-  return ((data ?? []) as Array<{
+export async function searchChatConversations(ownerId: string, searchTerm: string): Promise<ChatSearchResult[]> {
+  const rows = await query<{
     conversation_id: string;
     title: string;
-    updated_at: string;
+    updated_at: unknown;
     preview: string | null;
-  }>).map((row) => ({
+  }>("select conversation_id,title,updated_at,preview from search_chat_conversations($1,$2)", [databaseOwnerId(ownerId), searchTerm]);
+  return rows.map((row) => ({
     id: row.conversation_id,
     title: row.title,
-    updatedAt: row.updated_at,
+    updatedAt: isoTimestamp(row.updated_at),
     preview: row.preview ?? "",
   }));
 }
 
 export async function getChatConversation(ownerId: string, conversationId: string): Promise<ChatConversation | null> {
-  const db = client();
+  const owner = databaseOwnerId(ownerId);
   const [conversationResult, turnsResult, versionsResult, messagesResult] = await Promise.all([
-    db.from("chat_conversations").select("conversation_id,title").eq("owner_id", ownerId).eq("conversation_id", conversationId).maybeSingle(),
-    db.from("chat_turns").select("turn_id,position,active_version").eq("owner_id", ownerId).eq("conversation_id", conversationId).order("position"),
-    db.from("chat_message_versions").select("turn_id,version_id,version_index,parent_version_id").eq("owner_id", ownerId).eq("conversation_id", conversationId).order("version_index"),
-    db.from("chat_messages").select("*").eq("owner_id", ownerId).eq("conversation_id", conversationId),
+    query<{ conversation_id: string; title: string }>("select conversation_id,title from chat_conversations where owner_id=$1 and conversation_id=$2", [owner, conversationId]),
+    query<{ turn_id: string; position: number; active_version: number }>("select turn_id,position,active_version from chat_turns where owner_id=$1 and conversation_id=$2 order by position", [owner, conversationId]),
+    query<{ turn_id: string; version_id: string; version_index: number; parent_version_id: string | null }>("select turn_id,version_id,version_index,parent_version_id from chat_message_versions where owner_id=$1 and conversation_id=$2 order by version_index", [owner, conversationId]),
+    query<MessageRow>("select * from chat_messages where owner_id=$1 and conversation_id=$2", [owner, conversationId]),
   ]);
-  if (conversationResult.error) throw conversationResult.error;
-  if (!conversationResult.data) return null;
-  if (turnsResult.error) throw turnsResult.error;
-  if (versionsResult.error) throw versionsResult.error;
-  if (messagesResult.error) throw messagesResult.error;
+  const conversation = conversationResult[0];
+  if (!conversation) return null;
 
-  let messages = (messagesResult.data ?? []) as MessageRow[];
+  let messages = messagesResult;
   const jobIds = [...new Set(messages.map((message) => message.job_id).filter((jobId): jobId is string => Boolean(jobId)))];
   if (jobIds.length) {
     const [eventsResult, jobsResult] = await Promise.all([
-      db.from("chat_job_events").select("job_id,event_index,event").eq("owner_id", ownerId).eq("conversation_id", conversationId).in("job_id", jobIds).order("event_index"),
-      db.from("chat_jobs").select("job_id,status,error,final_output").eq("owner_id", ownerId).eq("conversation_id", conversationId).in("job_id", jobIds),
+      query<{ job_id: string; event_index: number | string; event: ChatStreamEvent }>("select job_id,event_index,event from chat_job_events where owner_id=$1 and conversation_id=$2 and job_id=any($3::text[]) order by event_index", [owner, conversationId, jobIds]),
+      query<{ job_id: string; status: ChatJobStatus; error: string | null; final_output: string | null }>("select job_id,status,error,final_output from chat_jobs where owner_id=$1 and conversation_id=$2 and job_id=any($3::text[])", [owner, conversationId, jobIds]),
     ]);
-    if (eventsResult.error) throw eventsResult.error;
-    if (jobsResult.error) throw jobsResult.error;
     const eventsByJob = new Map<string, Array<{ sequence: number; event: ChatStreamEvent }>>();
-    for (const row of eventsResult.data ?? []) {
+    for (const row of eventsResult) {
       const eventList = eventsByJob.get(row.job_id) ?? [];
       eventList.push({ sequence: Number(row.event_index), event: row.event as ChatStreamEvent });
       eventsByJob.set(row.job_id, eventList);
     }
-    const jobsById = new Map((jobsResult.data ?? []).map((job) => [job.job_id, job]));
+    const jobsById = new Map(jobsResult.map((job) => [job.job_id, job]));
     messages = messages.map((row) => {
       if (!row.job_id) return row;
       let projected = messageFromRow(row);
@@ -704,7 +604,7 @@ export async function getChatConversation(ownerId: string, conversationId: strin
     messagesByVersion.set(row.version_id, pair);
   }
   const versionsByTurn = new Map<string, Array<{ id: string; index: number; parentVersionId?: string }>>();
-  for (const row of versionsResult.data ?? []) {
+  for (const row of versionsResult) {
     const versions = versionsByTurn.get(row.turn_id) ?? [];
     versions.push({
       id: row.version_id,
@@ -714,9 +614,9 @@ export async function getChatConversation(ownerId: string, conversationId: strin
     versionsByTurn.set(row.turn_id, versions);
   }
   return {
-    id: conversationResult.data.conversation_id,
-    title: conversationResult.data.title,
-    turns: (turnsResult.data ?? []).map((turn) => ({
+    id: conversation.conversation_id,
+    title: conversation.title,
+    turns: turnsResult.map((turn) => ({
       id: turn.turn_id,
       activeVersion: turn.active_version,
       versions: (versionsByTurn.get(turn.turn_id) ?? []).sort((left, right) => left.index - right.index).flatMap((version) => {
@@ -735,49 +635,19 @@ export async function getChatConversation(ownerId: string, conversationId: strin
 }
 
 export async function updateChatConversationTitle(ownerId: string, conversationId: string, title: string): Promise<void> {
-  const { error } = await client()
-    .from("chat_conversations")
-    .update({ title: title.trim().slice(0, 160), updated_at: new Date().toISOString() })
-    .eq("owner_id", ownerId)
-    .eq("conversation_id", conversationId);
-  if (error) throw error;
+  await query("update chat_conversations set title=$1,updated_at=$2 where owner_id=$3 and conversation_id=$4", [title.trim().slice(0, 160), new Date().toISOString(), databaseOwnerId(ownerId), conversationId]);
 }
 
 export async function deleteChatConversationRecord(ownerId: string, conversationId: string): Promise<void> {
-  const { error } = await client()
-    .from("chat_conversations")
-    .delete()
-    .eq("owner_id", ownerId)
-    .eq("conversation_id", conversationId);
-  if (error) throw error;
+  await query("delete from chat_conversations where owner_id=$1 and conversation_id=$2", [databaseOwnerId(ownerId), conversationId]);
 }
 
 export async function updateChatActiveVersion(ownerId: string, conversationId: string, turnId: string, versionId: string): Promise<void> {
-  const { data: version, error: versionError } = await client()
-    .from("chat_message_versions")
-    .select("version_index")
-    .eq("owner_id", ownerId)
-    .eq("conversation_id", conversationId)
-    .eq("turn_id", turnId)
-    .eq("version_id", versionId)
-    .maybeSingle();
-  if (versionError) throw versionError;
+  const owner = databaseOwnerId(ownerId);
+  const [version] = await query<{ version_index: number }>("select version_index from chat_message_versions where owner_id=$1 and conversation_id=$2 and turn_id=$3 and version_id=$4", [owner, conversationId, turnId, versionId]);
   if (!version) throw new Error("Conversation version not found.");
-  const { data: turn, error: turnReadError } = await client()
-    .from("chat_turns")
-    .select("position")
-    .eq("owner_id", ownerId)
-    .eq("conversation_id", conversationId)
-    .eq("turn_id", turnId)
-    .maybeSingle();
-  if (turnReadError) throw turnReadError;
+  const [turn] = await query<{ position: number }>("select position from chat_turns where owner_id=$1 and conversation_id=$2 and turn_id=$3", [owner, conversationId, turnId]);
   if (!turn) throw new Error("Conversation turn not found.");
   await materializePersistedLineage(ownerId, conversationId, Number(turn.position));
-  const { error } = await client()
-    .from("chat_turns")
-    .update({ active_version: version.version_index, updated_at: new Date().toISOString() })
-    .eq("owner_id", ownerId)
-    .eq("conversation_id", conversationId)
-    .eq("turn_id", turnId);
-  if (error) throw error;
+  await query("update chat_turns set active_version=$1,updated_at=$2 where owner_id=$3 and conversation_id=$4 and turn_id=$5", [version.version_index, new Date().toISOString(), owner, conversationId, turnId]);
 }

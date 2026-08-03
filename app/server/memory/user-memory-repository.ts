@@ -9,9 +9,7 @@ import {
   type UserMemoryTree,
   type UserMemoryWriter,
 } from "../../../lib/user-memory";
-import { getServerClient } from "../../auth/supabase-server-adapter";
-
-const db = () => getServerClient();
+import { asIsoTimestamp, databaseOwnerId, jsonb, query } from "../database/database";
 
 export type MemoryWriteContext = {
   ownerId: string;
@@ -22,60 +20,32 @@ export type MemoryWriteContext = {
   actionIndex?: number;
 };
 
-type FolderRow = {
-  id: string; parent_id: string | null; name: string; created_at: string;
-};
-type MemoryRow = {
-  id: string; folder_id: string; content: string; source_chat_id: string; source_job_id: string;
-  writer: UserMemoryWriter; created_at: string; updated_at: string;
-};
+type FolderRow = { id: string; parent_id: string | null; name: string; created_at: unknown };
+type MemoryRow = { id: string; folder_id: string; content: string; source_chat_id: string; source_job_id: string; writer: UserMemoryWriter; created_at: unknown; updated_at: unknown };
 
 async function ensureProfile(ownerId: string): Promise<void> {
-  const { error } = await db().from("user_memory_profiles").upsert(
-    { owner_id: ownerId, revision: 0 },
-    { onConflict: "owner_id", ignoreDuplicates: true },
-  );
-  if (error) throw error;
+  await query("insert into user_memory_profiles(owner_id) values($1) on conflict(owner_id) do nothing", [databaseOwnerId(ownerId)]);
 }
 
 async function nextRevision(ownerId: string): Promise<number> {
   await ensureProfile(ownerId);
+  const databaseOwner = databaseOwnerId(ownerId);
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    const { data, error } = await db().from("user_memory_profiles")
-      .select("revision").eq("owner_id", ownerId).single();
-    if (error) throw error;
-    const revision = Number(data.revision);
-    const now = new Date().toISOString();
-    const { data: updated, error: updateError } = await db().from("user_memory_profiles")
-      .update({ revision: revision + 1, updated_at: now })
-      .eq("owner_id", ownerId).eq("revision", revision).select("revision").maybeSingle();
-    if (updateError) throw updateError;
-    if (updated) return revision + 1;
+    const [row] = await query<{ revision: number }>("select revision from user_memory_profiles where owner_id=$1", [databaseOwner]);
+    const [updated] = await query<{ revision: number }>("update user_memory_profiles set revision=revision+1,updated_at=$1 where owner_id=$2 and revision=$3 returning revision", [new Date().toISOString(), databaseOwner, Number(row.revision)]);
+    if (updated) return Number(updated.revision);
   }
   throw new Error("The user profile changed concurrently.");
 }
 
-async function audit(
-  context: MemoryWriteContext,
-  operation: "create_folder" | "add" | "edit" | "move" | "delete" | "merge",
-  input: { memoryId?: string; folderId?: string; before?: unknown; after?: unknown },
-): Promise<void> {
+async function audit(context: MemoryWriteContext, operation: "create_folder" | "add" | "edit" | "move" | "delete" | "merge", input: { memoryId?: string; folderId?: string; before?: unknown; after?: unknown }): Promise<void> {
   const profileRevision = await nextRevision(context.ownerId);
-  const { error } = await db().from("user_memory_revisions").insert({
-    owner_id: context.ownerId,
-    profile_revision: profileRevision,
-    memory_id: input.memoryId ?? null,
-    folder_id: input.folderId ?? null,
-    operation,
-    before_state: input.before ?? null,
-    after_state: input.after ?? null,
-    source_chat_id: context.sourceChatId,
-    source_job_id: context.sourceJobId,
-    writer: context.writer,
-    dreaming_run_id: context.dreamingRunId ?? null,
-    action_index: context.actionIndex ?? null,
-  });
-  if (error && error.code !== "23505") throw error;
+  try {
+    await query(`insert into user_memory_revisions(owner_id,profile_revision,memory_id,folder_id,operation,before_state,after_state,source_chat_id,source_job_id,writer,dreaming_run_id,action_index)
+      values($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9,$10,$11,$12)`, [databaseOwnerId(context.ownerId), profileRevision, input.memoryId ?? null, input.folderId ?? null, operation, jsonb(input.before ?? null), jsonb(input.after ?? null), context.sourceChatId, context.sourceJobId, context.writer, context.dreamingRunId ?? null, context.actionIndex ?? null]);
+  } catch (error) {
+    if ((error as { code?: string }).code !== "23505") throw error;
+  }
 }
 
 function pathsFor(rows: FolderRow[]): Map<string, string[]> {
@@ -88,9 +58,7 @@ function pathsFor(rows: FolderRow[]): Map<string, string[]> {
     seen.add(id);
     const row = byId.get(id);
     if (!row) return [USER_MEMORY_ROOT_NAME];
-    const path = row.parent_id
-      ? [...visit(row.parent_id, seen), row.name]
-      : [USER_MEMORY_ROOT_NAME, row.name];
+    const path = row.parent_id ? [...visit(row.parent_id, seen), row.name] : [USER_MEMORY_ROOT_NAME, row.name];
     cache.set(id, path);
     return path;
   };
@@ -99,85 +67,52 @@ function pathsFor(rows: FolderRow[]): Map<string, string[]> {
 }
 
 function folderValue(row: FolderRow, paths: Map<string, string[]>): UserMemoryFolder {
-  return { id: row.id, parentId: row.parent_id, name: row.name, path: paths.get(row.id)!, createdAt: row.created_at };
+  return { id: row.id, parentId: row.parent_id, name: row.name, path: paths.get(row.id)!, createdAt: asIsoTimestamp(row.created_at) };
 }
 
 function memoryValue(row: MemoryRow): UserMemory {
-  return {
-    id: row.id,
-    folderId: row.folder_id,
-    content: row.content,
-    sourceChatId: row.source_chat_id,
-    sourceJobId: row.source_job_id,
-    writer: row.writer,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
+  return { id: row.id, folderId: row.folder_id, content: row.content, sourceChatId: row.source_chat_id, sourceJobId: row.source_job_id, writer: row.writer, createdAt: asIsoTimestamp(row.created_at), updatedAt: asIsoTimestamp(row.updated_at) };
 }
 
 export async function getUserMemoryTree(ownerId: string): Promise<UserMemoryTree> {
   await ensureProfile(ownerId);
-  const client = db();
-  const [profile, folders, memories] = await Promise.all([
-    client.from("user_memory_profiles").select("revision").eq("owner_id", ownerId).single(),
-    client.from("user_memory_folders").select("id,parent_id,name,created_at")
-      .eq("owner_id", ownerId).is("deleted_at", null).order("name"),
-    client.from("user_memories").select("id,folder_id,content,source_chat_id,source_job_id,writer,created_at,updated_at")
-      .eq("owner_id", ownerId).is("deleted_at", null).order("updated_at", { ascending: false }),
+  const databaseOwner = databaseOwnerId(ownerId);
+  const [[profile], folders, memories] = await Promise.all([
+    query<{ revision: number }>("select revision from user_memory_profiles where owner_id=$1", [databaseOwner]),
+    query<FolderRow>("select id,parent_id,name,created_at from user_memory_folders where owner_id=$1 and deleted_at is null order by name", [databaseOwner]),
+    query<MemoryRow>("select id,folder_id,content,source_chat_id,source_job_id,writer,created_at,updated_at from user_memories where owner_id=$1 and deleted_at is null order by updated_at desc", [databaseOwner]),
   ]);
-  if (profile.error) throw profile.error;
-  if (folders.error) throw folders.error;
-  if (memories.error) throw memories.error;
-  const folderRows = (folders.data ?? []) as FolderRow[];
-  const paths = pathsFor(folderRows);
-  return {
-    revision: Number(profile.data.revision),
-    folders: folderRows.map((row) => folderValue(row, paths)),
-    memories: ((memories.data ?? []) as MemoryRow[]).map(memoryValue),
-  };
+  const paths = pathsFor(folders);
+  return { revision: Number(profile.revision), folders: folders.map((row) => folderValue(row, paths)), memories: memories.map(memoryValue) };
 }
 
 export async function ensureMemoryFolderPath(context: MemoryWriteContext, rawPath: string[]): Promise<UserMemoryFolder | null> {
   const path = rawPath[0] === USER_MEMORY_ROOT_NAME ? rawPath.slice(1) : rawPath;
   let parentId: string | null = null;
   let result: UserMemoryFolder | null = null;
+  const owner = databaseOwnerId(context.ownerId);
   for (const [folderIndex, name] of path.entries()) {
     const normalized = normalizeMemoryKey(name);
-    let query = db().from("user_memory_folders").select("id,parent_id,name,created_at")
-      .eq("owner_id", context.ownerId).eq("normalized_name", normalized).is("deleted_at", null);
-    query = parentId ? query.eq("parent_id", parentId) : query.is("parent_id", null);
-    const { data: existing, error: readError } = await query.maybeSingle();
-    if (readError) throw readError;
-    let row = existing as FolderRow | null;
+    const rows: FolderRow[] = parentId
+      ? await query<FolderRow>("select id,parent_id,name,created_at from user_memory_folders where owner_id=$1 and normalized_name=$2 and parent_id=$3 and deleted_at is null", [owner, normalized, parentId])
+      : await query<FolderRow>("select id,parent_id,name,created_at from user_memory_folders where owner_id=$1 and normalized_name=$2 and parent_id is null and deleted_at is null", [owner, normalized]);
+    let row: FolderRow | undefined = rows[0];
     if (!row) {
-      const { data, error } = await db().from("user_memory_folders").insert({
-        owner_id: context.ownerId,
-        parent_id: parentId,
-        name,
-        normalized_name: normalized,
-        created_by: context.writer,
-        source_chat_id: context.sourceChatId,
-        source_job_id: context.sourceJobId,
-      }).select("id,parent_id,name,created_at").single();
-      if (error) {
-        if (error.code === "23505") {
-          let retry = db().from("user_memory_folders").select("id,parent_id,name,created_at")
-            .eq("owner_id", context.ownerId).eq("normalized_name", normalized).is("deleted_at", null);
-          retry = parentId ? retry.eq("parent_id", parentId) : retry.is("parent_id", null);
-          const reread = await retry.single();
-          if (reread.error) throw reread.error;
-          row = reread.data as FolderRow;
-        } else throw error;
-      } else {
-        row = data as FolderRow;
-        await audit({
-          ...context,
-          ...(context.actionIndex === undefined ? {} : { actionIndex: context.actionIndex - 99 + folderIndex }),
-        }, "create_folder", { folderId: row.id, after: { name: row.name, parentId: row.parent_id } });
+      try {
+        [row] = await query<FolderRow>("insert into user_memory_folders(owner_id,parent_id,name,normalized_name,created_by,source_chat_id,source_job_id) values($1,$2,$3,$4,$5,$6,$7) returning id,parent_id,name,created_at", [owner, parentId, name, normalized, context.writer, context.sourceChatId, context.sourceJobId]);
+        if (!row) throw new Error("The memory folder could not be created.");
+        await audit({ ...context, ...(context.actionIndex === undefined ? {} : { actionIndex: context.actionIndex - 99 + folderIndex }) }, "create_folder", { folderId: row.id, after: { name: row.name, parentId: row.parent_id } });
+      } catch (error) {
+        if ((error as { code?: string }).code !== "23505") throw error;
+        const retry: FolderRow[] = parentId
+          ? await query<FolderRow>("select id,parent_id,name,created_at from user_memory_folders where owner_id=$1 and normalized_name=$2 and parent_id=$3 and deleted_at is null", [owner, normalized, parentId])
+          : await query<FolderRow>("select id,parent_id,name,created_at from user_memory_folders where owner_id=$1 and normalized_name=$2 and parent_id is null and deleted_at is null", [owner, normalized]);
+        row = retry[0];
+        if (!row) throw error;
       }
     }
     parentId = row.id;
-    result = { id: row.id, parentId: row.parent_id, name: row.name, path: [], createdAt: row.created_at };
+    result = { id: row.id, parentId: row.parent_id, name: row.name, path: [], createdAt: asIsoTimestamp(row.created_at) };
   }
   return result;
 }
@@ -186,78 +121,48 @@ function fingerprint(content: string): string {
   return createHash("sha256").update(normalizeMemoryKey(content)).digest("hex");
 }
 
+const memoryColumns = "id,folder_id,content,source_chat_id,source_job_id,writer,created_at,updated_at";
+
 export async function addUserMemory(context: MemoryWriteContext, folderId: string, content: string): Promise<UserMemory> {
-  const { data, error } = await db().from("user_memories").insert({
-    owner_id: context.ownerId,
-    folder_id: folderId,
-    content,
-    content_fingerprint: fingerprint(content),
-    source_chat_id: context.sourceChatId,
-    source_job_id: context.sourceJobId,
-    writer: context.writer,
-  }).select("id,folder_id,content,source_chat_id,source_job_id,writer,created_at,updated_at").single();
-  if (error) {
-    if (error.code !== "23505") throw error;
-    const duplicate = await db().from("user_memories")
-      .select("id,folder_id,content,source_chat_id,source_job_id,writer,created_at,updated_at")
-      .eq("owner_id", context.ownerId).eq("folder_id", folderId).eq("content_fingerprint", fingerprint(content))
-      .is("deleted_at", null).single();
-    if (duplicate.error) throw duplicate.error;
-    return memoryValue(duplicate.data as MemoryRow);
+  const owner = databaseOwnerId(context.ownerId);
+  try {
+    const [row] = await query<MemoryRow>(`insert into user_memories(owner_id,folder_id,content,content_fingerprint,source_chat_id,source_job_id,writer) values($1,$2,$3,$4,$5,$6,$7) returning ${memoryColumns}`, [owner, folderId, content, fingerprint(content), context.sourceChatId, context.sourceJobId, context.writer]);
+    const memory = memoryValue(row);
+    await audit(context, "add", { memoryId: memory.id, folderId, after: memory });
+    return memory;
+  } catch (error) {
+    if ((error as { code?: string }).code !== "23505") throw error;
+    const [duplicate] = await query<MemoryRow>(`select ${memoryColumns} from user_memories where owner_id=$1 and folder_id=$2 and content_fingerprint=$3 and deleted_at is null`, [owner, folderId, fingerprint(content)]);
+    if (!duplicate) throw error;
+    return memoryValue(duplicate);
   }
-  const memory = memoryValue(data as MemoryRow);
-  await audit(context, "add", { memoryId: memory.id, folderId, after: memory });
-  return memory;
 }
 
 async function currentMemory(ownerId: string, memoryId: string): Promise<MemoryRow> {
-  const { data, error } = await db().from("user_memories")
-    .select("id,folder_id,content,source_chat_id,source_job_id,writer,created_at,updated_at")
-    .eq("owner_id", ownerId).eq("id", memoryId).is("deleted_at", null).single();
-  if (error) throw error;
-  return data as MemoryRow;
+  const [row] = await query<MemoryRow>(`select ${memoryColumns} from user_memories where owner_id=$1 and id=$2 and deleted_at is null`, [databaseOwnerId(ownerId), memoryId]);
+  if (!row) throw new Error("Memory not found.");
+  return row;
 }
 
 export async function editUserMemory(context: MemoryWriteContext, memoryId: string, content: string): Promise<UserMemory> {
   const before = await currentMemory(context.ownerId, memoryId);
-  const { data, error } = await db().from("user_memories").update({
-    content,
-    content_fingerprint: fingerprint(content),
-    source_chat_id: context.sourceChatId,
-    source_job_id: context.sourceJobId,
-    writer: context.writer,
-    updated_at: new Date().toISOString(),
-  }).eq("owner_id", context.ownerId).eq("id", memoryId).is("deleted_at", null)
-    .select("id,folder_id,content,source_chat_id,source_job_id,writer,created_at,updated_at").single();
-  if (error) throw error;
-  const memory = memoryValue(data as MemoryRow);
+  const [row] = await query<MemoryRow>(`update user_memories set content=$1,content_fingerprint=$2,source_chat_id=$3,source_job_id=$4,writer=$5,updated_at=$6 where owner_id=$7 and id=$8 and deleted_at is null returning ${memoryColumns}`, [content, fingerprint(content), context.sourceChatId, context.sourceJobId, context.writer, new Date().toISOString(), databaseOwnerId(context.ownerId), memoryId]);
+  if (!row) throw new Error("Memory not found.");
+  const memory = memoryValue(row);
   await audit(context, "edit", { memoryId, folderId: memory.folderId, before: memoryValue(before), after: memory });
   return memory;
 }
 
 export async function editUserMemoryFromSettings(ownerId: string, memoryId: string, content: string): Promise<UserMemory | null> {
-  const { data, error } = await db().from("user_memories").update({
-    content,
-    content_fingerprint: fingerprint(content),
-    updated_at: new Date().toISOString(),
-  }).eq("owner_id", ownerId).eq("id", memoryId).is("deleted_at", null)
-    .select("id,folder_id,content,source_chat_id,source_job_id,writer,created_at,updated_at").maybeSingle();
-  if (error) throw error;
-  return data ? memoryValue(data as MemoryRow) : null;
+  const [row] = await query<MemoryRow>(`update user_memories set content=$1,content_fingerprint=$2,updated_at=$3 where owner_id=$4 and id=$5 and deleted_at is null returning ${memoryColumns}`, [content, fingerprint(content), new Date().toISOString(), databaseOwnerId(ownerId), memoryId]);
+  return row ? memoryValue(row) : null;
 }
 
 export async function moveUserMemory(context: MemoryWriteContext, memoryId: string, folderId: string): Promise<UserMemory> {
   const before = await currentMemory(context.ownerId, memoryId);
-  const { data, error } = await db().from("user_memories").update({
-    folder_id: folderId,
-    source_chat_id: context.sourceChatId,
-    source_job_id: context.sourceJobId,
-    writer: context.writer,
-    updated_at: new Date().toISOString(),
-  }).eq("owner_id", context.ownerId).eq("id", memoryId).is("deleted_at", null)
-    .select("id,folder_id,content,source_chat_id,source_job_id,writer,created_at,updated_at").single();
-  if (error) throw error;
-  const memory = memoryValue(data as MemoryRow);
+  const [row] = await query<MemoryRow>(`update user_memories set folder_id=$1,source_chat_id=$2,source_job_id=$3,writer=$4,updated_at=$5 where owner_id=$6 and id=$7 and deleted_at is null returning ${memoryColumns}`, [folderId, context.sourceChatId, context.sourceJobId, context.writer, new Date().toISOString(), databaseOwnerId(context.ownerId), memoryId]);
+  if (!row) throw new Error("Memory not found.");
+  const memory = memoryValue(row);
   await audit(context, "move", { memoryId, folderId, before: memoryValue(before), after: memory });
   return memory;
 }
@@ -265,23 +170,10 @@ export async function moveUserMemory(context: MemoryWriteContext, memoryId: stri
 export async function deleteUserMemory(context: MemoryWriteContext, memoryId: string): Promise<void> {
   const before = await currentMemory(context.ownerId, memoryId);
   const now = new Date().toISOString();
-  const { error } = await db().from("user_memories").update({
-    deleted_at: now,
-    updated_at: now,
-    source_chat_id: context.sourceChatId,
-    source_job_id: context.sourceJobId,
-    writer: context.writer,
-  }).eq("owner_id", context.ownerId).eq("id", memoryId).is("deleted_at", null);
-  if (error) throw error;
+  await query("update user_memories set deleted_at=$1,updated_at=$1,source_chat_id=$2,source_job_id=$3,writer=$4 where owner_id=$5 and id=$6 and deleted_at is null", [now, context.sourceChatId, context.sourceJobId, context.writer, databaseOwnerId(context.ownerId), memoryId]);
   await audit(context, "delete", { memoryId, folderId: before.folder_id, before: memoryValue(before), after: null });
 }
 
 export async function deleteUserMemoryFromSettings(ownerId: string, memoryId: string): Promise<boolean> {
-  const { data, error } = await db().from("user_memories").update({
-    deleted_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  }).eq("owner_id", ownerId).eq("id", memoryId).is("deleted_at", null)
-    .select("id").maybeSingle();
-  if (error) throw error;
-  return Boolean(data);
+  return (await query<{ id: string }>("update user_memories set deleted_at=$1,updated_at=$1 where owner_id=$2 and id=$3 and deleted_at is null returning id", [new Date().toISOString(), databaseOwnerId(ownerId), memoryId])).length > 0;
 }

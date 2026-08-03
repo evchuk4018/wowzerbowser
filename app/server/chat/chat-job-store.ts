@@ -1,22 +1,18 @@
 import "server-only";
+
 import { randomUUID } from "node:crypto";
 import type { ChatJobResumeResponse, ChatJobStatus, ChatRequest, ChatStreamEvent, ChatUsage } from "../../../lib/chat-protocol";
-import { getServerClient } from "../../auth/supabase-server-adapter";
+import { databaseOwnerId, isoTimestamp, jsonb, query } from "../database/database";
 import { createAsyncBatchWriter, type AsyncBatchWriter } from "./chat-event-writer";
 import { authoritativeAttachmentsForSubmission } from "./chat-history-store";
 import { CHAT_JOB_LEASE_MS, CHAT_JOB_MAX_ATTEMPTS } from "./chat-job-lease";
 import { withChatPersistenceRetry } from "./chat-persistence-retry";
 
-const table = () => getServerClient();
 const CHAT_EVENT_BATCH_SIZE = 32;
 const CHAT_EVENT_FLUSH_INTERVAL_MS = 100;
 const CHAT_EVENT_PAGE_SIZE = 1000;
 
-async function runRpc(name: string, args: Record<string, unknown>) {
-  const result = await table().rpc(name, args);
-  if (result.error) throw result.error;
-  return result;
-}
+type RpcRow = { result: unknown };
 
 export type PersistedChatJobEvent = {
   eventIndex: number;
@@ -30,27 +26,21 @@ export async function createOrGetChatJob(ownerId: string, request: ChatRequest) 
   if (requestedAttachments.length !== new Set(request.messages.at(-1)?.attachments?.map((attachment) => attachment.id) ?? []).size) {
     throw new Error("Chat image metadata is invalid.");
   }
-  const { data, error } = await withChatPersistenceRetry(() => runRpc("submit_and_claim_chat_job", {
-    p_owner_id: ownerId,
-    p_request: request,
-    p_attachments: requestedAttachments,
-  }));
-  if (error) throw error;
-  return data as { jobId: string; status: ChatJobStatus; resumed: boolean; request?: ChatRequest };
+  const owner = databaseOwnerId(ownerId);
+  const [row] = await withChatPersistenceRetry(() => query<RpcRow>(
+    "select submit_and_claim_chat_job($1,$2::jsonb,$3::jsonb) as result",
+    [owner, jsonb(request), jsonb(requestedAttachments)],
+  ));
+  return row.result as { jobId: string; status: ChatJobStatus; resumed: boolean; request?: ChatRequest };
 }
 
 export async function claimChatJob(ownerId: string, conversationId: string, jobId: string) {
   const workerToken = randomUUID();
-  const { data, error } = await withChatPersistenceRetry(() => runRpc("claim_chat_job", {
-    p_owner_id: ownerId,
-    p_conversation_id: conversationId,
-    p_job_id: jobId,
-    p_worker_token: workerToken,
-    p_lease_ms: CHAT_JOB_LEASE_MS,
-    p_max_attempts: CHAT_JOB_MAX_ATTEMPTS,
-  }));
-  if (error) throw error;
-  const claim = data as { claimed?: boolean; status?: ChatJobStatus | "missing"; request?: ChatRequest; leaseToken?: string; error?: string } | null;
+  const [row] = await withChatPersistenceRetry(() => query<RpcRow>(
+    "select claim_chat_job($1,$2,$3,$4::uuid,$5,$6) as result",
+    [databaseOwnerId(ownerId), conversationId, jobId, workerToken, CHAT_JOB_LEASE_MS, CHAT_JOB_MAX_ATTEMPTS],
+  ));
+  const claim = row.result as { claimed?: boolean; status?: ChatJobStatus | "missing"; request?: ChatRequest; leaseToken?: string; error?: string } | null;
   if (!claim?.claimed) return null;
   return {
     status: claim.status as ChatJobStatus,
@@ -61,15 +51,11 @@ export async function claimChatJob(ownerId: string, conversationId: string, jobI
 }
 
 export async function renewChatJob(ownerId: string, conversationId: string, jobId: string, leaseToken: string) {
-  const { data, error } = await withChatPersistenceRetry(() => runRpc("heartbeat_chat_job", {
-    p_owner_id: ownerId,
-    p_conversation_id: conversationId,
-    p_job_id: jobId,
-    p_worker_token: leaseToken,
-    p_lease_ms: CHAT_JOB_LEASE_MS,
-  }));
-  if (error) throw error;
-  return data as { active: boolean; status: ChatJobStatus | "missing"; cancelled?: boolean };
+  const [row] = await withChatPersistenceRetry(() => query<RpcRow>(
+    "select heartbeat_chat_job($1,$2,$3,$4::uuid,$5) as result",
+    [databaseOwnerId(ownerId), conversationId, jobId, leaseToken, CHAT_JOB_LEASE_MS],
+  ));
+  return row.result as { active: boolean; status: ChatJobStatus | "missing"; cancelled?: boolean };
 }
 
 async function appendChatJobEvents(
@@ -80,20 +66,10 @@ async function appendChatJobEvents(
   events: readonly PersistedChatJobEvent[],
 ): Promise<void> {
   if (!events.length) return;
-  await withChatPersistenceRetry(async () => {
-    const { error } = await table().rpc("append_chat_job_events", {
-      p_owner_id: ownerId,
-      p_conversation_id: conversationId,
-      p_job_id: jobId,
-      p_worker_token: leaseToken,
-      p_events: events.map(({ eventIndex, event }) => ({
-        eventId: `${jobId}:${eventIndex}`,
-        eventIndex,
-        event,
-      })),
-    });
-    if (error) throw error;
-  });
+  await withChatPersistenceRetry(() => query(
+    "select append_chat_job_events($1,$2,$3,$4::uuid,$5::jsonb) as inserted",
+    [databaseOwnerId(ownerId), conversationId, jobId, leaseToken, jsonb(events.map(({ eventIndex, event }) => ({ eventId: `${jobId}:${eventIndex}`, eventIndex, event })))],
+  ).then(() => undefined));
 }
 
 export function createChatJobEventWriter(
@@ -109,68 +85,74 @@ export function createChatJobEventWriter(
 }
 
 export async function finishChatJob(ownerId: string, conversationId: string, jobId: string, leaseToken: string, status: ChatJobStatus, values: { error?: string | null; usage?: ChatUsage | null; finalOutput?: string | null } = {}) {
-  const { data, error } = await withChatPersistenceRetry(() => runRpc("complete_chat_job_and_finalize_message", {
-    p_owner_id: ownerId,
-    p_conversation_id: conversationId,
-    p_job_id: jobId,
-    p_worker_token: leaseToken,
-    p_status: status,
-    p_error: values.error ?? null,
-    p_usage: values.usage ?? null,
-    p_final_output: values.finalOutput ?? null,
-  }));
-  if (error) throw error;
-  return Boolean((data as { applied?: boolean } | null)?.applied);
+  const [row] = await withChatPersistenceRetry(() => query<RpcRow>(
+    "select complete_chat_job_and_finalize_message($1,$2,$3,$4::uuid,$5,$6,$7::jsonb,$8) as result",
+    [databaseOwnerId(ownerId), conversationId, jobId, leaseToken, status, values.error ?? null, jsonb(values.usage ?? null), values.finalOutput ?? null],
+  ));
+  return Boolean((row.result as { applied?: boolean } | null)?.applied);
 }
 
 export async function getChatJob(ownerId: string, conversationId: string, jobId: string, after = 0): Promise<ChatJobResumeResponse | null> {
-  const client = table();
-  const [jobResult, eventsResult] = await Promise.all([
-    client.from("chat_jobs").select("job_id,conversation_id,status,error,usage,final_output,created_at,updated_at").eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("job_id", jobId).maybeSingle(),
-    client.from("chat_job_events").select("event_index,event").eq("owner_id", ownerId).eq("conversation_id", conversationId).eq("job_id", jobId).gt("event_index", after).order("event_index").limit(CHAT_EVENT_PAGE_SIZE + 1),
+  const databaseOwner = databaseOwnerId(ownerId);
+  const [jobRows, eventRows] = await Promise.all([
+    query<{ job_id: string; conversation_id: string; status: ChatJobStatus; error: string | null; usage: unknown; final_output: string | null; created_at: unknown; updated_at: unknown }>(
+      "select job_id,conversation_id,status,error,usage,final_output,created_at,updated_at from chat_jobs where owner_id=$1 and conversation_id=$2 and job_id=$3",
+      [databaseOwner, conversationId, jobId],
+    ),
+    query<{ event_index: number | string; event: ChatStreamEvent }>(
+      "select event_index,event from chat_job_events where owner_id=$1 and conversation_id=$2 and job_id=$3 and event_index>$4 order by event_index limit $5",
+      [databaseOwner, conversationId, jobId, after, CHAT_EVENT_PAGE_SIZE + 1],
+    ),
   ]);
-  if (jobResult.error) throw jobResult.error;
-  if (!jobResult.data) return null;
-  if (eventsResult.error) throw eventsResult.error;
-  const rows = eventsResult.data ?? [];
-  const hasMore = rows.length > CHAT_EVENT_PAGE_SIZE;
-  const events = rows.slice(0, CHAT_EVENT_PAGE_SIZE).map((row) => ({
+  const job = jobRows[0];
+  if (!job) return null;
+  const hasMore = eventRows.length > CHAT_EVENT_PAGE_SIZE;
+  const events = eventRows.slice(0, CHAT_EVENT_PAGE_SIZE).map((row) => ({
     ...(row.event as ChatStreamEvent),
     sequence: Number(row.event_index),
     jobId,
   }));
   const annotationEvent = [...events].reverse().find((event) => event.type === "annotations");
-  return { jobId, conversationId, status: jobResult.data.status as ChatJobStatus, events, hasMore, lastSequence: events.at(-1)?.sequence ?? after, error: jobResult.data.error, usage: jobResult.data.usage as ChatUsage | null, finalOutput: jobResult.data.final_output, ...(annotationEvent?.type === "annotations" ? { annotations: annotationEvent.annotations, sources: annotationEvent.sources } : {}), createdAt: jobResult.data.created_at, updatedAt: jobResult.data.updated_at };
+  return {
+    jobId,
+    conversationId,
+    status: job.status,
+    events,
+    hasMore,
+    lastSequence: events.at(-1)?.sequence ?? after,
+    error: job.error,
+    usage: job.usage as ChatUsage | null,
+    finalOutput: job.final_output,
+    ...(annotationEvent?.type === "annotations" ? { annotations: annotationEvent.annotations, sources: annotationEvent.sources } : {}),
+    createdAt: isoTimestamp(job.created_at),
+    updatedAt: isoTimestamp(job.updated_at),
+  };
 }
 
 export async function cancelChatJob(ownerId: string, conversationId: string, jobId: string) {
-  const { data, error } = await withChatPersistenceRetry(() => runRpc("cancel_chat_job_and_finalize_message", {
-    p_owner_id: ownerId,
-    p_conversation_id: conversationId,
-    p_job_id: jobId,
-  }));
-  if (error) throw error;
-  return Boolean((data as { applied?: boolean } | null)?.applied);
+  const [row] = await withChatPersistenceRetry(() => query<RpcRow>(
+    "select cancel_chat_job_and_finalize_message($1,$2,$3) as result",
+    [databaseOwnerId(ownerId), conversationId, jobId],
+  ));
+  return Boolean((row.result as { applied?: boolean } | null)?.applied);
 }
 
 export async function cancelChatJobsForConversation(ownerId: string, conversationId: string): Promise<void> {
-  const { data, error } = await table()
-    .from("chat_jobs")
-    .select("job_id")
-    .eq("owner_id", ownerId)
-    .eq("conversation_id", conversationId)
-    .in("status", ["queued", "running", "awaiting_approval"]);
-  if (error) throw error;
-  await Promise.all(
-    (data ?? []).map((row) => cancelChatJob(ownerId, conversationId, row.job_id as string)),
+  const rows = await query<{ job_id: string }>(
+    "select job_id from chat_jobs where owner_id=$1 and conversation_id=$2 and status=any($3::text[])",
+    [databaseOwnerId(ownerId), conversationId, ["queued", "running", "awaiting_approval"]],
   );
+  await Promise.all(rows.map((row) => cancelChatJob(ownerId, conversationId, row.job_id)));
+}
+
+export async function setChatJobAwaitingApproval(ownerId: string, conversationId: string, jobId: string): Promise<void> {
+  await query("update chat_jobs set status='awaiting_approval',updated_at=$1 where owner_id=$2 and conversation_id=$3 and job_id=$4 and status='running'", [new Date().toISOString(), databaseOwnerId(ownerId), conversationId, jobId]);
+}
+
+export async function resumeChatJobAfterApproval(ownerId: string, conversationId: string, jobId: string): Promise<void> {
+  await query("update chat_jobs set status='running',updated_at=$1 where owner_id=$2 and conversation_id=$3 and job_id=$4 and status='awaiting_approval'", [new Date().toISOString(), databaseOwnerId(ownerId), conversationId, jobId]);
 }
 
 export async function deleteChatJobsForConversation(ownerId: string, conversationId: string): Promise<void> {
-  const { error } = await table()
-    .from("chat_jobs")
-    .delete()
-    .eq("owner_id", ownerId)
-    .eq("conversation_id", conversationId);
-  if (error) throw error;
+  await query("delete from chat_jobs where owner_id=$1 and conversation_id=$2", [databaseOwnerId(ownerId), conversationId]);
 }
