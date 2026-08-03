@@ -63,7 +63,7 @@ import { PdfPreviewPanel, type PdfPreviewLoadState } from "./pdf-preview-panel";
 
 export type ChatWorkspaceProps = {
   user: AuthUser;
-  getAccessToken: () => Promise<string | null>;
+  hasSession: () => Promise<boolean>;
   initialDraft?: string;
   onSignOut: () => Promise<void>;
   onSessionInvalid: () => Promise<void>;
@@ -78,7 +78,7 @@ function createStartupConversationState(requestedConversationId?: string) {
 
 export function ChatWorkspace({
   user,
-  getAccessToken,
+  hasSession,
   initialDraft = "",
   onSignOut,
   onSessionInvalid,
@@ -141,11 +141,10 @@ export function ChatWorkspace({
   } = useChatStartupSnapshot(user.id);
 
   const loadUsage = useCallback(async (range: Parameters<typeof fetchChatUsage>[0]) => {
-    const accessToken = await getAccessToken();
-    if (!accessToken) throw new Error("Sign in to view usage.");
+    if (!(await hasSession())) throw new Error("Sign in to view usage.");
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    return fetchChatUsage(range, timeZone, accessToken);
-  }, [getAccessToken]);
+    return fetchChatUsage(range, timeZone);
+  }, [hasSession]);
 
   useEffect(() => {
     if (!snapshotLoaded) return;
@@ -153,9 +152,8 @@ export function ChatWorkspace({
     const requestId = ++bootstrapRequestRef.current;
     void (async () => {
       try {
-        const token = await getAccessToken();
-        if (!token) throw new ChatRequestError(401, "Your session expired.");
-        const bootstrap = await fetchChatBootstrap(token, initialConversationIdRef.current);
+        if (!(await hasSession())) throw new ChatRequestError(401, "Your session expired.");
+        const bootstrap = await fetchChatBootstrap(initialConversationIdRef.current);
         if (!mounted || requestId !== bootstrapRequestRef.current) {
           return;
         }
@@ -231,7 +229,7 @@ export function ChatWorkspace({
     return () => {
       mounted = false;
     };
-  }, [bootstrapAttempt, getAccessToken, onSessionInvalid, persistSnapshot, snapshot, snapshotLoaded, user.id]);
+  }, [bootstrapAttempt, hasSession, onSessionInvalid, persistSnapshot, snapshot, snapshotLoaded, user.id]);
 
   useEffect(() => {
     if (!snapshotLoaded || remoteAuthorized) return;
@@ -292,12 +290,8 @@ export function ChatWorkspace({
       setLoadingConversationId(conversationId);
       setConversationLoadError(null);
       try {
-        const token = await getAccessToken();
-        if (!token) throw new Error("Your session expired.");
-        const conversation = await loadConversation(
-          conversationId,
-          token,
-        );
+        if (!(await hasSession())) throw new Error("Your session expired.");
+        const conversation = await loadConversation(conversationId);
         if (!conversation) {
           throw new Error("Conversation not found.");
         }
@@ -320,7 +314,7 @@ export function ChatWorkspace({
         }
       }
     },
-    [getAccessToken, state.conversations],
+    [hasSession, state.conversations],
   );
 
   useEffect(() => {
@@ -357,7 +351,7 @@ export function ChatWorkspace({
 
   const preferences = useChatPreferences({
     activeConversationId: state.activeId,
-    getAccessToken,
+    hasSession,
     initialModelPreferences: bootstrapModelPreferences,
     bootstrapComplete,
   });
@@ -367,7 +361,7 @@ export function ChatWorkspace({
     model: preferences.model,
     thinking: preferences.effectiveThinking,
     reasoningEffort: preferences.effectiveEffort,
-    getAccessToken,
+    hasSession,
     dispatch,
     onDraftConsumed: () => setDraft(""),
     onEditingConsumed: () => {
@@ -381,7 +375,7 @@ export function ChatWorkspace({
   usePersistedJobRecovery({
     enabled: remoteAuthorized,
     conversations: state.conversations,
-    getAccessToken,
+    hasSession,
     dispatch,
     scopeKey: user.id,
     onConversationStreamingChange: (conversationId, streaming) => {
@@ -445,9 +439,9 @@ export function ChatWorkspace({
 
     void (async () => {
       try {
-        const accessToken = await getAccessToken();
-        if (!accessToken) throw new Error("Your session expired. Sign in and try again.");
-        const blob = await fetchChatArtifact(artifact, accessToken);
+        const sessionReady = await hasSession();
+        if (!sessionReady) throw new Error("Your session expired. Sign in and try again.");
+        const blob = await fetchChatArtifact(artifact);
         const url = URL.createObjectURL(blob);
         if (pdfPreviewRequestRef.current !== requestId) {
           URL.revokeObjectURL(url);
@@ -466,7 +460,7 @@ export function ChatWorkspace({
         });
       }
     })();
-  }, [getAccessToken, releasePdfPreviewUrl]);
+  }, [hasSession, releasePdfPreviewUrl]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(closePdfPreview);
@@ -661,8 +655,8 @@ export function ChatWorkspace({
     const version = turn.versions[versionIndex];
     if (!version) return;
     dispatch({ type: "SELECT_TURN_VERSION", conversationId: state.activeId, turnId, versionIndex, versionId: version.id });
-    void getAccessToken().then((token) =>
-      token ? saveConversationSelection(state.activeId, turnId, version.id, token) : undefined,
+    void hasSession().then((sessionReady) =>
+      sessionReady ? saveConversationSelection(state.activeId, turnId, version.id) : undefined,
     );
   };
   const copyPrompt = async (message: Message) => {
@@ -727,9 +721,8 @@ export function ChatWorkspace({
     setDeleteConversationError(null);
     try {
       await generation.stopStreaming(conversationId);
-      const token = await getAccessToken();
-      if (!token) throw new Error("Your session expired. Please sign in again.");
-      await deleteConversation(conversationId, token);
+      if (!(await hasSession())) throw new Error("Your session expired. Please sign in again.");
+      await deleteConversation(conversationId);
       setConversationSummaries((current) =>
         current.filter(({ id }) => id !== conversationId),
       );
@@ -835,7 +828,7 @@ export function ChatWorkspace({
       />
       {searchOpen && (
         <ChatSearchDialog
-          getAccessToken={getAccessToken}
+          hasSession={hasSession}
           onClose={() => setSearchOpen(false)}
           onSelectConversation={selectConversation}
         />
@@ -864,11 +857,11 @@ export function ChatWorkspace({
         <SettingsModal
           settings={settings}
           loadUsage={loadUsage}
-          getAccessToken={getAccessToken}
+          hasSession={hasSession}
           onClose={closeSettings}
           onSave={(next) => {
             setSettings(next);
-            void getAccessToken().then((token) => token ? saveSettings(next, token) : undefined);
+            void hasSession().then((sessionReady) => sessionReady ? saveSettings(next) : undefined);
             closeSettings();
           }}
         />
@@ -916,7 +909,7 @@ export function ChatWorkspace({
             waitingByMessage={generation.waitingByMessage}
             thinkingByMessage={generation.thinkingByMessage}
             copiedMessageId={copiedMessageId}
-            getAccessToken={getAccessToken}
+            hasSession={hasSession}
             transcriptRef={transcriptRef}
             onTranscriptScroll={handleTranscriptScroll}
             onSetOpenMessageActions={setOpenMessageActions}

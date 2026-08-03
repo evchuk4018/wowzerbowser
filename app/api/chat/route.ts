@@ -17,10 +17,8 @@ export const maxDuration = 300;
 const unauthorized = () => NextResponse.json({ error: "Unauthorized." }, { status: 401 });
 
 export async function POST(request: Request) {
-  const authorization = request.headers.get("authorization");
-  if (!authorization?.startsWith("Bearer ")) return unauthorized();
   if (Number(request.headers.get("content-length") ?? "0") > 1_250_000) return NextResponse.json({ error: "Request is too large." }, { status: 413 });
-  const user = await authorizeOwnerSession(authorization.slice(7));
+  const user = await authorizeOwnerSession(request);
   if (!user) return unauthorized();
   try {
     const chatRequest = parseChatRequest(await request.json());

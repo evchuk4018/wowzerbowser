@@ -11,10 +11,7 @@ import {
 const ID = /^[0-9a-f-]{36}$/i;
 
 async function ownerFor(request: Request) {
-  const authorization = request.headers.get("authorization");
-  return authorization?.startsWith("Bearer ")
-    ? authorizeOwnerSession(authorization.slice(7))
-    : null;
+  return authorizeOwnerSession(request);
 }
 
 function validMemoryId(memoryId: string): boolean {

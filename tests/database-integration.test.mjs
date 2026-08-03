@@ -61,7 +61,7 @@ test.after(async () => {
 
 test("local migrations, atomic chat jobs, document registration, and leased summaries work against real PostgreSQL", async () => {
   const migrationRows = await query("select version from schema_migrations order by version");
-  assert.deepEqual(migrationRows.map((row) => row.version), ["001_initial_schema", "002_seed_catalog", "003_atomic_functions"]);
+  assert.deepEqual(migrationRows.map((row) => row.version), ["001_initial_schema", "002_seed_catalog", "003_atomic_functions", "004_owner_auth"]);
 
   const conversationId = `${testPrefix}-chat`;
   const jobId = `${testPrefix}-job`;

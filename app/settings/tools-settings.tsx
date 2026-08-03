@@ -30,7 +30,7 @@ const draftFor = (tool: CustomToolDefinition): Draft => ({
   secretValues: {}, removeSecrets: [],
 });
 
-export function ToolsSettings({ getAccessToken }: { getAccessToken: () => Promise<string | null> }) {
+export function ToolsSettings({ hasSession }: { hasSession: () => Promise<boolean> }) {
   const [tools, setTools] = useState<CustomToolSummary[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [status, setStatus] = useState<"loading" | "idle" | "saving" | "testing">("loading");
@@ -40,21 +40,23 @@ export function ToolsSettings({ getAccessToken }: { getAccessToken: () => Promis
   const [calendar, setCalendar] = useState<GoogleCalendarConnection | null>(null);
   const [calendarBusy, setCalendarBusy] = useState(false);
 
-  const token = useCallback(async () => {
-    const value = await getAccessToken();
+  const ensureSession = useCallback(async () => {
+    const value = await hasSession();
     if (!value) throw new Error("Sign in to manage tools.");
-    return value;
-  }, [getAccessToken]);
-  const reload = useCallback(async () => setTools(await fetchCustomTools(await token())), [token]);
+  }, [hasSession]);
+  const reload = useCallback(async () => {
+    await ensureSession();
+    setTools(await fetchCustomTools());
+  }, [ensureSession]);
 
   useEffect(() => {
     let active = true;
     void (async () => {
       try {
-        const accessToken = await token();
+        await ensureSession();
         const [values, connection] = await Promise.all([
-          fetchCustomTools(accessToken),
-          fetchGoogleCalendarConnection(accessToken),
+          fetchCustomTools(),
+          fetchGoogleCalendarConnection(),
         ]);
         if (active) { setTools(values); setCalendar(connection); }
       } catch (reason) {
@@ -64,11 +66,11 @@ export function ToolsSettings({ getAccessToken }: { getAccessToken: () => Promis
       }
     })();
     return () => { active = false; };
-  }, [token]);
+  }, [ensureSession]);
 
   async function connectCalendar() {
     setCalendarBusy(true); setError("");
-    try { window.location.assign(await startGoogleCalendarConnection(await token())); }
+    try { await ensureSession(); window.location.assign(await startGoogleCalendarConnection()); }
     catch (reason) {
       setError(reason instanceof Error ? reason.message : "Google Calendar connection could not start.");
       setCalendarBusy(false);
@@ -79,7 +81,8 @@ export function ToolsSettings({ getAccessToken }: { getAccessToken: () => Promis
     if (!window.confirm("Disconnect Google Calendar? Calendar events will not be changed.")) return;
     setCalendarBusy(true); setError("");
     try {
-      await disconnectGoogleCalendarConnection(await token());
+      await ensureSession();
+      await disconnectGoogleCalendarConnection();
       setCalendar({ connected: false, connectedAt: null, updatedAt: null });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Google Calendar could not be disconnected.");
@@ -88,7 +91,7 @@ export function ToolsSettings({ getAccessToken }: { getAccessToken: () => Promis
 
   async function edit(id: string) {
     setError(""); setTestResult(null); setStatus("loading");
-    try { setDraft(draftFor(await fetchCustomTool(id, await token()))); }
+    try { await ensureSession(); setDraft(draftFor(await fetchCustomTool(id))); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "The tool could not be loaded."); }
     finally { setStatus("idle"); }
   }
@@ -110,8 +113,8 @@ export function ToolsSettings({ getAccessToken }: { getAccessToken: () => Promis
     setStatus("saving"); setError("");
     try {
       const saved = draft.id
-        ? await updateCustomTool(draft.id, mutation(draft), await token())
-        : await createCustomTool(mutation({ ...draft, enabled: false }), await token());
+        ? (await ensureSession(), await updateCustomTool(draft.id, mutation(draft)))
+        : (await ensureSession(), await createCustomTool(mutation({ ...draft, enabled: false })));
       setDraft(draftFor(saved)); await reload();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "The tool could not be saved."); }
     finally { setStatus("idle"); }
@@ -120,7 +123,7 @@ export function ToolsSettings({ getAccessToken }: { getAccessToken: () => Promis
   async function runTest() {
     if (!draft?.id) return;
     setStatus("testing"); setError(""); setTestResult(null);
-    try { setTestResult(await testCustomTool(draft.id, JSON.parse(sample), await token())); }
+      try { await ensureSession(); setTestResult(await testCustomTool(draft.id, JSON.parse(sample))); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "The test could not be run."); }
     finally { setStatus("idle"); }
   }
@@ -128,7 +131,7 @@ export function ToolsSettings({ getAccessToken }: { getAccessToken: () => Promis
   async function remove() {
     if (!draft?.id || !window.confirm(`Delete ${draft.name}? This also deletes its credentials.`)) return;
     setStatus("saving"); setError("");
-    try { await deleteCustomTool(draft.id, await token()); setDraft(null); await reload(); }
+    try { await ensureSession(); await deleteCustomTool(draft.id); setDraft(null); await reload(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "The tool could not be deleted."); }
     finally { setStatus("idle"); }
   }

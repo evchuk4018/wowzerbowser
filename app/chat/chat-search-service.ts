@@ -1,4 +1,5 @@
 import type { ChatSearchResponse, ChatSearchResult } from "../../lib/chat-search";
+import { authFetch } from "../auth/auth-fetch";
 
 async function readError(response: Response): Promise<string> {
   const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
@@ -7,15 +8,11 @@ async function readError(response: Response): Promise<string> {
 
 export async function fetchChatSearch(
   query: string,
-  accessToken: string,
   signal?: AbortSignal,
 ): Promise<ChatSearchResult[]> {
   const params = new URLSearchParams();
   if (query.trim()) params.set("q", query.trim());
-  const response = await fetch(`/api/chat/search?${params.toString()}`, {
-    headers: { authorization: `Bearer ${accessToken}` },
-    signal,
-  });
+  const response = await authFetch(`/api/chat/search?${params.toString()}`, { signal });
   if (!response.ok) throw new Error(await readError(response));
   const body = await response.json() as ChatSearchResponse;
   return Array.isArray(body.conversations) ? body.conversations : [];

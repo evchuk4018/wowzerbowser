@@ -189,11 +189,11 @@ function ReasoningCard({ activity, phaseActivities }: { activity: ReasoningActiv
 
 function ArtifactDownload({
   artifact,
-  getAccessToken,
+  hasSession,
   onOpenArtifact,
 }: {
   artifact: ChatArtifact;
-  getAccessToken: () => Promise<string | null>;
+  hasSession: () => Promise<boolean>;
   onOpenArtifact: (artifact: ChatArtifact) => void;
 }) {
   const [state, setState] = useState<"idle" | "downloading" | "error">("idle");
@@ -202,9 +202,8 @@ function ArtifactDownload({
     if (state === "downloading") return;
     setState("downloading");
     try {
-      const accessToken = await getAccessToken();
-      if (!accessToken) throw new Error("Session expired");
-      const blob = await fetchChatArtifact(artifact, accessToken);
+      if (!(await hasSession())) throw new Error("Session expired");
+      const blob = await fetchChatArtifact(artifact);
       const objectUrl = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = objectUrl;
@@ -242,7 +241,7 @@ type AssistantActivityTimelineProps = {
   artifacts: ChatArtifact[];
   annotations?: ChatCitation[];
   sources?: ChatSource[];
-  getAccessToken: () => Promise<string | null>;
+  hasSession: () => Promise<boolean>;
   onOpenArtifact: (artifact: ChatArtifact) => void;
   streaming?: boolean;
 };
@@ -253,7 +252,7 @@ function AssistantActivityTimelineInner({
   artifacts,
   annotations,
   sources,
-  getAccessToken,
+  hasSession,
   onOpenArtifact,
   streaming = false,
 }: AssistantActivityTimelineProps) {
@@ -327,7 +326,7 @@ function AssistantActivityTimelineInner({
             <ArtifactDownload
               key={artifact.id}
               artifact={artifact}
-              getAccessToken={getAccessToken}
+              hasSession={hasSession}
               onOpenArtifact={onOpenArtifact}
             />
           ))}

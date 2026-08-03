@@ -13,6 +13,7 @@ import {
 import { readChatLiveStream } from "./read-chat-live-stream";
 import { chatTerminalEvents } from "./chat-terminal-events";
 import { waitForChatRetry } from "./chat-retry-backoff";
+import { authFetch } from "../auth/auth-fetch";
 
 async function readError(response: Response): Promise<string> {
   const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
@@ -27,32 +28,25 @@ export class ChatRequestError extends Error {
 }
 
 export async function fetchChatBootstrap(
-  accessToken: string,
   requestedConversationId?: string,
 ): Promise<ChatBootstrapPayload> {
   const query = requestedConversationId
     ? `?conversationId=${encodeURIComponent(requestedConversationId)}`
     : "";
-  const response = await fetch(`/api/chat/bootstrap${query}`, {
-    headers: { authorization: `Bearer ${accessToken}` },
-  });
+  const response = await authFetch(`/api/chat/bootstrap${query}`);
   if (!response.ok) throw new ChatRequestError(response.status, await readError(response));
   return parseChatBootstrapPayload(await response.json());
 }
 
-export async function fetchChatConversations(accessToken: string): Promise<ChatConversationSummary[]> {
-  const response = await fetch("/api/chat/conversations", {
-    headers: { authorization: `Bearer ${accessToken}` },
-  });
+export async function fetchChatConversations(): Promise<ChatConversationSummary[]> {
+  const response = await authFetch("/api/chat/conversations");
   if (!response.ok) throw new Error(await readError(response));
   const body = await response.json() as { conversations?: ChatConversationSummary[] };
   return body.conversations ?? [];
 }
 
-export async function fetchChatConversation(conversationId: string, accessToken: string): Promise<ChatConversation> {
-  const response = await fetch(`/api/chat/conversations/${encodeURIComponent(conversationId)}`, {
-    headers: { authorization: `Bearer ${accessToken}` },
-  });
+export async function fetchChatConversation(conversationId: string): Promise<ChatConversation> {
+  const response = await authFetch(`/api/chat/conversations/${encodeURIComponent(conversationId)}`);
   if (!response.ok) throw new Error(await readError(response));
   const body = await response.json() as { conversation?: ChatConversation };
   if (!body.conversation) throw new Error("Conversation not found.");
@@ -62,38 +56,34 @@ export async function fetchChatConversation(conversationId: string, accessToken:
 export async function updateChatConversation(
   conversationId: string,
   values: { title?: string; turnId?: string; versionId?: string },
-  accessToken: string,
 ): Promise<void> {
-  const response = await fetch(`/api/chat/conversations/${encodeURIComponent(conversationId)}`, {
+  const response = await authFetch(`/api/chat/conversations/${encodeURIComponent(conversationId)}`, {
     method: "PATCH",
-    headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(values),
   });
   if (!response.ok) throw new Error(await readError(response));
 }
 
-export async function deleteChatConversation(conversationId: string, accessToken: string): Promise<void> {
-  const response = await fetch(`/api/chat/conversations/${encodeURIComponent(conversationId)}`, {
+export async function deleteChatConversation(conversationId: string): Promise<void> {
+  const response = await authFetch(`/api/chat/conversations/${encodeURIComponent(conversationId)}`, {
     method: "DELETE",
-    headers: { authorization: `Bearer ${accessToken}` },
   });
   if (!response.ok) throw new Error(await readError(response));
 }
 
-export async function fetchChatModels(accessToken: string): Promise<ChatModelInfo[]> {
-  const response = await fetch("/api/chat/models", {
-    headers: { authorization: `Bearer ${accessToken}` },
-  });
+export async function fetchChatModels(): Promise<ChatModelInfo[]> {
+  const response = await authFetch("/api/chat/models");
   if (!response.ok) throw new Error(await readError(response));
 
   const body = (await response.json()) as { models?: ChatModelInfo[] };
   return body.models ?? [];
 }
 
-async function openChatStream(request: ChatRequest, accessToken: string, signal?: AbortSignal): Promise<Response> {
-  const response = await fetch("/api/chat", {
+async function openChatStream(request: ChatRequest, signal?: AbortSignal): Promise<Response> {
+  const response = await authFetch("/api/chat", {
     method: "POST",
-    headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(request),
     signal,
   });
@@ -101,28 +91,26 @@ async function openChatStream(request: ChatRequest, accessToken: string, signal?
   return response;
 }
 
-export async function fetchChatJob(conversationId: string, jobId: string, after: number, accessToken: string, signal?: AbortSignal): Promise<ChatJobResumeResponse> {
-  const response = await fetch(`/api/chat/jobs/${encodeURIComponent(conversationId)}/${encodeURIComponent(jobId)}?after=${after}`, { headers: { authorization: `Bearer ${accessToken}` }, signal });
+export async function fetchChatJob(conversationId: string, jobId: string, after: number, signal?: AbortSignal): Promise<ChatJobResumeResponse> {
+  const response = await authFetch(`/api/chat/jobs/${encodeURIComponent(conversationId)}/${encodeURIComponent(jobId)}?after=${after}`, { signal });
   if (!response.ok) throw new Error(await readError(response));
   return response.json() as Promise<ChatJobResumeResponse>;
 }
 
-export async function cancelChatJob(conversationId: string, jobId: string, accessToken: string) {
-  const response = await fetch(`/api/chat/jobs/${encodeURIComponent(conversationId)}/${encodeURIComponent(jobId)}/cancel`, { method: "POST", headers: { authorization: `Bearer ${accessToken}` } });
+export async function cancelChatJob(conversationId: string, jobId: string) {
+  const response = await authFetch(`/api/chat/jobs/${encodeURIComponent(conversationId)}/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
   if (!response.ok) throw new Error(await readError(response));
 }
 
-export async function resumeChatJob(conversationId: string, jobId: string, accessToken: string): Promise<void> {
-  const response = await fetch(`/api/chat/jobs/${encodeURIComponent(conversationId)}/${encodeURIComponent(jobId)}/resume`, {
+export async function resumeChatJob(conversationId: string, jobId: string): Promise<void> {
+  const response = await authFetch(`/api/chat/jobs/${encodeURIComponent(conversationId)}/${encodeURIComponent(jobId)}/resume`, {
     method: "POST",
-    headers: { authorization: `Bearer ${accessToken}` },
   });
   if (!response.ok) throw new Error(await readError(response));
 }
 
 export async function* streamChatResponse(
   request: ChatRequest,
-  accessToken: string,
   signal?: AbortSignal,
 ): AsyncGenerator<SequencedChatStreamEvent> {
   let sequence = 0;
@@ -130,7 +118,7 @@ export async function* streamChatResponse(
   let sawStreamError = false;
   let sawDone = false;
   let activeJobId = request.jobId!;
-  const response = await openChatStream(request, accessToken, signal);
+  const response = await openChatStream(request, signal);
   try {
     for await (const envelope of readChatLiveStream(response)) {
       if (envelope.type === "submission") {
@@ -169,7 +157,7 @@ export async function* streamChatResponse(
   const retrySignal = signal ?? new AbortController().signal;
   while (!signal?.aborted) {
     try {
-      await resumeChatJob(request.conversationId!, activeJobId, accessToken);
+      await resumeChatJob(request.conversationId!, activeJobId);
     } catch {
       if (signal?.aborted) throw signal.reason;
       if (!(await waitForChatRetry(retrySignal, retryAttempt++))) return;
@@ -177,7 +165,7 @@ export async function* streamChatResponse(
     }
     let snapshot: ChatJobResumeResponse;
     try {
-      snapshot = await fetchChatJob(request.conversationId!, activeJobId, sequence, accessToken, signal);
+      snapshot = await fetchChatJob(request.conversationId!, activeJobId, sequence, signal);
     } catch (error) {
       if (signal?.aborted) throw error;
       if (!(await waitForChatRetry(retrySignal, retryAttempt++))) return;
@@ -212,13 +200,9 @@ export async function* streamChatResponse(
 
 export async function fetchChatArtifact(
   artifact: ChatArtifact,
-  accessToken: string,
 ): Promise<Blob> {
-  const response = await fetch(
+  const response = await authFetch(
     `/api/chat/artifacts/${encodeURIComponent(artifact.id)}`,
-    {
-      headers: { authorization: `Bearer ${accessToken}` },
-    },
   );
   if (!response.ok) throw new Error(await readError(response));
   return response.blob();
@@ -227,12 +211,11 @@ export async function fetchChatArtifact(
 export async function fetchChatImage(
   imageId: string,
   conversationId: string,
-  accessToken: string,
   signal?: AbortSignal,
 ): Promise<Blob> {
-  const response = await fetch(
+  const response = await authFetch(
     `/api/chat/images/${encodeURIComponent(imageId)}?conversationId=${encodeURIComponent(conversationId)}`,
-    { headers: { authorization: `Bearer ${accessToken}` }, signal },
+    { signal },
   );
   if (!response.ok) throw new ChatImageFetchError(response.status, await readError(response));
   return response.blob();

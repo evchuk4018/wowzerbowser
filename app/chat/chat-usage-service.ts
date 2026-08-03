@@ -1,4 +1,5 @@
 import type { UsageRange, UsageReport } from "../../lib/usage-protocol";
+import { authFetch } from "../auth/auth-fetch";
 
 async function readError(response: Response): Promise<string> {
   const body = await response.json().catch(() => null) as { error?: unknown } | null;
@@ -7,12 +8,9 @@ async function readError(response: Response): Promise<string> {
 export async function fetchChatUsage(
   range: UsageRange,
   timeZone: string,
-  accessToken: string,
 ): Promise<UsageReport> {
   const params = new URLSearchParams({ range, timeZone });
-  const response = await fetch(`/api/chat/usage?${params.toString()}`, {
-    headers: { authorization: `Bearer ${accessToken}` },
-  });
+  const response = await authFetch(`/api/chat/usage?${params.toString()}`);
   if (!response.ok) throw new Error(await readError(response));
   return await response.json() as UsageReport;
 }

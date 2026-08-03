@@ -1,6 +1,7 @@
 "use client";
 
 import type { MemoryView } from "../../lib/memory-protocol";
+import { authFetch } from "../auth/auth-fetch";
 
 async function responseJson<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => ({})) as T & { error?: string };
@@ -8,28 +9,25 @@ async function responseJson<T>(response: Response): Promise<T> {
   return body;
 }
 
-export async function fetchMemoryView(token: string): Promise<MemoryView> {
-  return responseJson<MemoryView>(await fetch("/api/memory", {
-    headers: { authorization: `Bearer ${token}` },
+export async function fetchMemoryView(): Promise<MemoryView> {
+  return responseJson<MemoryView>(await authFetch("/api/memory", {
     cache: "no-store",
   }));
 }
 
-export async function updateMemory(id: string, content: string, token: string): Promise<void> {
-  await responseJson<{ memory: unknown }>(await fetch(`/api/memory/${id}`, {
+export async function updateMemory(id: string, content: string): Promise<void> {
+  await responseJson<{ memory: unknown }>(await authFetch(`/api/memory/${id}`, {
     method: "PATCH",
     headers: {
-      authorization: `Bearer ${token}`,
       "content-type": "application/json",
     },
     body: JSON.stringify({ content }),
   }));
 }
 
-export async function deleteMemory(id: string, token: string): Promise<void> {
-  const response = await fetch(`/api/memory/${id}`, {
+export async function deleteMemory(id: string): Promise<void> {
+  const response = await authFetch(`/api/memory/${id}`, {
     method: "DELETE",
-    headers: { authorization: `Bearer ${token}` },
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({})) as { error?: string };

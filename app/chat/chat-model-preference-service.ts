@@ -1,4 +1,5 @@
 import type { ChatModelPreference } from "../../lib/chat-model-preference";
+import { authFetch } from "../auth/auth-fetch";
 
 type StoredChatModelPreference = ChatModelPreference & { conversationId: string };
 
@@ -7,10 +8,8 @@ async function readError(response: Response): Promise<string> {
   return typeof body?.error === "string" ? body.error : `Request failed (${response.status}).`;
 }
 
-export async function fetchChatModelPreferences(accessToken: string) {
-  const response = await fetch("/api/chat/preferences", {
-    headers: { authorization: `Bearer ${accessToken}` },
-  });
+export async function fetchChatModelPreferences() {
+  const response = await authFetch("/api/chat/preferences");
   if (!response.ok) throw new Error(await readError(response));
   const body = await response.json() as { preferences?: StoredChatModelPreference[] };
   return Object.fromEntries(
@@ -21,11 +20,10 @@ export async function fetchChatModelPreferences(accessToken: string) {
 export async function saveChatModelPreference(
   conversationId: string,
   preference: ChatModelPreference,
-  accessToken: string,
 ) {
-  const response = await fetch("/api/chat/preferences", {
+  const response = await authFetch("/api/chat/preferences", {
     method: "PUT",
-    headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify({ conversationId, preference }),
   });
   if (!response.ok) throw new Error(await readError(response));

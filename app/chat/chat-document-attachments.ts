@@ -1,6 +1,7 @@
 "use client";
 import { DOCX_CONTENT_TYPE, DOCUMENT_CONTENT_TYPES, MAX_PDF_BYTES, type ChatDocumentAttachment } from "../../lib/chat-document";
 import { DOCUMENT_INGESTION_STAGES, DocumentIngestionTiming, type DocumentIngestionStage } from "../server/chat/document-ingestion-timing";
+import { authFetch } from "../auth/auth-fetch";
 
 export type ChatDocumentUploadContext = {
  conversationId: string;
@@ -45,20 +46,19 @@ export async function uploadChatDocument(input: {
  userMessageId:string;
  jobId:string;
  document:PendingChatDocument;
- accessToken:string;
  signal:AbortSignal;
  onStageChange?: (stage: "uploading" | "parsing") => void;
 }): Promise<ChatDocumentAttachment> {
  const timing = new DocumentIngestionTiming({ documentType: input.document.file.type, byteSize: input.document.file.size, cacheStatus: "unknown" });
  const contentType = chatDocumentContentType(input.document.file);
  if (!contentType) throw new Error("Choose a PDF or DOCX file.");
- const headers={authorization:`Bearer ${input.accessToken}`,"content-type":"application/json"};
+ const headers={"content-type":"application/json"};
  try {
   input.onStageChange?.("uploading");
-  const signed=await timing.measure(DOCUMENT_INGESTION_STAGES.SIGNED_UPLOAD_URL,async()=>{const response=await fetch("/api/chat/documents/upload-url",{method:"POST",headers,signal:input.signal,body:JSON.stringify({conversationId:input.conversationId,documentId:input.document.id,size:input.document.file.size,contentType})}); if(!response.ok)throw await errorFor(response); return await response.json() as {signedUrl:string};});
+  const signed=await timing.measure(DOCUMENT_INGESTION_STAGES.SIGNED_UPLOAD_URL,async()=>{const response=await authFetch("/api/chat/documents/upload-url",{method:"POST",headers,signal:input.signal,body:JSON.stringify({conversationId:input.conversationId,documentId:input.document.id,size:input.document.file.size,contentType})}); if(!response.ok)throw await errorFor(response); return await response.json() as {signedUrl:string};});
   await timing.measure(DOCUMENT_INGESTION_STAGES.BROWSER_UPLOAD,async()=>{const response=await fetch(signed.signedUrl,{method:"PUT",headers:{"content-type":contentType},body:input.document.file,signal:input.signal}); if(!response.ok)throw new Error("Direct document upload failed.");});
   input.onStageChange?.("parsing");
-  const document=await timing.measure(DOCUMENT_INGESTION_STAGES.FINALIZE_REQUEST,async()=>{const response=await fetch("/api/chat/documents/finalize",{method:"POST",headers,signal:input.signal,body:JSON.stringify({conversationId:input.conversationId,documentId:input.document.id,userMessageId:input.userMessageId,jobId:input.jobId,filename:input.document.file.name,contentType})}); if(!response.ok)throw await errorFor(response); return (await response.json() as {document:ChatDocumentAttachment}).document;});
+  const document=await timing.measure(DOCUMENT_INGESTION_STAGES.FINALIZE_REQUEST,async()=>{const response=await authFetch("/api/chat/documents/finalize",{method:"POST",headers,signal:input.signal,body:JSON.stringify({conversationId:input.conversationId,documentId:input.document.id,userMessageId:input.userMessageId,jobId:input.jobId,filename:input.document.file.name,contentType})}); if(!response.ok)throw await errorFor(response); return (await response.json() as {document:ChatDocumentAttachment}).document;});
   timing.updateMetadata({ pageCount: document.pageCount, ocrPageCount: document.analyzedImageCount ?? 0 });
   timing.finish();
   timing.log((entry)=>console.info(entry));
@@ -75,13 +75,12 @@ export async function uploadChatDocument(input: {
 export async function deleteChatDocument(input: {
  conversationId: string;
  document: Pick<PendingChatDocument, "id" | "file">;
- accessToken: string;
 }): Promise<void> {
  const contentType = chatDocumentContentType(input.document.file);
  if (!contentType) return;
- const response = await fetch("/api/chat/documents/delete", {
+ const response = await authFetch("/api/chat/documents/delete", {
   method: "DELETE",
-  headers: { authorization: `Bearer ${input.accessToken}`, "content-type": "application/json" },
+  headers: { "content-type": "application/json" },
   body: JSON.stringify({
    conversationId: input.conversationId,
    documentId: input.document.id,

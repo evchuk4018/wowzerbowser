@@ -147,7 +147,8 @@ test("server renders the local auth-aware app shell", async () => {
 
     const html = await response.text();
     assert.match(html, /<title>Chat<\/title>/i);
-    assert.match(html, /aria-label="Loading session"/);
+    assert.match(html, /id="sign-in-title"/);
+    assert.match(html, /name="password"/);
   });
 });
 
@@ -247,32 +248,31 @@ test("keeps PWA icon references and service worker behavior safe", async () => {
   assert.match(styles, /height: 100dvh;/);
 });
 
-test("keeps Supabase calls behind adapters and owner authorization", async () => {
-  const [page, browserAdapter, serverAdapter, ownerService, magicLinkRoute, authService, authForm] = await Promise.all([
+test("keeps Auth.js credentials and object storage separate", async () => {
+  const [page, authConfig, authRoute, ownerService, authService, authForm, storageAdapter] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/auth/supabase-browser-adapter.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/auth/supabase-server-adapter.ts", import.meta.url), "utf8"),
+    readFile(new URL("../auth.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/auth/[...nextauth]/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/auth/owner-auth-service.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/api/auth/magic-link/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/auth/auth-service.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/auth/magic-link-form.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/auth/login-form.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/server/storage/supabase-storage-adapter.ts", import.meta.url), "utf8"),
   ]);
 
   assert.doesNotMatch(page, /@supabase\/supabase-js|createClient\(/);
-  assert.match(browserAdapter, /@supabase\/supabase-js/);
-  assert.doesNotMatch(browserAdapter, /signInWithOtp/);
-  assert.match(serverAdapter, /signInWithOtp/);
-  assert.match(serverAdapter, /shouldCreateUser: true/);
-  assert.match(ownerService, /APP_OWNER_EMAIL/);
+  assert.match(authConfig, /Credentials/);
+  assert.match(authConfig, /strategy: "jwt"/);
+  assert.match(authConfig, /trustHost: true/);
+  assert.match(authConfig, /sessionVersion/);
+  assert.match(authRoute, /handlers/);
+  assert.match(ownerService, /ownerForSession/);
   assert.match(ownerService, /NEXT_PUBLIC_SITE_URL/);
-  assert.match(magicLinkRoute, /sendOwnerMagicLink/);
-  assert.match(magicLinkRoute, /magic_link_rate_limited/);
-  assert.match(authService, /MagicLinkRateLimitError/);
-  assert.match(authService, /response\.status === 429/);
-  assert.match(browserAdapter, /signInWithPassword/);
-  assert.match(browserAdapter, /signUp/);
-  assert.match(authForm, /Create password account/);
-  assert.match(authForm, /isMagicLinkRateLimitError/);
+  assert.match(authService, /authSignIn\("credentials"/);
+  assert.doesNotMatch(authService, /supabase|magic|signUp/i);
+  assert.match(authForm, /Password/);
+  assert.doesNotMatch(authForm, /Create password account|magic link|signUp/i);
+  assert.match(storageAdapter, /@supabase\/supabase-js/);
+  assert.doesNotMatch(storageAdapter, /supabase\.auth|signIn|signUp|magic/i);
 });
 
 test("renders a non-blocking startup shell before remote chat bootstrap", async () => {
@@ -301,10 +301,10 @@ test("collapses authenticated chat startup into one bootstrap request", async ()
     readFile(new URL("../app/chat/chat-service.ts", import.meta.url), "utf8"),
   ]);
 
-  assert.doesNotMatch(authService, /\/api\/auth\/session/);
-  assert.match(authService, /session\?\.user/);
+  assert.match(authService, /\/api\/auth\/session/);
+  assert.match(authService, /body\?\.user/);
   assert.match(client, /fetchChatBootstrap/);
-  assert.match(workspace, /fetchChatBootstrap\(token/);
+  assert.match(workspace, /fetchChatBootstrap\(initialConversationIdRef\.current\)/);
   assert.doesNotMatch(workspace, /loadConversationIndex\(|loadSettings\(/);
   assert.doesNotMatch(preferences, /fetchChatModelPreferences/);
   assert.match(preferences, /bootstrapComplete/);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { MagicLinkForm } from "../auth/magic-link-form";
+import { LoginForm } from "../auth/login-form";
 import { useAuthSession } from "../auth/use-auth-session";
 import { ChatWorkspace } from "./chat-workspace";
 import { ChatStartupShell } from "./chat-startup-shell";
@@ -10,12 +10,9 @@ import { clearChatStartupSnapshot } from "./use-chat-startup-snapshot";
 export function ChatPage() {
   const {
     state,
-    sendMagicLink,
-    signInWithPassword,
-    signUpWithPassword,
     signOut,
     invalidateSession,
-    getAccessToken,
+    hasSession,
   } = useAuthSession();
   const [startupDraft, setStartupDraft] = useState("");
   const clearCurrentUserSnapshot = useCallback(async (userId: string | null) => {
@@ -41,21 +38,14 @@ export function ChatPage() {
   }
 
   if (state.status !== "authenticated") {
-    return (
-      <MagicLinkForm
-        error={state.status === "error" ? state.error : null}
-        onSubmit={sendMagicLink}
-        onPasswordSignIn={signInWithPassword}
-        onPasswordSignUp={signUpWithPassword}
-      />
-    );
+    return <LoginForm error={state.status === "error" ? state.error : null} />;
   }
 
   return (
     <ChatWorkspace
       key={state.user.id}
       user={state.user}
-      getAccessToken={getAccessToken}
+      hasSession={hasSession}
       initialDraft={startupDraft}
       onSignOut={handleSignOut}
       onSessionInvalid={handleSessionInvalid}

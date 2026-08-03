@@ -19,7 +19,7 @@ import {
   validateChatImageBytes,
 } from "../lib/chat-image.ts";
 
-const authHeaders = { authorization: "Bearer session-token" };
+const authHeaders = { cookie: "wowzerbowser.session-token=session" };
 const png = new Uint8Array([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
   0, 0, 0, 0, 0, 0, 0, 0,
@@ -119,8 +119,8 @@ test("upload transport rejects duplicate IDs, mismatched counts, and too many fi
 test("upload transport forwards the authenticated owner, conversation, MIME declaration, and bytes", async () => {
   let call;
   const handler = createChatImageUploadHandler({
-    authorizeOwnerSession: async (token) => {
-      assert.equal(token, "session-token");
+    authorizeOwnerSession: async (request) => {
+      assert.ok(request instanceof Request);
       return { id: "owner-from-session" };
     },
     analyzeAndStoreChatImages: async (...args) => {
@@ -166,8 +166,8 @@ test("image signature validation rejects spoofed MIME and unsupported bytes", ()
 test("image read forwards owner and conversation and safely formats a scoped miss", async () => {
   let readInput;
   const handler = createChatImageReadHandler({
-    authorizeOwnerSession: async (token) => {
-      assert.equal(token, "session-token");
+    authorizeOwnerSession: async (request) => {
+      assert.ok(request instanceof Request);
       return { id: "owner-from-session" };
     },
     readChatImagePreviewForOwner: async (input) => {

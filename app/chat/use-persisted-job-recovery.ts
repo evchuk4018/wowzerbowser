@@ -15,7 +15,7 @@ export type { PersistedJobCandidate, RecoverPersistedJobOptions, FetchPersistedJ
 export type PersistedJobRecoveryOptions = {
   enabled: boolean;
   conversations: ChatConversation[];
-  getAccessToken: () => Promise<string | null>;
+  hasSession: () => Promise<boolean>;
   dispatch: (action: ConversationAction) => void;
   scopeKey?: string;
   onConversationStreamingChange?: (conversationId: string, streaming: boolean) => void;
@@ -24,21 +24,21 @@ export type PersistedJobRecoveryOptions = {
 export function usePersistedJobRecovery({
   enabled,
   conversations,
-  getAccessToken,
+  hasSession,
   dispatch,
   scopeKey = "default",
   onConversationStreamingChange,
 }: PersistedJobRecoveryOptions): void {
   const conversationsRef = useRef(conversations);
-  const getAccessTokenRef = useRef(getAccessToken);
+  const hasSessionRef = useRef(hasSession);
   const dispatchRef = useRef(dispatch);
   const streamingChangeRef = useRef(onConversationStreamingChange);
   useEffect(() => {
     conversationsRef.current = conversations;
-    getAccessTokenRef.current = getAccessToken;
+    hasSessionRef.current = hasSession;
     dispatchRef.current = dispatch;
     streamingChangeRef.current = onConversationStreamingChange;
-  }, [conversations, dispatch, getAccessToken, onConversationStreamingChange]);
+  }, [conversations, dispatch, hasSession, onConversationStreamingChange]);
 
   useEffect(() => {
     if (!enabled) return undefined;
@@ -52,7 +52,7 @@ export function usePersistedJobRecovery({
         await recoverPersistedJob({
           candidate,
           signal: controller.signal,
-          getAccessToken: getAccessTokenRef.current,
+          hasSession: hasSessionRef.current,
           dispatch: dispatchRef.current,
           onConversationStreamingChange: streamingChangeRef.current,
         });

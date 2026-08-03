@@ -10,9 +10,7 @@ import { authorizeChatModel, ChatModelAuthorizationError } from "../../../server
 const unauthorized = () => NextResponse.json({ error: "Unauthorized." }, { status: 401 });
 
 async function ownerFor(request: Request) {
-  const authorization = request.headers.get("authorization");
-  if (!authorization?.startsWith("Bearer ")) return null;
-  return authorizeOwnerSession(authorization.slice(7));
+  return authorizeOwnerSession(request);
 }
 
 export async function GET(request: Request) {

@@ -15,7 +15,7 @@ function writerLabel(writer: UserMemory["writer"]): string {
   return writer === "dreaming" ? "Dreaming model" : "Chat model";
 }
 
-export function MemorySettings({ getAccessToken }: { getAccessToken: () => Promise<string | null> }) {
+export function MemorySettings({ hasSession }: { hasSession: () => Promise<boolean> }) {
   const [view, setView] = useState<MemoryView | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
@@ -25,10 +25,9 @@ export function MemorySettings({ getAccessToken }: { getAccessToken: () => Promi
   const [mutatingId, setMutatingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const token = await getAccessToken();
-    if (!token) throw new Error("Sign in to view memory.");
-    return fetchMemoryView(token);
-  }, [getAccessToken]);
+    if (!(await hasSession())) throw new Error("Sign in to view memory.");
+    return fetchMemoryView();
+  }, [hasSession]);
 
   const reload = useCallback(async () => {
     setStatus("loading");
@@ -69,17 +68,16 @@ export function MemorySettings({ getAccessToken }: { getAccessToken: () => Promi
     return groups;
   }, [view]);
 
-  async function tokenForMutation(): Promise<string> {
-    const token = await getAccessToken();
-    if (!token) throw new Error("Sign in to manage memory.");
-    return token;
+  async function ensureMutationSession(): Promise<void> {
+    if (!(await hasSession())) throw new Error("Sign in to manage memory.");
   }
 
   async function saveMemory(memoryId: string) {
     setMutatingId(memoryId);
     setError("");
     try {
-      await updateMemory(memoryId, editingContent, await tokenForMutation());
+      await ensureMutationSession();
+      await updateMemory(memoryId, editingContent);
       setEditingId(null);
       setEditingContent("");
       await reload();
@@ -94,7 +92,8 @@ export function MemorySettings({ getAccessToken }: { getAccessToken: () => Promi
     setMutatingId(memoryId);
     setError("");
     try {
-      await deleteMemory(memoryId, await tokenForMutation());
+      await ensureMutationSession();
+      await deleteMemory(memoryId);
       setConfirmingId(null);
       await reload();
     } catch (reason) {

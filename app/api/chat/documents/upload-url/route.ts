@@ -18,7 +18,7 @@ function logTiming(timing: DocumentIngestionTiming) {
 }
 
 export function createUploadUrlHandler(deps = { authorizeOwnerSession, createSignedDocumentUpload, ensureChatDocumentSchema }) { return async (request: Request) => {
-  const auth = request.headers.get("authorization"); const owner = auth?.startsWith("Bearer ") ? await deps.authorizeOwnerSession(auth.slice(7)) : null;
+  const owner = await deps.authorizeOwnerSession(request);
   if (!owner) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   if (!body || typeof body.conversationId !== "string" || typeof body.documentId !== "string" || typeof body.size !== "number" || body.size > MAX_PDF_BYTES || body.size < 1 || !DOCUMENT_CONTENT_TYPES.includes(body.contentType as never)) return NextResponse.json({ error: "Invalid document upload." }, { status: 400 });

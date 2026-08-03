@@ -11,7 +11,7 @@ function input(fetchImage, overrides = {}) {
     imageId: "image-1",
     conversationId: "conversation-1",
     signal: new AbortController().signal,
-    getAccessToken: async () => "fresh-token",
+    hasSession: async () => true,
     fetchImage,
     wait: immediateWait,
     ...overrides,
@@ -29,15 +29,15 @@ test("preview loader retries a transient 404 and eventually returns the image", 
   assert.equal(calls, 2);
 });
 
-test("preview loader bounds transient retries and requests a fresh token each time", async () => {
+test("preview loader bounds transient retries while rechecking the session", async () => {
   let fetches = 0;
-  let tokens = 0;
+  let sessionChecks = 0;
   await assert.rejects(loadChatImagePreview(input(async () => {
     fetches += 1;
     throw new ChatImageFetchError(503, "Unavailable");
-  }, { getAccessToken: async () => `token-${++tokens}` })), /Unavailable/);
+  }, { hasSession: async () => { sessionChecks += 1; return true; } })), /Unavailable/);
   assert.equal(fetches, CHAT_IMAGE_PREVIEW_DELAYS_MS.length + 1);
-  assert.equal(tokens, fetches);
+  assert.equal(sessionChecks, fetches);
 });
 
 test("preview loader does not retry permanent authorization failures", async () => {

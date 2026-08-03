@@ -170,7 +170,7 @@ export function ChatSidebar({
           </button>
           <div className="account-details">
             <div className="account-name">{userEmail}</div>
-            <div className="account-note">Magic link account</div>
+            <div className="account-note">Owner account</div>
           </div>
           <button
             className="sign-out-button"

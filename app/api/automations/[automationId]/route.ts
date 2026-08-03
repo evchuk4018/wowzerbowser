@@ -4,8 +4,7 @@ import { AutomationNotFoundError, deleteAutomation, getAutomation, updateAutomat
 
 type Context = { params: Promise<{ automationId: string }> | { automationId: string } };
 async function owner(request: Request) {
-  const header = request.headers.get("authorization");
-  return header?.startsWith("Bearer ") ? authorizeOwnerSession(header.slice(7)) : null;
+  return authorizeOwnerSession(request);
 }
 const failure = (error: unknown) => error instanceof AutomationNotFoundError
   ? NextResponse.json({ error: error.message }, { status: 404 })

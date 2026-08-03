@@ -13,7 +13,7 @@ export type ChatTranscriptProps = {
   waitingByMessage: Record<string, boolean>;
   thinkingByMessage: Record<string, ThinkingTiming>;
   copiedMessageId: string | null;
-  getAccessToken: () => Promise<string | null>;
+  hasSession: () => Promise<boolean>;
   transcriptRef: RefObject<HTMLDivElement | null>;
   onTranscriptScroll: (element: HTMLDivElement) => void;
   onSetOpenMessageActions: (turnId: string | null) => void;
@@ -37,7 +37,7 @@ export function ChatTranscript({
   waitingByMessage,
   thinkingByMessage,
   copiedMessageId,
-  getAccessToken,
+  hasSession,
   transcriptRef,
   onTranscriptScroll,
   onSetOpenMessageActions,
@@ -81,7 +81,7 @@ export function ChatTranscript({
           waitingByMessage={waitingByMessage}
           thinkingByMessage={thinkingByMessage}
           copiedMessageId={copiedMessageId}
-          getAccessToken={getAccessToken}
+          hasSession={hasSession}
           onOpenActions={onSetOpenMessageActions}
           onCloseActions={onCloseMessageActions}
           onStartLongPress={onStartLongPress}

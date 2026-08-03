@@ -1,22 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { authFetch } from "../auth/auth-fetch";
 import type { Automation, AutomationKind, AutomationSchedule } from "../../lib/automation-protocol";
 
 const empty = () => ({ name: "", kind: "report" as AutomationKind, instructions: "", schedule: { kind: "daily", localTime: "09:00" } as AutomationSchedule, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Etc/UTC" });
 
-export function AutomationsSettings({ getAccessToken }: { getAccessToken: () => Promise<string | null> }) {
+export function AutomationsSettings({ hasSession }: { hasSession: () => Promise<boolean> }) {
   const [items, setItems] = useState<Automation[]>([]);
   const [draft, setDraft] = useState(empty);
   const [editing, setEditing] = useState<string | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "saving" | "error">("loading");
   const request = useCallback(async (path = "", init?: RequestInit) => {
-    const token = await getAccessToken();
-    if (!token) throw new Error("Your session expired.");
-    const response = await fetch(`/api/automations${path}`, { ...init, headers: { authorization: `Bearer ${token}`, ...(init?.body ? { "content-type": "application/json" } : {}) } });
+    if (!(await hasSession())) throw new Error("Your session expired.");
+    const response = await authFetch(`/api/automations${path}`, { ...init, headers: { ...(init?.body ? { "content-type": "application/json" } : {}) } });
     if (!response.ok) throw new Error(((await response.json().catch(() => ({}))) as { error?: string }).error ?? "Automation request failed.");
     return response.status === 204 ? null : response.json();
-  }, [getAccessToken]);
+  }, [hasSession]);
   const load = useCallback(() => {
     void request().then((body) => { setItems((body as { automations: Automation[] }).automations); setStatus("ready"); }).catch(() => setStatus("error"));
   }, [request]);

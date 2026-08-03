@@ -4,9 +4,7 @@ import { authorizeOwnerSession } from "../../../auth/owner-auth-service";
 import { searchChatConversations } from "../../../server/chat/chat-history-store";
 
 async function ownerFor(request: Request) {
-  const authorization = request.headers.get("authorization");
-  if (!authorization?.startsWith("Bearer ")) return null;
-  return authorizeOwnerSession(authorization.slice(7));
+  return authorizeOwnerSession(request);
 }
 
 export async function GET(request: Request) {

@@ -1,15 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import {
-  getCurrentAccessToken,
-  getCurrentUser,
-  requestMagicLink,
-  signInWithPassword,
-  signUpWithPassword,
-  signOut,
-  subscribeToAuth,
-} from "./auth-service";
+import { getCurrentUser, signInWithPassword, signOut } from "./auth-service";
 import type { AuthState } from "./types";
 
 const INITIAL_STATE: AuthState = { status: "loading", user: null, error: null };
@@ -17,95 +9,33 @@ const INITIAL_STATE: AuthState = { status: "loading", user: null, error: null };
 export function useAuthSession() {
   const [state, setState] = useState<AuthState>(INITIAL_STATE);
 
+  const refresh = useCallback(async () => {
+    try {
+      const user = await getCurrentUser();
+      setState(user ? { status: "authenticated", user, error: null } : { status: "anonymous", user: null, error: null });
+    } catch (error: unknown) {
+      setState({ status: "error", user: null, error: error instanceof Error ? error.message : "Authentication is unavailable." });
+    }
+  }, []);
+
   useEffect(() => {
-    let active = true;
+    const timer = window.setTimeout(() => void refresh(), 0);
+    return () => window.clearTimeout(timer);
+  }, [refresh]);
 
-    getCurrentUser()
-      .then((user) => {
-        if (!active) return;
-        setState(
-          user
-            ? { status: "authenticated", user, error: null }
-            : { status: "anonymous", user: null, error: null },
-        );
-      })
-      .catch((error: unknown) => {
-        if (!active) return;
-        setState({
-          status: "error",
-          user: null,
-          error: error instanceof Error ? error.message : "Authentication is unavailable.",
-        });
-      });
-
-    let unsubscribe = () => {};
-    try {
-      unsubscribe = subscribeToAuth((user) => {
-        if (!active) return;
-        setState(
-          user
-            ? { status: "authenticated", user, error: null }
-            : { status: "anonymous", user: null, error: null },
-        );
-      });
-    } catch (error: unknown) {
-      queueMicrotask(() => {
-        if (!active) return;
-        setState({
-          status: "error",
-          user: null,
-          error: error instanceof Error ? error.message : "Authentication is unavailable.",
-        });
-      });
-    }
-
-    return () => {
-      active = false;
-      unsubscribe();
-    };
-  }, []);
-
-  const sendMagicLink = useCallback((email: string) => requestMagicLink(email), []);
-  const passwordSignIn = useCallback(
-    (email: string, password: string) => signInWithPassword(email, password),
-    [],
-  );
-  const passwordSignUp = useCallback(
-    (email: string, password: string) => signUpWithPassword(email, password),
-    [],
-  );
+  const passwordSignIn = useCallback((email: string, password: string, callbackUrl?: string) => signInWithPassword(email, password, callbackUrl), []);
   const endSession = useCallback(async () => {
-    try {
-      await signOut();
-    } catch (error: unknown) {
-      setState({
-        status: "error",
-        user: null,
-        error: error instanceof Error ? error.message : "Could not sign out.",
-      });
-    }
-  }, []);
-
-  const invalidateSession = useCallback(async () => {
     try {
       await signOut();
       setState({ status: "anonymous", user: null, error: null });
     } catch (error: unknown) {
-      setState({
-        status: "error",
-        user: null,
-        error: error instanceof Error ? error.message : "Could not sign out.",
-      });
+      setState({ status: "error", user: null, error: error instanceof Error ? error.message : "Could not sign out." });
     }
   }, []);
 
-  return {
-    state,
-    sendMagicLink,
-    signInWithPassword: passwordSignIn,
-    signUpWithPassword: passwordSignUp,
-    signOut: endSession,
-    invalidateSession,
-    getAccessToken: getCurrentAccessToken,
-  };
+  // API requests authenticate with the HttpOnly Auth.js cookie. This helper
+  // only lets UI flows fail early when the session has disappeared.
+  const hasSession = useCallback(async () => Boolean(await getCurrentUser()), []);
+
+  return { state, signInWithPassword: passwordSignIn, signOut: endSession, invalidateSession: endSession, refresh, hasSession };
 }

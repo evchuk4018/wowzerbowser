@@ -12,9 +12,7 @@ export async function GET(
   request: Request,
   context: { params: Promise<{ artifactId: string }> | { artifactId: string } },
 ) {
-  const authorization = request.headers.get("authorization");
-  if (!authorization?.startsWith("Bearer ")) return unauthorizedResponse();
-  const user = await authorizeOwnerSession(authorization.slice(7));
+  const user = await authorizeOwnerSession(request);
   if (!user) return unauthorizedResponse();
 
   const params = await context.params;

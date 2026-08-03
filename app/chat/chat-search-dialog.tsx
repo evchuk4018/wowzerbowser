@@ -5,7 +5,7 @@ import type { ChatSearchResult } from "../../lib/chat-search";
 import { fetchChatSearch } from "./chat-search-service";
 
 export type ChatSearchDialogProps = {
-  getAccessToken: () => Promise<string | null>;
+  hasSession: () => Promise<boolean>;
   onClose: () => void;
   onSelectConversation: (conversationId: string) => void;
 };
@@ -20,7 +20,7 @@ function ConversationIcon() {
   return <span className="search-result-icon" aria-hidden="true"><span /></span>;
 }
 
-export function ChatSearchDialog({ getAccessToken, onClose, onSelectConversation }: ChatSearchDialogProps) {
+export function ChatSearchDialog({ hasSession, onClose, onSelectConversation }: ChatSearchDialogProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ChatSearchResult[]>([]);
   const [loading, setLoading] = useState(true);
@@ -56,10 +56,10 @@ export function ChatSearchDialog({ getAccessToken, onClose, onSelectConversation
     const timer = window.setTimeout(() => {
       setLoading(true);
       setError(null);
-      void getAccessToken()
-        .then((token) => {
-          if (!token) throw new Error("Your session expired. Sign in and try again.");
-          return fetchChatSearch(query, token, controller.signal);
+      void hasSession()
+        .then((sessionReady) => {
+          if (!sessionReady) throw new Error("Your session expired. Sign in and try again.");
+          return fetchChatSearch(query, controller.signal);
         })
         .then((nextResults) => {
           if (!controller.signal.aborted) setResults(nextResults);
@@ -77,7 +77,7 @@ export function ChatSearchDialog({ getAccessToken, onClose, onSelectConversation
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [getAccessToken, query]);
+  }, [hasSession, query]);
 
   return (
     <div

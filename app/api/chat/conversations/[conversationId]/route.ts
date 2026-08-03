@@ -10,9 +10,7 @@ import { deleteChatConversation } from "../../../../server/chat/chat-conversatio
 const idPattern = /^[a-zA-Z0-9_-]{1,128}$/;
 
 async function ownerFor(request: Request) {
-  const authorization = request.headers.get("authorization");
-  if (!authorization?.startsWith("Bearer ")) return null;
-  return authorizeOwnerSession(authorization.slice(7));
+  return authorizeOwnerSession(request);
 }
 
 export async function GET(request: Request, context: { params: Promise<{ conversationId: string }> }) {

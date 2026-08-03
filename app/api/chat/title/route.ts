@@ -4,11 +4,7 @@ import { OpenRouterError } from "../../../providers/openrouter/openrouter-catalo
 import { generateAndPersistChatTitle } from "../../../server/chat/chat-title-service";
 
 export async function POST(request: Request) {
-  const authorization = request.headers.get("authorization");
-  if (!authorization?.startsWith("Bearer ")) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-  }
-  const owner = await authorizeOwnerSession(authorization.slice(7));
+  const owner = await authorizeOwnerSession(request);
   if (!owner) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   try {
     const body = await request.json() as { firstTurn?: unknown; conversationId?: unknown };

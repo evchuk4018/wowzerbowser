@@ -6,8 +6,7 @@ import { ChatModelAuthorizationError, composerChatModels, discoverChatModels, en
 import { OpenRouterError } from "../../../providers/openrouter/openrouter-catalog-adapter";
 
 async function ownerFor(request: Request) {
-  const authorization = request.headers.get("authorization");
-  return authorization?.startsWith("Bearer ") ? authorizeOwnerSession(authorization.slice(7)) : null;
+  return authorizeOwnerSession(request);
 }
 export async function GET(request: Request) {
   const owner = await ownerFor(request);

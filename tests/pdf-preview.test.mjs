@@ -70,7 +70,7 @@ test("wires the PDF preview through the workspace and responsive shell", async (
     readFile(new URL("../app/styles/pdf-preview.css", import.meta.url), "utf8"),
   ]);
 
-  assert.match(workspace, /fetchChatArtifact\(artifact, accessToken\)/);
+  assert.match(workspace, /fetchChatArtifact\(artifact\)/);
   assert.match(workspace, /URL\.createObjectURL\(blob\)/);
   assert.match(workspace, /URL\.revokeObjectURL/);
   assert.match(workspace, /onOpenArtifact=\{openPdfPreview\}/);

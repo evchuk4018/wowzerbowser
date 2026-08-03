@@ -58,17 +58,17 @@ const completedSnapshot = {
   updatedAt: "",
 };
 
-test("retries when a token is temporarily unavailable", async () => {
+test("retries when the session is temporarily unavailable", async () => {
   const controller = new AbortController();
-  let tokenReads = 0;
+  let sessionChecks = 0;
   const changes = [];
   const actions = [];
   await recoverPersistedJob({
     candidate,
     signal: controller.signal,
-    getAccessToken: async () => {
-      tokenReads += 1;
-      return tokenReads === 1 ? null : "token";
+    hasSession: async () => {
+      sessionChecks += 1;
+      return sessionChecks !== 1;
     },
     dispatch: (action) => actions.push(action),
     onConversationStreamingChange: (_id, streaming) => changes.push(streaming),
@@ -76,7 +76,7 @@ test("retries when a token is temporarily unavailable", async () => {
     waitForRetry: async () => true,
     fetchJob: async () => completedSnapshot,
   });
-  assert.equal(tokenReads, 2);
+  assert.equal(sessionChecks, 2);
   assert.deepEqual(changes, [true, false]);
   assert.equal(actions[0].type, "MARK_MESSAGE_COMPLETE");
 });
@@ -88,7 +88,7 @@ test("retries a transient job snapshot failure instead of leaving streaming stuc
   await recoverPersistedJob({
     candidate,
     signal: controller.signal,
-    getAccessToken: async () => "token",
+    hasSession: async () => true,
     dispatch: () => undefined,
     onConversationStreamingChange: (_id, streaming) => changes.push(streaming),
     resumeJob: async () => undefined,

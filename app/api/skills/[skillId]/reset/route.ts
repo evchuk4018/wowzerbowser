@@ -6,10 +6,7 @@ import { skillRouteError } from "../../skill-route-response";
 type RouteContext = { params: Promise<{ skillId: string }> | { skillId: string } };
 
 export async function POST(request: Request, context: RouteContext) {
-  const authorization = request.headers.get("authorization");
-  const owner = authorization?.startsWith("Bearer ")
-    ? await authorizeOwnerSession(authorization.slice(7))
-    : null;
+  const owner = await authorizeOwnerSession(request);
   if (!owner) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   try {
     const { skillId } = await context.params;

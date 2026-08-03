@@ -6,6 +6,7 @@ import {
   CHAT_IMAGE_MAX_COUNT,
   type ChatImageAttachment,
 } from "../../lib/chat-protocol";
+import { authFetch } from "../auth/auth-fetch";
 
 export const ACCEPTED_CHAT_IMAGE_TYPES = CHAT_IMAGE_CONTENT_TYPES;
 export const MAX_CHAT_IMAGES_PER_TURN = CHAT_IMAGE_MAX_COUNT;
@@ -44,7 +45,6 @@ export async function uploadChatImages(input: {
   userMessageId: string;
   jobId: string;
   images: readonly Pick<PendingChatImage, "id" | "file">[];
-  accessToken: string | Promise<string>;
   signal: AbortSignal;
 }): Promise<UploadedChatImage[]> {
   const formData = new FormData();
@@ -55,9 +55,8 @@ export async function uploadChatImages(input: {
     formData.append("imageIds", image.id);
     formData.append("images", image.file, image.file.name);
   }
-  const response = await fetch("/api/chat/images", {
+  const response = await authFetch("/api/chat/images", {
     method: "POST",
-    headers: { authorization: `Bearer ${await input.accessToken}` },
     body: formData,
     signal: input.signal,
   });

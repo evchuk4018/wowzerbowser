@@ -401,9 +401,8 @@ function validSummary(value: unknown): ChatConversationSummary | null {
 }
 
 export async function loadConversationIndex(
-  accessToken: string,
 ): Promise<LoadedConversationIndex> {
-  const raw = await fetchChatConversations(accessToken);
+  const raw = await fetchChatConversations();
   const summaries = Array.isArray(raw)
     ? raw
         .map(validSummary)
@@ -423,10 +422,9 @@ export async function loadConversationIndex(
 
 export async function loadConversation(
   conversationId: string,
-  accessToken: string,
 ): Promise<ChatConversation | null> {
   return normalizeConversation(
-    await fetchChatConversation(conversationId, accessToken),
+    await fetchChatConversation(conversationId),
     { freezeRunningActivities: false },
   );
 }
@@ -434,11 +432,10 @@ export async function loadConversation(
 /** Save server-owned conversation metadata. Transcript writes happen in jobs. */
 export async function saveConversation(
   conversation: Conversation,
-  accessToken: string,
 ): Promise<void> {
   if (!conversation || typeof conversation.id !== "string" || !conversation.id) return;
   try {
-    await updateChatConversation(conversation.id, { title: conversation.title }, accessToken);
+    await updateChatConversation(conversation.id, { title: conversation.title });
   } catch {
     // Persistence is best effort at the UI boundary; the local reducer remains authoritative.
   }
@@ -446,30 +443,28 @@ export async function saveConversation(
 
 export async function deleteConversation(
   conversationId: string,
-  accessToken: string,
 ): Promise<void> {
   if (!conversationId) return;
-  await deleteChatConversation(conversationId, accessToken);
+  await deleteChatConversation(conversationId);
 }
 
 export async function saveConversationSelection(
   conversationId: string,
   turnId: string,
   versionId: string,
-  accessToken: string,
 ): Promise<void> {
   if (!conversationId || !turnId || !versionId) return;
   try {
-    await updateChatConversation(conversationId, { turnId, versionId }, accessToken);
+    await updateChatConversation(conversationId, { turnId, versionId });
   } catch {
     // See saveConversation: a transient metadata failure must not break chat UI.
   }
 }
 
 /** Load user preferences while always retaining the canonical system prompt. */
-export async function loadSettings(accessToken: string): Promise<ChatSettings> {
+export async function loadSettings(): Promise<ChatSettings> {
   try {
-    const value = await fetchChatUserPreferences(accessToken);
+    const value = await fetchChatUserPreferences();
     const parsed = parseChatUserPreferences(value) ?? DEFAULT_CHAT_USER_PREFERENCES;
     return {
       ...DEFAULT_CHAT_SETTINGS,
@@ -485,7 +480,7 @@ export async function loadSettings(accessToken: string): Promise<ChatSettings> {
 }
 
 /** Save the remotely supported user preference; systemPrompt is canonical. */
-export async function saveSettings(settings: ChatSettings, accessToken: string): Promise<void> {
+export async function saveSettings(settings: ChatSettings): Promise<void> {
   const userPresence = typeof settings?.userPresence === "string"
     ? settings.userPresence.trim().slice(0, 12_000)
     : "";
@@ -496,7 +491,7 @@ export async function saveSettings(settings: ChatSettings, accessToken: string):
       automationModel: settings?.automationModel,
       automationThinking: settings?.automationThinking ?? false,
       focusedContextEnabled: settings?.focusedContextEnabled ?? false,
-    }, accessToken);
+    });
   } catch {
     // Saving preferences is intentionally nonfatal, matching the existing UI policy.
   }

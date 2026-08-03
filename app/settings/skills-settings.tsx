@@ -10,7 +10,7 @@ import { createSkill, deleteSkill, fetchSkills, resetSkill, updateSkill } from "
 
 const blankDraft = (): SkillMutation => ({ name: "", summary: "", instructions: "" });
 
-export function SkillsSettings({ getAccessToken }: { getAccessToken: () => Promise<string | null> }) {
+export function SkillsSettings({ hasSession }: { hasSession: () => Promise<boolean> }) {
   const [skills, setSkills] = useState<SkillDefinition[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | "new" | null>(null);
@@ -19,17 +19,19 @@ export function SkillsSettings({ getAccessToken }: { getAccessToken: () => Promi
   const [error, setError] = useState("");
   const [confirming, setConfirming] = useState<"delete" | "reset" | null>(null);
 
-  const token = useCallback(async () => {
-    const value = await getAccessToken();
+  const ensureSession = useCallback(async () => {
+    const value = await hasSession();
     if (!value) throw new Error("Sign in to manage skills.");
-    return value;
-  }, [getAccessToken]);
+  }, [hasSession]);
 
-  const reload = useCallback(async () => setSkills(await fetchSkills(await token())), [token]);
+  const reload = useCallback(async () => {
+    await ensureSession();
+    setSkills(await fetchSkills());
+  }, [ensureSession]);
 
   useEffect(() => {
     let active = true;
-    void token().then(fetchSkills).then(
+    void ensureSession().then(fetchSkills).then(
       (values) => {
         if (!active) return;
         setSkills(values);
@@ -42,7 +44,7 @@ export function SkillsSettings({ getAccessToken }: { getAccessToken: () => Promi
       },
     );
     return () => { active = false; };
-  }, [token]);
+  }, [ensureSession]);
 
   function beginCreate() {
     setDraft(blankDraft());
@@ -70,10 +72,10 @@ export function SkillsSettings({ getAccessToken }: { getAccessToken: () => Promi
     setStatus("saving");
     setError("");
     try {
-      const accessToken = await token();
+      await ensureSession();
       const saved = editingId === "new"
-        ? await createSkill(draft, accessToken)
-        : await updateSkill(editingId, draft, accessToken);
+        ? await createSkill(draft)
+        : await updateSkill(editingId, draft);
       await reload();
       setExpandedId(saved.id);
       closeEditor();
@@ -88,7 +90,8 @@ export function SkillsSettings({ getAccessToken }: { getAccessToken: () => Promi
     setStatus("saving");
     setError("");
     try {
-      await resetSkill(skill.id, await token());
+      await ensureSession();
+      await resetSkill(skill.id);
       await reload();
       setConfirming(null);
     } catch (reason) {
@@ -102,7 +105,8 @@ export function SkillsSettings({ getAccessToken }: { getAccessToken: () => Promi
     setStatus("saving");
     setError("");
     try {
-      await deleteSkill(skill.id, await token());
+      await ensureSession();
+      await deleteSkill(skill.id);
       await reload();
       setExpandedId(null);
       setConfirming(null);

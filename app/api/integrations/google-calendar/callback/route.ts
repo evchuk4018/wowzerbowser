@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { authorizeOwnerSession } from "../../../../auth/owner-auth-service";
 import { connectGoogleCalendar } from "../../../../server/calendar/google-calendar-service";
 import {
   exchangeGoogleCalendarCode, GOOGLE_CALENDAR_STATE_COOKIE, verifyGoogleCalendarState,
@@ -16,10 +17,11 @@ export async function GET(request: Request) {
   const cookie = request.headers.get("cookie")?.split(";").map((part) => part.trim())
     .find((part) => part.startsWith(`${GOOGLE_CALENDAR_STATE_COOKIE}=`))?.slice(GOOGLE_CALENDAR_STATE_COOKIE.length + 1);
   const ownerId = verifyGoogleCalendarState(state, cookie ? decodeURIComponent(cookie) : undefined);
+  const owner = await authorizeOwnerSession(request);
   let response: NextResponse;
   try {
     const code = url.searchParams.get("code");
-    if (!ownerId || !code || url.searchParams.has("error")) throw new Error("Invalid Google Calendar authorization response.");
+    if (!ownerId || !owner || owner.id !== ownerId || !code || url.searchParams.has("error")) throw new Error("Invalid Google Calendar authorization response.");
     const token = await exchangeGoogleCalendarCode(code);
     await connectGoogleCalendar(ownerId, token.refreshToken, token.scope);
     response = NextResponse.redirect(destination("connected"));

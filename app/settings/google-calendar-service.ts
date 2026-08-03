@@ -1,23 +1,24 @@
 import type { GoogleCalendarConnection } from "../../lib/google-calendar-protocol";
+import { authFetch } from "../auth/auth-fetch";
 
-async function request<T>(accessToken: string, init?: RequestInit): Promise<T> {
-  const response = await fetch("/api/integrations/google-calendar", {
+async function request<T>(init?: RequestInit): Promise<T> {
+  const response = await authFetch("/api/integrations/google-calendar", {
     ...init,
-    headers: { authorization: `Bearer ${accessToken}`, ...init?.headers },
+    headers: { ...init?.headers },
   });
   const value = await response.json().catch(() => ({})) as T & { error?: string };
   if (!response.ok) throw new Error(value.error ?? "Google Calendar request failed.");
   return value;
 }
 
-export async function fetchGoogleCalendarConnection(accessToken: string): Promise<GoogleCalendarConnection> {
-  return (await request<{ connection: GoogleCalendarConnection }>(accessToken)).connection;
+export async function fetchGoogleCalendarConnection(): Promise<GoogleCalendarConnection> {
+  return (await request<{ connection: GoogleCalendarConnection }>()).connection;
 }
 
-export async function startGoogleCalendarConnection(accessToken: string): Promise<string> {
-  return (await request<{ authorizationUrl: string }>(accessToken, { method: "POST" })).authorizationUrl;
+export async function startGoogleCalendarConnection(): Promise<string> {
+  return (await request<{ authorizationUrl: string }>({ method: "POST" })).authorizationUrl;
 }
 
-export async function disconnectGoogleCalendarConnection(accessToken: string): Promise<void> {
-  await request(accessToken, { method: "DELETE" });
+export async function disconnectGoogleCalendarConnection(): Promise<void> {
+  await request({ method: "DELETE" });
 }

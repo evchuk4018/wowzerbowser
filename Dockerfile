@@ -27,7 +27,12 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/background-worker.mjs ./scripts/background-worker.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/migrate.mjs ./scripts/migrate.mjs
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/owner-auth-cli.mjs ./scripts/owner-auth-cli.mjs
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/bootstrap-owner.mjs ./scripts/bootstrap-owner.mjs
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/reset-owner-password.mjs ./scripts/reset-owner-password.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/database ./database
+COPY --from=builder --chown=nextjs:nodejs /app/app/server/auth/password.mjs ./app/server/auth/password.mjs
+COPY --from=builder --chown=nextjs:nodejs /app/app/server/auth/owner-auth-repository.mjs ./app/server/auth/owner-auth-repository.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/postgres ./node_modules/postgres
 COPY --from=builder /app/docker/app-entrypoint.sh /usr/local/bin/app-entrypoint
 RUN chmod 0555 /usr/local/bin/app-entrypoint

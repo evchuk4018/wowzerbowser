@@ -20,7 +20,7 @@ export type SettingsModalProps = {
   onClose: () => void;
   onSave: (settings: ChatSettings) => void;
   loadUsage?: (range: UsageRange) => Promise<UsageReport>;
-  getAccessToken: () => Promise<string | null>;
+  hasSession: () => Promise<boolean>;
 };
 
 type SettingsSection =
@@ -317,7 +317,7 @@ function PlaceholderSettings({ label }: { label: string }) {
   );
 }
 
-export function SettingsModal({ settings, onClose, onSave, loadUsage, getAccessToken }: SettingsModalProps) {
+export function SettingsModal({ settings, onClose, onSave, loadUsage, hasSession }: SettingsModalProps) {
   const [draft, setDraft] = useState(settings);
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
   const [showIndex, setShowIndex] = useState(true);
@@ -429,20 +429,20 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage, getAccessT
             ) : activeSection === "usage" ? (
               <UsageSettings loadUsage={loadUsage} />
             ) : activeSection === "tools" ? (
-              <ToolsSettings getAccessToken={getAccessToken} />
+              <ToolsSettings hasSession={hasSession} />
             ) : activeSection === "connectors" ? (
-              <ConnectorsSettings getAccessToken={getAccessToken} />
+              <ConnectorsSettings hasSession={hasSession} />
             ) : activeSection === "models" ? (
-              <ModelsSettings getAccessToken={getAccessToken} />
+              <ModelsSettings hasSession={hasSession} />
             ) : activeSection === "memory" ? (
-              <MemorySettings getAccessToken={getAccessToken} />
+              <MemorySettings hasSession={hasSession} />
             ) : activeSection === "skills" ? (
-              <SkillsSettings getAccessToken={getAccessToken} />
+              <SkillsSettings hasSession={hasSession} />
             ) : activeSection === "automations" ? (
-              <AutomationsSettings getAccessToken={getAccessToken} />
+              <AutomationsSettings hasSession={hasSession} />
             ) : activeSection === "safety" ? (
               <ConfigurablesSettings
-                getAccessToken={getAccessToken}
+                hasSession={hasSession}
                 visionModel={draft.visionModel}
                 onVisionModelChange={(visionModel) => setDraft((current) => ({ ...current, visionModel }))}
                 automationModel={draft.automationModel}

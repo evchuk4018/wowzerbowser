@@ -40,8 +40,8 @@ export function normalizeChatModels(values: unknown): ChatModelInfo[] {
   return models.length ? models : DEFAULT_CHAT_MODELS;
 }
 const findModel = (ref: ChatModelRef, models: ChatModelInfo[]) => models.find((item) => chatModelIdentity(item.ref) === chatModelIdentity(ref));
-export type UseChatPreferencesOptions = { activeConversationId: string; getAccessToken: () => Promise<string | null>; initialModelPreferences?: Record<string, ChatModelPreference>; bootstrapComplete?: boolean };
-export function useChatPreferences({ activeConversationId, getAccessToken, initialModelPreferences = {}, bootstrapComplete = false }: UseChatPreferencesOptions): ChatPreferences {
+export type UseChatPreferencesOptions = { activeConversationId: string; hasSession: () => Promise<boolean>; initialModelPreferences?: Record<string, ChatModelPreference>; bootstrapComplete?: boolean };
+export function useChatPreferences({ activeConversationId, hasSession, initialModelPreferences = {}, bootstrapComplete = false }: UseChatPreferencesOptions): ChatPreferences {
   const [models, setModels] = useState<ChatModelInfo[]>(DEFAULT_CHAT_MODELS);
   const [model, setModel] = useState(DEFAULT_CHAT_MODEL_PREFERENCE.model);
   const [thinking, setThinking] = useState(DEFAULT_CHAT_MODEL_PREFERENCE.thinking);
@@ -50,10 +50,10 @@ export function useChatPreferences({ activeConversationId, getAccessToken, initi
   const [modelPreferencesLoaded, setModelPreferencesLoaded] = useState(bootstrapComplete);
   useEffect(() => {
     let active = true;
-    const load = () => void getAccessToken().then((token) => token ? fetchChatModels(token) : []).then((items) => { if (active) setModels(normalizeChatModels(items)); }).catch(() => undefined);
+    const load = () => void hasSession().then((sessionReady) => sessionReady ? fetchChatModels() : []).then((items) => { if (active) setModels(normalizeChatModels(items)); }).catch(() => undefined);
     load(); window.addEventListener("chat-models-changed", load);
     return () => { active = false; window.removeEventListener("chat-models-changed", load); };
-  }, [getAccessToken]);
+  }, [hasSession]);
   useEffect(() => {
     if (bootstrapComplete || Object.keys(initialModelPreferences).length) {
       // Bootstrap is the authoritative external preference snapshot.
@@ -79,7 +79,7 @@ export function useChatPreferences({ activeConversationId, getAccessToken, initi
     if (!activeConversationId) return;
     const normalized = normalizeModelPreference(preference, findModel(preference.model, models) ?? DEFAULT_CHAT_MODELS[0]);
     setModelPreferences((current) => ({ ...current, [activeConversationId]: normalized }));
-    void getAccessToken().then((token) => token ? saveChatModelPreference(activeConversationId, normalized, token) : undefined).catch(() => undefined);
-  }, [activeConversationId, getAccessToken, models]);
+    void hasSession().then((sessionReady) => sessionReady ? saveChatModelPreference(activeConversationId, normalized) : undefined).catch(() => undefined);
+  }, [activeConversationId, hasSession, models]);
   return { models, model, setModel, thinking, setThinking, effort, setEffort, selectedModel, supportedEfforts, canThink, effectiveThinking, effectiveEffort, modelPreferencesLoaded, modelPreferences, persistModelPreference, onPreferenceChange: persistModelPreference };
 }

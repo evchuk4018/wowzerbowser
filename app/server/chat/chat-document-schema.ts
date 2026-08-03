@@ -1,7 +1,7 @@
 import "server-only";
 
 import { CHAT_DOCUMENT_BUCKET, DOCX_CONTENT_TYPE, ChatDocumentError } from "../../../lib/chat-document";
-import { getServerClient } from "../../auth/supabase-server-adapter";
+import { getServerClient } from "../storage/supabase-storage-adapter";
 import { assertChatDocumentTables } from "./chat-document-store";
 
 const SCHEMA_CACHE_MS = 5 * 60 * 1_000;

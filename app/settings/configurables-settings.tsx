@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { authFetch } from "../auth/auth-fetch";
 import { DEFAULT_AUTOMATION_MODEL } from "../../lib/automation-protocol";
 import { chatModelIdentity, type ChatModelInfo, type ChatModelRef } from "../../lib/chat-protocol";
 
-export function ConfigurablesSettings({ getAccessToken, visionModel, onVisionModelChange, automationModel, onAutomationModelChange, automationThinking, onAutomationThinkingChange }: {
-  getAccessToken: () => Promise<string | null>;
+export function ConfigurablesSettings({ hasSession, visionModel, onVisionModelChange, automationModel, onAutomationModelChange, automationThinking, onAutomationThinkingChange }: {
+  hasSession: () => Promise<boolean>;
   visionModel: ChatModelRef | null;
   onVisionModelChange: (model: ChatModelRef | null) => void;
   automationModel: ChatModelRef;
@@ -18,9 +19,9 @@ export function ConfigurablesSettings({ getAccessToken, visionModel, onVisionMod
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   useEffect(() => {
     let active = true;
-    void getAccessToken().then(async (token) => {
-      const headers = { authorization: `Bearer ${token}` };
-      const [vision, chat] = await Promise.all([fetch("/api/chat/models?scope=vision", { headers }), fetch("/api/chat/models", { headers })]);
+    void hasSession().then(async (sessionReady) => {
+      if (!sessionReady) throw new Error("Your session expired.");
+      const [vision, chat] = await Promise.all([authFetch("/api/chat/models?scope=vision"), authFetch("/api/chat/models")]);
       if (!vision.ok || !chat.ok) throw new Error("Models are unavailable.");
       return Promise.all([vision.json(), chat.json()]) as Promise<[{ models?: ChatModelInfo[] }, { models?: ChatModelInfo[] }]>;
     }).then(([vision, chat]) => {
@@ -30,7 +31,7 @@ export function ConfigurablesSettings({ getAccessToken, visionModel, onVisionMod
       setStatus("ready");
     }).catch(() => { if (active) setStatus("error"); });
     return () => { active = false; };
-  }, [getAccessToken]);
+  }, [hasSession]);
 
   return <div className="configurables-settings">
     <div className="settings-panel-heading"><h3>Configurables</h3><p>Choose models used for vision and recurring automations.</p></div>

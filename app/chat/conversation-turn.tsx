@@ -16,10 +16,10 @@ import { ConnectorApprovalModal } from "../settings/connector-approval-modal";
 
 export type ThinkingTiming = { startedAt: number; now: number };
 
-function UserImage({ image, conversationId, getAccessToken }: {
+function UserImage({ image, conversationId, hasSession }: {
   image: ChatImageAttachment;
   conversationId: string;
-  getAccessToken: () => Promise<string | null>;
+  hasSession: () => Promise<boolean>;
 }) {
   const [preview, setPreview] = useState<{ status: "loading" | "loaded" | "error"; url?: string }>({ status: "loading" });
   const [retryKey, setRetryKey] = useState(0);
@@ -30,8 +30,8 @@ function UserImage({ image, conversationId, getAccessToken }: {
       imageId: image.id,
       conversationId,
       signal: controller.signal,
-      getAccessToken,
-      fetchImage: fetchChatImage,
+      hasSession,
+      fetchImage: (imageId, conversationId, signal) => fetchChatImage(imageId, conversationId, signal),
     })
       .then((blob) => {
         if (controller.signal.aborted) return;
@@ -48,7 +48,7 @@ function UserImage({ image, conversationId, getAccessToken }: {
       controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [conversationId, getAccessToken, image.id, retryKey]);
+  }, [conversationId, hasSession, image.id, retryKey]);
   return (
     <div className="message-image-attachment">
       <div className="message-image-preview">
@@ -101,7 +101,7 @@ export type ConversationTurnProps = {
   waitingByMessage: Record<string, boolean>;
   thinkingByMessage: Record<string, ThinkingTiming>;
   copiedMessageId: string | null;
-  getAccessToken: () => Promise<string | null>;
+  hasSession: () => Promise<boolean>;
   onOpenActions: (turnId: string) => void;
   onCloseActions: () => void;
   onStartLongPress: (turnId: string, pointerType: string) => void;
@@ -123,7 +123,7 @@ function ConversationTurnInner({
   waitingByMessage,
   thinkingByMessage,
   copiedMessageId,
-  getAccessToken,
+  hasSession,
   onOpenActions,
   onCloseActions,
   onStartLongPress,
@@ -164,7 +164,7 @@ function ConversationTurnInner({
             {userMessage.attachments?.length ? (
               <div className="message-image-attachments">
                 {userMessage.attachments.map((image) => (
-                  <UserImage key={image.id} image={image} conversationId={conversationId} getAccessToken={getAccessToken} />
+                  <UserImage key={image.id} image={image} conversationId={conversationId} hasSession={hasSession} />
                 ))}
               </div>
             ) : null}
@@ -199,7 +199,7 @@ function ConversationTurnInner({
             artifacts={assistantMessage.artifacts ?? []}
             annotations={assistantMessage.annotations}
             sources={assistantMessage.sources}
-            getAccessToken={getAccessToken}
+            hasSession={hasSession}
             onOpenArtifact={onOpenArtifact}
             streaming={assistantMessage.status === "streaming"}
           />
@@ -235,7 +235,7 @@ function ConversationTurnInner({
             {assistantMessage.connectorApproval && (
               <ConnectorApprovalModal
                 approval={assistantMessage.connectorApproval}
-                getAccessToken={getAccessToken}
+                hasSession={hasSession}
               />
             )}
           </>
@@ -314,7 +314,7 @@ function areConversationTurnPropsEqual(previous: ConversationTurnProps, next: Co
     previous.conversationId !== next.conversationId
     || previous.actionsOpen !== next.actionsOpen
     || previous.isStreamingConversation !== next.isStreamingConversation
-    || previous.getAccessToken !== next.getAccessToken
+    || previous.hasSession !== next.hasSession
     || previous.onOpenArtifact !== next.onOpenArtifact
     || previous.turn.id !== next.turn.id
     || previous.turn.activeVersion !== next.turn.activeVersion

@@ -86,31 +86,38 @@ HDD mount is present before any application container is started.
 
 ## Authentication
 
-The app uses Supabase email magic-link authentication with a password fallback
-when magic-link delivery is rate-limited. Anonymous visitors see an email form;
-the browser keeps the resulting Supabase session refreshed. Only
-`APP_OWNER_EMAIL` is authorized to access the app.
+The app uses Auth.js Credentials authentication for exactly one owner. There is
+no signup, magic-link flow, or browser Supabase Auth client. Auth.js stores the
+encrypted session in an HttpOnly cookie, while the owner email and Node scrypt
+password hash live in local PostgreSQL. Supabase is retained only as the private
+object-storage adapter until issue #65 is complete.
 
 Copy `.env.example` to an ignored `.env` and provide these settings before
 starting the app:
 
 ```bash
-NEXT_PUBLIC_SUPABASE_URL=your-project-url
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 SUPABASE_URL=your-project-url
 SUPABASE_SECRET_KEY=your-server-secret-key
 APP_OWNER_EMAIL=the-only-email-allowed-to-sign-in
-NEXT_PUBLIC_SITE_URL=https://wowzerbowser.vercel.app
+APP_OWNER_ID=stable-owner-uuid
+AUTH_SECRET=at-least-32-random-characters
+NEXT_PUBLIC_SITE_URL=https://homelab.tail861ffd.ts.net
 ```
 
-Add `https://wowzerbowser.vercel.app` to the allowed redirect URLs in the
-Supabase Auth dashboard. For local testing, set `NEXT_PUBLIC_SITE_URL` to
-`http://localhost:3000` and add that URL to the dashboard as well. Keep
-`SUPABASE_SECRET_KEY` server-only. Provider SDK access stays in the browser and
-server Supabase adapters; UI components call the domain-facing auth service and
-hook instead. Password account creation uses Supabase browser signup and
-requires email confirmation to be disabled in the Supabase Auth settings so the
-new account receives a session immediately without email verification.
+Keep `AUTH_SECRET`, `APP_OWNER_ID`, and `SUPABASE_SECRET_KEY` server-only. On a
+new installation, create the one owner with the private CLI after migrations:
+
+```bash
+node scripts/bootstrap-owner.mjs --env-file /srv/storage/wowzerbowser/deployment.env
+```
+
+To rotate the password and invalidate every existing session, use:
+
+```bash
+node scripts/reset-owner-password.mjs --env-file /srv/storage/wowzerbowser/deployment.env
+```
+
+For local testing, set `NEXT_PUBLIC_SITE_URL` to `http://localhost:3000`.
 
 ## Google Calendar
 

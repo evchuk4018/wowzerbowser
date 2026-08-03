@@ -9,7 +9,7 @@ import {
   ChatImageError,
   validateChatImageBytes,
 } from "../../../lib/chat-image";
-import { getServerClient } from "../../auth/supabase-server-adapter";
+import { getServerClient } from "../storage/supabase-storage-adapter";
 import { databaseOwnerId, isoTimestamp, jsonb, query } from "../database/database";
 
 const ID_PATTERN = /^[a-zA-Z0-9_-]{1,128}$/;

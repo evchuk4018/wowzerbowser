@@ -1,6 +1,6 @@
 import "server-only";
 import { CHAT_DOCUMENT_BUCKET, DOCX_CONTENT_TYPE, ChatDocumentError, PDF_PAGE_EXTRACTION_METHODS, type ChatDocumentAttachment, type ChatDocumentPage, type ChatDocumentPageFailure } from "../../../lib/chat-document";
-import { getServerClient } from "../../auth/supabase-server-adapter";
+import { getServerClient } from "../storage/supabase-storage-adapter";
 import { databaseOwnerId, jsonb, query } from "../database/database";
 import { DOCUMENT_INGESTION_STAGES, type DocumentIngestionTiming } from "./document-ingestion-timing";
 import { withChatPersistenceRetry } from "./chat-persistence-retry";
@@ -31,7 +31,7 @@ function storedPageMethod(value: unknown, text: unknown): ChatDocumentPage["extr
 }
 
 function configuredSupabaseOrigin(): string | null {
-  const configuredUrl = process.env.SUPABASE_URL?.trim() || process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const configuredUrl = process.env.SUPABASE_URL?.trim();
   if (!configuredUrl) return null;
   try { return new URL(configuredUrl).origin; } catch { return null; }
 }

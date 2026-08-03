@@ -3,10 +3,7 @@ import { authorizeOwnerSession } from "../../auth/owner-auth-service";
 import { getMemoryView } from "../../server/memory/memory-service";
 
 async function ownerFor(request: Request) {
-  const authorization = request.headers.get("authorization");
-  return authorization?.startsWith("Bearer ")
-    ? authorizeOwnerSession(authorization.slice(7))
-    : null;
+  return authorizeOwnerSession(request);
 }
 
 export async function GET(request: Request) {

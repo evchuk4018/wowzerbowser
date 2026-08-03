@@ -14,7 +14,6 @@ export type FetchPersistedJob = (
   conversationId: string,
   jobId: string,
   after: number,
-  accessToken: string,
   signal?: AbortSignal,
 ) => Promise<ChatJobResumeResponse>;
 
@@ -46,11 +45,11 @@ function terminalAction(candidate: PersistedJobCandidate, snapshot: ChatJobResum
 export type RecoverPersistedJobOptions = {
   candidate: PersistedJobCandidate;
   signal: AbortSignal;
-  getAccessToken: () => Promise<string | null>;
+  hasSession: () => Promise<boolean>;
   dispatch: (action: ConversationAction) => void;
   onConversationStreamingChange?: (conversationId: string, streaming: boolean) => void;
   fetchJob?: FetchPersistedJob;
-  resumeJob?: (conversationId: string, jobId: string, accessToken: string) => Promise<void>;
+  resumeJob?: (conversationId: string, jobId: string) => Promise<void>;
   waitForRetry?: (signal: AbortSignal, attempt: number) => Promise<boolean>;
 };
 
@@ -58,7 +57,7 @@ export type RecoverPersistedJobOptions = {
 export async function recoverPersistedJob({
   candidate,
   signal,
-  getAccessToken,
+  hasSession,
   dispatch,
   onConversationStreamingChange,
   fetchJob = fetchChatJob,
@@ -71,21 +70,21 @@ export async function recoverPersistedJob({
   let currentMessage = candidate.message;
   let retryAttempt = 0;
   while (!signal.aborted) {
-    let accessToken: string | null = null;
-    try { accessToken = await getAccessToken(); } catch { /* retry below */ }
-    if (!accessToken) {
+    let sessionReady = false;
+    try { sessionReady = await hasSession(); } catch { /* retry below */ }
+    if (!sessionReady) {
       if (!(await waitForRetry(signal, retryAttempt++))) return;
       continue;
     }
     try {
-      await resumeJob(candidate.conversationId, candidate.message.jobId, accessToken);
+      await resumeJob(candidate.conversationId, candidate.message.jobId);
     } catch {
       if (!(await waitForRetry(signal, retryAttempt++))) return;
       continue;
     }
     let snapshot: ChatJobResumeResponse;
     try {
-      snapshot = await fetchJob(candidate.conversationId, candidate.message.jobId, after, accessToken, signal);
+      snapshot = await fetchJob(candidate.conversationId, candidate.message.jobId, after, signal);
     } catch {
       if (!(await waitForRetry(signal, retryAttempt++))) return;
       continue;

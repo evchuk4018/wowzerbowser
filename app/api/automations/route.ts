@@ -3,8 +3,7 @@ import { authorizeOwnerSession } from "../../auth/owner-auth-service";
 import { createAutomation, listAutomations } from "../../server/automations/automation-service";
 
 async function owner(request: Request) {
-  const header = request.headers.get("authorization");
-  return header?.startsWith("Bearer ") ? authorizeOwnerSession(header.slice(7)) : null;
+  return authorizeOwnerSession(request);
 }
 
 export async function GET(request: Request) {

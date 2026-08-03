@@ -1,7 +1,7 @@
 import { after, NextResponse } from "next/server";
 import { authorizeOwnerSession } from "../../../../auth/owner-auth-service";
 import { CHAT_DOCUMENT_BUCKET, ChatDocumentError, DOCUMENT_CONTENT_TYPES, MAX_PDF_BYTES } from "../../../../../lib/chat-document";
-import { getServerClient } from "../../../../auth/supabase-server-adapter";
+import { getServerClient } from "../../../../server/storage/supabase-storage-adapter";
 import { documentStoragePath } from "../../../../server/chat/chat-document-store";
 import { ingestDocx, ingestPdf } from "../../../../server/chat/chat-document-service";
 import { cleanupEmptyChatConversation } from "../../../../server/chat/chat-conversation-service";
@@ -50,7 +50,7 @@ function publicFailureMessage(stage: string, status?: number) {
 export function createFinalizeHandler(overrides: Partial<FinalizeDependencies> = {}) {
  const deps: FinalizeDependencies = { authorizeOwnerSession, getServerClient, ingestPdf, ingestDocx, cleanupEmptyChatConversation, ...overrides };
  return async (request: Request) => {
- const auth=request.headers.get("authorization"); const owner=auth?.startsWith("Bearer ")?await deps.authorizeOwnerSession(auth.slice(7)):null; if(!owner)return NextResponse.json({error:"Unauthorized."},{status:401});
+ const owner=await deps.authorizeOwnerSession(request); if(!owner)return NextResponse.json({error:"Unauthorized."},{status:401});
  const body=await request.json().catch(()=>null) as Record<string,unknown>|null; if(!body||typeof body.conversationId!=="string"||typeof body.documentId!=="string"||typeof body.userMessageId!=="string"||typeof body.jobId!=="string"||typeof body.filename!=="string"||!DOCUMENT_CONTENT_TYPES.includes(body.contentType as never))return NextResponse.json({error:"Invalid document metadata."},{status:400});
  const contentType=body.contentType as (typeof DOCUMENT_CONTENT_TYPES)[number];
  const timing = new DocumentIngestionTiming({ documentType: contentType, cacheStatus: "bypass" });

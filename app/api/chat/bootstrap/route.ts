@@ -5,12 +5,7 @@ import { buildChatBootstrap } from "../../../server/chat/chat-bootstrap-service"
 const noStore = { "Cache-Control": "private, no-store" };
 
 export async function GET(request: Request) {
-  const authorization = request.headers.get("authorization");
-  if (!authorization?.startsWith("Bearer ")) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401, headers: noStore });
-  }
-
-  const owner = await authorizeOwnerSession(authorization.slice(7));
+  const owner = await authorizeOwnerSession(request);
   if (!owner) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401, headers: noStore });
   }

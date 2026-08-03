@@ -6,8 +6,7 @@ import {
 } from "../../../server/calendar/google-calendar-oauth";
 
 async function owner(request: Request) {
-  const header = request.headers.get("authorization");
-  return header?.startsWith("Bearer ") ? authorizeOwnerSession(header.slice(7)) : null;
+  return authorizeOwnerSession(request);
 }
 
 export async function GET(request: Request) {

@@ -1,41 +1,59 @@
 import "server-only";
 
-import { findSupabaseUserByEmail, sendSupabaseMagicLink, verifySupabaseAccessToken } from "./supabase-server-adapter";
-import type { AuthUser } from "./types";
+import { getOwnerCredentialsById, ownerIdFromEnvironment } from "../server/auth/owner-auth-repository.mjs";
+import { ownerAuthUser, ownerForSession, normalizedOwnerEmail, type OwnerAuthUser } from "../server/auth/owner-credential-service";
 
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export type AuthUser = OwnerAuthUser;
 
-function ownerEmail(): string {
-  const email = process.env.APP_OWNER_EMAIL?.trim().toLowerCase();
-  if (!email) throw new Error("APP_OWNER_EMAIL is not configured.");
-  return email;
+async function currentAuthSession() {
+  const { auth } = await import("../../auth");
+  return auth();
 }
 
-export async function sendOwnerMagicLink(emailInput: string): Promise<void> {
-  const email = emailInput.trim().toLowerCase();
-  if (!EMAIL_PATTERN.test(email)) throw new Error("Enter a valid email address.");
-
-  // Return normally for non-owner addresses so the endpoint does not disclose the allowlist.
-  if (email !== ownerEmail()) return;
-
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://wowzerbowser.vercel.app";
-  await sendSupabaseMagicLink(email, new URL("/", siteUrl).toString());
+function configuredOrigin(): string | null {
+  const value = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  if (!value) return null;
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
 }
 
-export async function authorizeOwnerSession(accessToken: string): Promise<AuthUser | null> {
-  const user = await verifySupabaseAccessToken(accessToken);
-  return user?.email.toLowerCase() === ownerEmail() ? user : null;
+function sameOriginRequest(request: Request): boolean {
+  if (["GET", "HEAD", "OPTIONS"].includes(request.method.toUpperCase())) return true;
+  const requestOrigin = request.headers.get("origin") ?? request.headers.get("referer");
+  if (!requestOrigin) return false;
+  try {
+    const origin = new URL(requestOrigin).origin;
+    return origin === (configuredOrigin() ?? new URL(request.url).origin);
+  } catch {
+    return false;
+  }
 }
 
-let configuredOwnerPromise: Promise<AuthUser> | null = null;
-
-export function configuredOwner(): Promise<AuthUser> {
-  configuredOwnerPromise ??= findSupabaseUserByEmail(ownerEmail()).then((user) => {
-    if (!user) throw new Error("APP_OWNER_EMAIL does not match a Supabase Auth user.");
-    return user;
-  }).catch((error) => {
-    configuredOwnerPromise = null;
-    throw error;
+export async function getCurrentOwner(): Promise<AuthUser | null> {
+  const session = await currentAuthSession();
+  const user = session?.user;
+  if (!user?.id || !user.email) return null;
+  return ownerForSession({
+    id: user.id,
+    email: normalizedOwnerEmail(user.email),
+    sessionVersion: (session as { sessionVersion?: unknown }).sessionVersion,
   });
-  return configuredOwnerPromise;
+}
+
+export async function authorizeOwnerSession(request: Request): Promise<AuthUser | null> {
+  if (!sameOriginRequest(request)) return null;
+  try {
+    return await getCurrentOwner();
+  } catch {
+    return null;
+  }
+}
+
+export async function configuredOwner(): Promise<AuthUser> {
+  const owner = await getOwnerCredentialsById(ownerIdFromEnvironment());
+  if (!owner) throw new Error("The owner credentials have not been bootstrapped.");
+  return ownerAuthUser(owner);
 }

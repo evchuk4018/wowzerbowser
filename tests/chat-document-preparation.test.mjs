@@ -43,7 +43,6 @@ test("document preparation uploads and finalizes immediately for PDF/DOCX flows"
       userMessageId: "message-1",
       jobId: "job-1",
       document: preparedDocument,
-      accessToken: "access-token",
       signal: new AbortController().signal,
       onStageChange: (stage) => stages.push(stage),
     });
@@ -76,7 +75,6 @@ test("aborting document preparation stops the client request without turning can
       userMessageId: "message-1",
       jobId: "job-1",
       document: preparedDocument,
-      accessToken: "access-token",
       signal: controller.signal,
     });
     controller.abort();

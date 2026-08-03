@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { authFetch } from "../auth/auth-fetch";
 import { DEFAULT_CHAT_MODELS, chatModelIdentity, type ChatModelInfo } from "../../lib/chat-protocol";
 
 type CatalogModel = ChatModelInfo & { enabled: boolean };
@@ -18,7 +19,7 @@ const sorts = [
 const money = (value: number | null) => value === null ? "—" : value === 0 ? "Free" : `$${value.toFixed(value < 0.01 ? 4 : 2)}`;
 const context = (value: number) => value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)}M` : `${Math.round(value / 1000)}K`;
 
-export function ModelsSettings({ getAccessToken }: { getAccessToken: () => Promise<string | null> }) {
+export function ModelsSettings({ hasSession }: { hasSession: () => Promise<boolean> }) {
   const [filters, setFilters] = useState<Record<string, string>>({ sort: "most-popular", enabled: "all" });
   const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
   const [loading, setLoading] = useState(true); const [error, setError] = useState<string | null>(null); const [advanced, setAdvanced] = useState(false);
@@ -28,21 +29,21 @@ export function ModelsSettings({ getAccessToken }: { getAccessToken: () => Promi
       const params = new URLSearchParams({ scope: "catalog" });
       Object.entries(filters).forEach(([key, value]) => { if (value) value.split(",").forEach((item) => params.append(key, item)); });
       setLoading(true);
-      void getAccessToken().then((token) => fetch(`/api/chat/models?${params}`, { headers: { authorization: `Bearer ${token}` }, signal: controller.signal }))
+      void hasSession().then(() => authFetch(`/api/chat/models?${params}`, { signal: controller.signal }))
         .then(async (response) => { if (!response.ok) throw new Error(((await response.json().catch(() => null)) as { error?: string } | null)?.error ?? "Catalog unavailable."); return response.json() as Promise<CatalogResponse>; })
         .then((next) => { if (requestNumber.current === number) { setCatalog(next); setError(null); } })
         .catch((reason) => { if (!controller.signal.aborted && requestNumber.current === number) setError(reason instanceof Error ? reason.message : "Catalog unavailable."); })
         .finally(() => { if (requestNumber.current === number) setLoading(false); });
     }, 250);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [filters, getAccessToken]);
+  }, [filters, hasSession]);
   const update = (key: string, value: string) => setFilters((current) => ({ ...current, [key]: value }));
   const chips = useMemo(() => Object.entries(filters).filter(([key, value]) => value && !["sort", "enabled"].includes(key)), [filters]);
   const toggle = async (model: CatalogModel) => {
     const enabled = !model.enabled;
     setCatalog((current) => current ? { ...current, models: current.models.map((item) => chatModelIdentity(item.ref) === chatModelIdentity(model.ref) ? { ...item, enabled } : item) } : current);
     try {
-      const token = await getAccessToken(); const response = await fetch("/api/chat/models", { method: "PUT", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ ...model.ref, enabled }) });
+      await hasSession(); const response = await authFetch("/api/chat/models", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...model.ref, enabled }) });
       if (!response.ok) throw new Error("Could not save model.");
       window.dispatchEvent(new CustomEvent("chat-models-changed"));
     } catch (reason) {

@@ -67,7 +67,7 @@ export type ChatGenerationOptions = {
   model: ChatModelRef;
   thinking: boolean;
   reasoningEffort: ChatReasoningEffort;
-  getAccessToken: () => Promise<string | null>;
+  hasSession: () => Promise<boolean>;
   dispatch: Dispatch<ConversationAction>;
   /** Clear the composer after a prompt is accepted. */
   onDraftConsumed?: () => void;
@@ -108,7 +108,7 @@ type GenerationInput = {
   model: ChatModelRef;
   thinking: boolean;
   reasoningEffort: ChatReasoningEffort;
-  getAccessToken: () => Promise<string | null>;
+  hasSession: () => Promise<boolean>;
   dispatch: Dispatch<ConversationAction>;
   onDraftConsumed?: () => void;
   onEditingConsumed?: () => void;
@@ -299,8 +299,8 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
       attachmentSubmissionRef.current = true;
       setIsSubmittingAttachments(true);
       try {
-        const accessToken = await input.getAccessToken();
-        if (!accessToken) throw new Error("Your session expired. Please sign in again.");
+        const sessionReady = await input.hasSession();
+        if (!sessionReady) throw new Error("Your session expired. Please sign in again.");
         const prepared = imageContext ? pendingImages.map((image) => image.uploadPromise) : [];
         if (prepared.every((promise): promise is Promise<UploadedChatImage> => Boolean(promise))) {
           uploadedImages = [...preservedAttachments, ...(await Promise.all(prepared))];
@@ -310,7 +310,6 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
             userMessageId,
             jobId: effectiveJobId,
             images: pendingImages,
-            accessToken,
             signal: new AbortController().signal,
           }))];
         }
@@ -326,14 +325,13 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
       attachmentSubmissionRef.current = true;
       setIsSubmittingAttachments(true);
       try {
-        const accessToken = await input.getAccessToken();
-        if (!accessToken) throw new Error("Your session expired. Please sign in again.");
+        const sessionReady = await input.hasSession();
+        if (!sessionReady) throw new Error("Your session expired. Please sign in again.");
         const prepared = pendingDocuments.map((document) => document.preparationPromise ?? uploadChatDocument({
           conversationId: conversation.id,
           userMessageId,
           jobId: effectiveJobId,
           document,
-          accessToken,
           signal: document.abortController?.signal ?? new AbortController().signal,
         }));
         uploadedDocuments = await Promise.all(prepared);
@@ -447,8 +445,8 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
       flushPendingEvents();
     };
     try {
-      const accessToken = await input.getAccessToken();
-      if (!accessToken) throw new Error("Your session expired. Please sign in again.");
+      const sessionReady = await input.hasSession();
+      if (!sessionReady) throw new Error("Your session expired. Please sign in again.");
       const shouldGenerateTitle = activeTurns.length === 0;
       if (
         controller.signal.aborted ||
@@ -472,7 +470,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         documents: uploadedDocuments,
       });
       let submissionAccepted = false;
-      for await (const event of streamChatResponse(request, accessToken, controller.signal)) {
+      for await (const event of streamChatResponse(request, controller.signal)) {
         if (!submissionAccepted) {
           submissionAccepted = true;
           pendingDocuments.forEach((document) => { document.consumed = true; });
@@ -497,7 +495,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
       }
       flushPendingEventsNow();
       if (shouldGenerateTitle && !controller.signal.aborted) {
-        void generateChatTitle(content, conversation.id, accessToken)
+        void generateChatTitle(content, conversation.id)
           .then((title) => inputRefDispatch(input, { type: "UPDATE_TITLE", conversationId: conversation.id, title }))
           .catch(() => undefined);
       }
@@ -543,14 +541,12 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         : { conversationId: conversation.id, userMessageId: makeId(), jobId: makeId() };
     imageDraftRef.current = { conversationId: conversation.id, context };
     documentDraftRef.current = { conversationId: conversation.id, context };
-    const accessTokenPromise = input.getAccessToken();
     setPreparingImageCount((count) => count + images.length);
     const uploadPromise = uploadChatImages({
       conversationId: conversation.id,
       userMessageId: context.userMessageId,
       jobId: context.jobId,
       images,
-      accessToken: accessTokenPromise.then((token) => token ?? ""),
       signal: new AbortController().signal,
     }).finally(() => {
       setPreparingImageCount((count) => Math.max(0, count - images.length));
@@ -599,15 +595,14 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     const setStage = (stage: "uploading" | "parsing") => updatePreparation({ preparationStatus: stage });
 
     setPreparingDocumentCount((count) => count + 1);
-    const preparation = input.getAccessToken()
-      .then((accessToken) => {
-        if (!accessToken) throw new Error("Your session expired. Please sign in again.");
+    const preparation = input.hasSession()
+      .then((sessionReady) => {
+        if (!sessionReady) throw new Error("Your session expired. Please sign in again.");
         return uploadChatDocument({
           conversationId: conversation.id,
           userMessageId: context.userMessageId,
           jobId: context.jobId,
           document: prepared,
-          accessToken,
           signal: abortController.signal,
           onStageChange: setStage,
         });
@@ -650,12 +645,11 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     const cleanup = (async () => {
       const context = document.uploadContext;
       if (!context) return;
-      const accessToken = await optionsRef.current.getAccessToken();
-      if (!accessToken) return;
+      const sessionReady = await optionsRef.current.hasSession();
+      if (!sessionReady) return;
       await deleteChatDocument({
         conversationId: context.conversationId,
         document,
-        accessToken,
       });
     })();
     document.cleanupPromise = cleanup.catch(() => {
@@ -685,8 +679,8 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     });
     input.dispatch({ type: "MARK_MESSAGE_CANCELLED", conversationId, messageId: request.messageId });
     clearRequestState(conversationId, request.messageId);
-    const token = await input.getAccessToken();
-    if (token) await cancelChatJob(conversationId, request.jobId, token).catch(() => undefined);
+    const sessionReady = await input.hasSession();
+    if (sessionReady) await cancelChatJob(conversationId, request.jobId).catch(() => undefined);
   }, [clearRequestState, thinkingByMessage]);
 
   return {

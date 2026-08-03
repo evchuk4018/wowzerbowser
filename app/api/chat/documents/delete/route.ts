@@ -14,10 +14,7 @@ function scheduleCleanup(task: () => Promise<unknown>): void {
 
 export function createDeleteHandler(deps = { authorizeOwnerSession, deleteDocument, cleanupEmptyChatConversation }) {
   return async (request: Request) => {
-    const auth = request.headers.get("authorization");
-    const owner = auth?.startsWith("Bearer ")
-      ? await deps.authorizeOwnerSession(auth.slice(7))
-      : null;
+    const owner = await deps.authorizeOwnerSession(request);
     if (!owner) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
 
     const body = await request.json().catch(() => null) as Record<string, unknown> | null;

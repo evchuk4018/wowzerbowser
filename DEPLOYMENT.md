@@ -71,8 +71,9 @@ chmod 600 /srv/storage/wowzerbowser/deployment.env
 
 Set `APP_UID` and `APP_GID` from `id -u` and `id -g`. Set a random
 `POSTGRES_PASSWORD`, make `DATABASE_URL` use the same password, and set the
-existing provider/auth values required by the application, including
-`SUPABASE_URL`, `SUPABASE_SECRET_KEY`, and `APP_OWNER_EMAIL`.
+provider values required by the application, including `SUPABASE_URL`,
+`SUPABASE_SECRET_KEY`, and `APP_OWNER_EMAIL`. Set a random `AUTH_SECRET` and
+keep `NEXT_PUBLIC_SITE_URL` on the private Tailscale HTTPS origin.
 
 Generate or verify the stable server-only database owner key:
 
@@ -81,10 +82,9 @@ node scripts/ensure-app-owner-id.mjs --env-file /srv/storage/wowzerbowser/deploy
 ```
 
 Keep the resulting `APP_OWNER_ID` fixed for the lifetime of this installation.
-It is the local PostgreSQL owner key; authenticated Supabase owner IDs remain
-available to Auth and Storage adapters. If the email is not found, set
-`APP_OWNER_ID` manually to the matching Supabase Auth UUID and rerun the
-command. Never expose this value or provider credentials to client code.
+It is the stable local PostgreSQL owner UUID used by Auth.js and all application
+repositories. Never expose it, `AUTH_SECRET`, passwords, or provider
+credentials to client code.
 
 Set `NEXT_PUBLIC_SITE_URL` to the private HTTPS hostname reported by Tailscale
 Serve after it is configured.
@@ -110,6 +110,20 @@ DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh
 
 The web and worker entrypoints refuse to start when a local PostgreSQL
 migration is pending.
+
+Bootstrap the one owner once the migration is applied. The command is
+idempotent for the configured owner and never logs the password:
+
+```bash
+DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh run --rm -e SKIP_DATABASE_MIGRATION_CHECK=1 web node scripts/bootstrap-owner.mjs --env-file /srv/storage/wowzerbowser/deployment.env
+```
+
+Rotate the owner password when needed; this increments the session version and
+invalidates every existing Auth.js session:
+
+```bash
+DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh run --rm -e SKIP_DATABASE_MIGRATION_CHECK=1 web node scripts/reset-owner-password.mjs --env-file /srv/storage/wowzerbowser/deployment.env
+```
 
 ## Database migrations
 
@@ -138,8 +152,9 @@ docker inspect wowzerbowser-web-1 --format '{{json .Mounts}}'
 docker inspect wowzerbowser-background-worker-1 --format '{{json .Mounts}}'
 ```
 
-The application retains Supabase Auth and Supabase Storage, but all structured
-application state is persisted in the private local PostgreSQL service.
+The application retains Supabase Storage only for private object uploads until
+issue #65 is complete. Auth.js credentials and all structured application state
+are persisted through the private local PostgreSQL service.
 
 ## Tailscale Serve
 

@@ -1,7 +1,7 @@
 import "server-only";
 
 import { DOCUMENT_SOURCE_BUCKET, validateDocumentProjectManifest, type DocumentProjectManifestV1 } from "../../../lib/document-project";
-import { getServerClient } from "../../auth/supabase-server-adapter";
+import { getServerClient } from "../storage/supabase-storage-adapter";
 import { databaseOwnerId, jsonb, query } from "../database/database";
 
 type Db = ReturnType<typeof getServerClient>;

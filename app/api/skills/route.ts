@@ -4,8 +4,7 @@ import { createOwnerSkill, listOwnerSkills } from "../../server/skills/skill-ser
 import { skillRouteError } from "./skill-route-response";
 
 async function ownerFor(request: Request) {
-  const authorization = request.headers.get("authorization");
-  return authorization?.startsWith("Bearer ") ? authorizeOwnerSession(authorization.slice(7)) : null;
+  return authorizeOwnerSession(request);
 }
 
 export async function GET(request: Request) {

@@ -118,10 +118,7 @@ export function createChatImageUploadHandler(dependencies = {
   cleanupEmptyChatConversation,
 }) {
   return async function POST(request: Request) {
-    const authorization = request.headers.get("authorization");
-    const owner = authorization?.startsWith("Bearer ")
-      ? await dependencies.authorizeOwnerSession(authorization.slice(7))
-      : null;
+    const owner = await dependencies.authorizeOwnerSession(request);
     if (!owner) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
     let conversationId: string | null = null;
     try {
