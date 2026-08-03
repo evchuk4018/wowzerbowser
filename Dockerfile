@@ -48,7 +48,6 @@ COPY --from=builder --chown=nextjs:nodejs /app/node_modules/fast-deep-equal ./no
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/lodash.snakecase ./node_modules/lodash.snakecase
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/magic-bytes.js ./node_modules/magic-bytes.js
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/tslib ./node_modules/tslib
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/undici ./node_modules/undici
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/pdfjs-dist ./node_modules/pdfjs-dist
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@napi-rs ./node_modules/@napi-rs
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/modal ./node_modules/modal
