@@ -144,13 +144,13 @@ services:
       context: .
       dockerfile: Dockerfile
       target: runner
-    env_file:
-      - path: ${DEPLOYMENT_ENV_FILE:-.env}
-        required: false
     environment:
       NODE_ENV: production
       NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://homelab.tail861ffd.ts.net}
       DISCORD_APP_URL: http://web:3000
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
+      DISCORD_ALLOWED_USER_ID: ${DISCORD_ALLOWED_USER_ID:-}
+      DISCORD_INTERNAL_SECRET: ${DISCORD_INTERNAL_SECRET:-}
       DISCORD_HEARTBEAT_FILE: /tmp/wowzerbowser-discord-worker.heartbeat
       DISCORD_HEARTBEAT_MAX_AGE_MS: ${DISCORD_HEARTBEAT_MAX_AGE_MS:-90000}
     entrypoint: ["node"]

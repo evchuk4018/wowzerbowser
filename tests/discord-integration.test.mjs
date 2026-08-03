@@ -159,6 +159,8 @@ test("Discord Gateway is optional and uses the local Compose network", async () 
   assert.match(compose, /discord:/);
   assert.match(compose, /profiles:\s*\["discord"\]/);
   assert.match(compose, /DISCORD_APP_URL: http:\/\/web:3000/);
+  assert.match(compose, /DISCORD_BOT_TOKEN: \$\{DISCORD_BOT_TOKEN:-\}/);
+  assert.doesNotMatch(compose.slice(compose.indexOf("  discord:"), compose.indexOf("volumes:")), /env_file:/);
   assert.match(compose, /worker\/discord-worker\.mjs/);
   assert.match(compose, /entrypoint: \["node"\]/);
   const discordBlock = compose.slice(compose.indexOf("  discord:"), compose.indexOf("volumes:"));
