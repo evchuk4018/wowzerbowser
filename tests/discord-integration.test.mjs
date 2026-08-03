@@ -151,9 +151,10 @@ test("Discord worker proactively polls, opens a DM, and activates delivered conv
 });
 
 test("Discord Gateway is optional and uses the local Compose network", async () => {
-  const [compose, dockerfile, worker] = await Promise.all([
+  const [compose, dockerfile, packageJson, worker] = await Promise.all([
     readFile(new URL("../compose.yaml", import.meta.url), "utf8"),
     readFile(new URL("../Dockerfile", import.meta.url), "utf8"),
+    readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../scripts/background-worker.ts", import.meta.url), "utf8"),
   ]);
   assert.match(compose, /discord:/);
@@ -167,5 +168,9 @@ test("Discord Gateway is optional and uses the local Compose network", async () 
   assert.doesNotMatch(discordBlock, /ports:/);
   assert.match(dockerfile, /build:discord-worker/);
   assert.match(dockerfile, /\.next\/worker \.\/worker/);
+  assert.match(packageJson, /build:discord-worker[^\n]*--external:discord\.js/);
+  assert.match(dockerfile, /node_modules\/discord\.js/);
+  assert.match(dockerfile, /node_modules\/@discordjs/);
+  assert.match(dockerfile, /node_modules\/undici/);
   assert.match(worker, /processPendingDiscordMessage/);
 });

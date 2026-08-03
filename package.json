@@ -20,7 +20,7 @@
     "auth:bootstrap": "node scripts/bootstrap-owner.mjs",
     "auth:reset-password": "node scripts/reset-owner-password.mjs",
     "build:worker": "esbuild scripts/background-worker.ts --bundle --platform=node --format=esm --target=node22 --conditions=react-server --alias:server-only=./scripts/server-only-empty.mjs --external:postgres --external:pdfjs-dist --external:@napi-rs/canvas --external:modal --external:mammoth --external:jsdom --outfile=.next/worker/background-worker.mjs",
-    "build:discord-worker": "esbuild scripts/discord-worker.mjs --bundle --platform=node --format=esm --target=node22 --outfile=.next/worker/discord-worker.mjs",
+    "build:discord-worker": "esbuild scripts/discord-worker.mjs --bundle --platform=node --format=esm --target=node22 --external:discord.js --outfile=.next/worker/discord-worker.mjs",
     "test:database": "tsx --conditions=react-server --test tests/database-integration.test.mjs",
     "test:deep-research": "tsx --conditions=react-server --test tests/deep-research.test.mjs",
     "pretest": "npm run test:deep-research",
