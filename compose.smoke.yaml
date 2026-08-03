@@ -1,0 +1,39 @@
+name: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME must be set for the smoke stack}
+
+services:
+  postgres:
+    volumes:
+      - smoke-postgres-data:/var/lib/postgresql/data
+
+  web:
+    environment:
+      STORAGE_MOUNT_GUARD: verified
+      SMOKE_TEST_DETERMINISTIC_PROVIDER: "1"
+      SMOKE_TEST_RESPONSE: Deterministic clean-install response.
+    volumes:
+      - type: bind
+        source: ${SMOKE_STORAGE_PATH:?SMOKE_STORAGE_PATH must be set}
+        target: /srv/storage/wowzerbowser
+        read_only: false
+
+  background-worker:
+    environment:
+      STORAGE_MOUNT_GUARD: verified
+      SMOKE_TEST_DETERMINISTIC_PROVIDER: "1"
+      SMOKE_TEST_RESPONSE: Deterministic clean-install response.
+      STORAGE_MAINTENANCE_INTERVAL_MS: 10000
+      AUTOMATION_SCHEDULER_INTERVAL_MS: 10000
+      MEMORY_SCHEDULER_INTERVAL_MS: 10000
+    volumes:
+      - type: bind
+        source: ${SMOKE_STORAGE_PATH:?SMOKE_STORAGE_PATH must be set}
+        target: /srv/storage/wowzerbowser
+        read_only: false
+
+volumes:
+  smoke-postgres-data:
+    name: ${SMOKE_POSTGRES_VOLUME_NAME:?SMOKE_POSTGRES_VOLUME_NAME must be set}
+
+networks:
+  application:
+    name: ${SMOKE_NETWORK_NAME:?SMOKE_NETWORK_NAME must be set}

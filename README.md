@@ -8,8 +8,8 @@ the homelab.
 ## Recurring automations
 
 Recurring automations, memory work, cleanup, and durable chat/document/image
-jobs run in the local `background-worker` against PostgreSQL. No Supabase Cron,
-Vault, `pg_net`, Redis, or hosted scheduler is required.
+jobs run in the local `background-worker` against PostgreSQL. No hosted
+scheduler, Redis, or second queue is required.
 
 Automation runs default to `qwen/qwen3.7-flash`, require the OpenRouter key, and
 have a user-configurable model in Settings → Configurables.
@@ -40,8 +40,8 @@ HDD mount is present before any application container is started.
 ## Authentication
 
 The app uses Auth.js Credentials authentication for exactly one owner. There is
-no signup, magic-link flow, or browser Supabase Auth client. Auth.js stores the
-encrypted session in an HttpOnly cookie, while the owner email and Node scrypt
+no signup or email-based login flow. Auth.js stores the encrypted session in an
+HttpOnly cookie, while the owner email and Node scrypt
 password hash live in local PostgreSQL. Application binaries live in the local
 filesystem under `/srv/storage/wowzerbowser/files` and their ownership,
 associations, MIME types, sizes, and hashes live in PostgreSQL.
@@ -200,7 +200,29 @@ then returns a clear "not configured" result.
 
 - `npm run dev`: start local development at `http://localhost:3000`
 - `npm run build`: verify the Next.js production build
+- `npm run audit:local-runtime`: fail if hosted runtime SDKs, URLs, keys, or
+  scheduler assumptions re-enter the production source
+- `npm run audit:client-bundle`: scan emitted browser assets for server-only
+  secrets and hosted-runtime markers
+- `npm run test:clean-install`: build a disposable clean-install Compose stack
+  and exercise login, durable jobs, storage, schedulers, restart recovery, and
+  logout without touching the production volume
 - `npm test`: build the app and verify its rendered shell and auth boundaries
+
+## Readiness and recovery
+
+`GET /api/health` is the operational readiness endpoint. It returns `200` only
+when the local PostgreSQL connection, ordered migration set, application-owned
+filesystem, and required server configuration are all ready; otherwise it
+returns `503` with stable check codes and no secret values. The container
+entrypoint performs the same configuration, storage, and migration checks before
+starting `web` or `background-worker`.
+
+For a new checkout, run `npm run audit:local-runtime`, `npm run build`,
+`npm run audit:client-bundle`, and `npm run test:clean-install`. On the
+homelab, use `docker/update.sh` for updates. It preserves the PostgreSQL named
+volume and application files, applies migrations under the migration lock, and
+restarts only after the new image is built. Do not use `docker compose down -v`.
 
 ## Learn More
 

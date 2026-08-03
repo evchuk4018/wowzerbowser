@@ -156,6 +156,17 @@ docker inspect wowzerbowser-web-1 --format '{{json .Mounts}}'
 docker inspect wowzerbowser-background-worker-1 --format '{{json .Mounts}}'
 ```
 
+Check readiness directly from the host when diagnosing a restart or failed
+healthcheck:
+
+```bash
+curl --fail-with-body --silent --show-error http://127.0.0.1:3000/api/health
+DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh run --rm --no-deps -T web node scripts/migrate.mjs --check
+```
+
+The health response is safe to log: it contains statuses and stable failure
+codes, not database URLs, passwords, API keys, or migration contents.
+
 Auth.js credentials, structured application state, and binary object metadata
 are persisted through the private local PostgreSQL service. Binary contents are
 stored atomically below `/srv/storage/wowzerbowser/files` and are served only
@@ -210,14 +221,28 @@ Verify that Serve is tailnet-only and that no Funnel configuration exists.
 
 ## Updates and reboot recovery
 
-Pull only the intended `main` branch and preserve the deployment environment
-file and Docker volume:
+Use the guarded update procedure from the `main` checkout. It refuses tracked
+local edits, preserves untracked files, pulls only `main` with fast-forward
+semantics, builds the new image, starts PostgreSQL, applies local migrations,
+and recreates `web` and `background-worker` only after the build and migration
+steps succeed:
 
 ```bash
-git pull --ff-only
-DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh up -d --build
-DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh ps
+DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/update.sh
 ```
+
+The script never deletes the PostgreSQL volume, application files, or the
+owner-managed media directory. It does not run `docker compose down -v`.
+If it stops at a guard, configuration, storage, or migration step, inspect the
+reported condition and correct it before retrying. If the app is already down,
+check `findmnt -T /srv/storage`, `./docker/compose.sh logs --tail=200 web
+postgres background-worker`, and the migration status command above; do not
+create a fallback `/srv/storage` directory or bypass the startup guard.
+
+For an optional Discord update, set `ENABLE_DISCORD_PROFILE=1` only when the
+private Discord credentials are present in `deployment.env`; the update script
+then recreates that profile after the core services. A rejected Discord token
+does not block the core web, PostgreSQL, or background-worker services.
 
 After a host reboot, verify the mount before inspecting the stack. The
 `unless-stopped` policies recover the services and Tailscale retains its host
@@ -238,6 +263,7 @@ directory, start the stack, or repair the disk from the application checkout.
 ```bash
 DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh config
 DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh ps
+curl --fail-with-body --silent --show-error http://127.0.0.1:3000/api/health
 docker inspect wowzerbowser-web-1 --format '{{json .Mounts}}'
 docker inspect wowzerbowser-background-worker-1 --format '{{json .Mounts}}'
 ss -ltnp

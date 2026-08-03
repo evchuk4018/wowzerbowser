@@ -10,7 +10,7 @@ import {
 
 /** Remove all provider-owned resources associated with one conversation. */
 export async function deleteConversationWorkspace(ownerId: string, conversationId: string): Promise<void> {
-  if (!isModalConfigured()) throw new Error("Modal workspace cleanup is unavailable.");
+  if (!isModalConfigured()) return;
 
   const client = new ModalClient();
   try {

@@ -3,6 +3,7 @@ import { DEFAULT_CHAT_MODELS, chatModelIdentity, type ChatModelInfo, type ChatMo
 import { fetchOpenRouterModels, fetchOpenRouterProviders, OpenRouterError } from "../../providers/openrouter/openrouter-catalog-adapter";
 import { canonicalCatalogQuery, catalogQueryHash, parseCatalogQuery } from "./chat-model-catalog-query";
 import { listEnabledOpenRouterModels, readCatalogCache, saveCatalogCache, setOpenRouterModelEnabled } from "./chat-model-catalog-repository";
+import { deterministicChatModelInfo, deterministicProviderEnabled } from "../../providers/deterministic/deterministic-chat-adapter";
 
 const TTL_MS = 15 * 60 * 1000;
 export class ChatModelAuthorizationError extends Error {}
@@ -75,6 +76,7 @@ export async function enableChatModel(ownerId: string, ref: ChatModelRef, enable
 export async function authorizeChatModel(ownerId: string, ref: ChatModelRef): Promise<ChatModelInfo> {
   const builtIn = DEFAULT_CHAT_MODELS.find((item) => chatModelIdentity(item.ref) === chatModelIdentity(ref));
   if (builtIn) return builtIn;
+  if (deterministicProviderEnabled()) return deterministicChatModelInfo(ref);
   if (ref.provider !== "openrouter") throw new ChatModelAuthorizationError("Model is not supported.");
   const enabled = new Set(await listEnabledOpenRouterModels(ownerId));
   if (!enabled.has(ref.model)) throw new ChatModelAuthorizationError("Model is not enabled.");
@@ -85,6 +87,7 @@ export async function authorizeChatModel(ownerId: string, ref: ChatModelRef): Pr
 }
 
 export async function authorizeAutomationModel(ownerId: string, ref: ChatModelRef): Promise<ChatModelInfo> {
+  if (deterministicProviderEnabled()) return deterministicChatModelInfo(ref);
   if (ref.provider !== "openrouter" || ref.model !== "qwen/qwen3.7-flash") return authorizeChatModel(ownerId, ref);
   const catalog = await discoverChatModels(ownerId, new URLSearchParams({ q: ref.model }));
   const model = catalog.models.find((item) => item.ref.model === ref.model && item.toolSupport && item.outputModalities.includes("text"));

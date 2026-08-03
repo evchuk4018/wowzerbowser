@@ -17,6 +17,11 @@ if [ -e /srv/storage/media ]; then
   exit 66
 fi
 
+if ! node /app/lib/runtime-preflight.mjs --startup; then
+  echo "Refusing to start: runtime configuration or application storage preflight failed." >&2
+  exit 68
+fi
+
 if [ "${SKIP_DATABASE_MIGRATION_CHECK:-0}" != "1" ]; then
   if ! node /app/scripts/migrate.mjs --check; then
     echo "Refusing to start: local PostgreSQL migrations are not current." >&2

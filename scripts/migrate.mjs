@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,6 +25,7 @@ async function migrationFiles() {
 
 async function ensureMigrationTable(sql) {
   await sql.unsafe("create table if not exists public.schema_migrations (version text primary key, applied_at timestamptz not null default now())");
+  await sql.unsafe("alter table public.schema_migrations add column if not exists checksum text");
 }
 
 async function main() {
@@ -34,11 +36,27 @@ async function main() {
     migrationLockAcquired = true;
     await ensureMigrationTable(sql);
     const files = await migrationFiles();
-    const appliedRows = await sql.unsafe("select version, applied_at from public.schema_migrations order by version");
+    const appliedRows = await sql.unsafe("select version, applied_at, checksum from public.schema_migrations order by version");
     const applied = new Map(appliedRows.map((row) => [row.version, row.applied_at]));
+    const checksums = new Map(appliedRows.map((row) => [row.version, row.checksum]));
+    const expectedChecksums = new Map();
+    for (const file of files) expectedChecksums.set(file.version, createHash("sha256").update(await readFile(file.path)).digest("hex"));
+    const unknown = appliedRows.map((row) => row.version).filter((version) => !expectedChecksums.has(version));
+    const changed = appliedRows
+      .filter((row) => row.checksum && expectedChecksums.get(row.version) !== row.checksum)
+      .map((row) => row.version);
+    if (unknown.length) throw new Error(`Database contains unknown migrations: ${unknown.join(", ")}.`);
+    if (changed.length) throw new Error(`Applied migrations changed on disk: ${changed.join(", ")}.`);
+    for (const [version, checksum] of expectedChecksums) {
+      if (applied.has(version) && !checksums.get(version)) {
+        await sql.unsafe("update public.schema_migrations set checksum = $2 where version = $1", [version, checksum]);
+      }
+    }
 
     if (command === "--status" || command === "status" || command === "--check" || command === "check") {
       for (const file of files) console.log(`${applied.has(file.version) ? "applied" : "pending"}\t${file.version}`);
+      for (const version of checksums.keys()) if (!expectedChecksums.has(version)) console.log(`unknown\t${version}`);
+      for (const version of changed) console.log(`changed\t${version}`);
       const pending = files.filter((file) => !applied.has(file.version));
       console.log(`migration-status\tapplied=${files.length - pending.length}\tpending=${pending.length}`);
       if (command === "--check" || command === "check") {
@@ -56,9 +74,10 @@ async function main() {
     for (const file of files) {
       if (applied.has(file.version)) continue;
       const source = await readFile(file.path, "utf8");
+      const checksum = expectedChecksums.get(file.version);
       await sql.begin(async (transaction) => {
         await transaction.unsafe(source);
-        await transaction.unsafe("insert into public.schema_migrations(version) values ($1)", [file.version]);
+        await transaction.unsafe("insert into public.schema_migrations(version,checksum) values ($1,$2)", [file.version, checksum]);
       });
       appliedCount += 1;
       console.log(`applied\t${file.version}`);
