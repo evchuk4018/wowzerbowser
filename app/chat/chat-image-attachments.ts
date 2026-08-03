@@ -40,6 +40,38 @@ async function readError(response: Response): Promise<string> {
   return typeof body?.error === "string" ? body.error : `Image upload failed (${response.status}).`;
 }
 
+function waitFor(milliseconds: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }, milliseconds);
+    const abort = () => {
+      clearTimeout(timeout);
+      signal.removeEventListener("abort", abort);
+      reject(signal.reason ?? new Error("Image preparation was cancelled."));
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+  });
+}
+
+async function waitForImageJob(input: { conversationId: string; jobId: string; signal: AbortSignal }): Promise<UploadedChatImage> {
+  let delay = 250;
+  for (let attempt = 0; attempt < 240; attempt += 1) {
+    const response = await authFetch(`/api/chat/images/jobs/${encodeURIComponent(input.conversationId)}/${encodeURIComponent(input.jobId)}`, { signal: input.signal });
+    if (!response.ok) throw new Error(await readError(response));
+    const snapshot = await response.json() as { status: string; error?: string | null; attachment?: UploadedChatImage };
+    if (snapshot.status === "completed" && snapshot.attachment) return snapshot.attachment;
+    if (snapshot.status === "failed" || snapshot.status === "cancelled") {
+      throw new Error(snapshot.error ?? "An image could not be prepared. Remove it or try again.");
+    }
+    await waitFor(delay, input.signal);
+    delay = Math.min(2_000, Math.round(delay * 1.5));
+  }
+  throw new Error("Image preparation timed out. Please retry the image.");
+}
+
 export async function uploadChatImages(input: {
   conversationId: string;
   userMessageId: string;
@@ -61,10 +93,20 @@ export async function uploadChatImages(input: {
     signal: input.signal,
   });
   if (!response.ok) throw new Error(await readError(response));
-  const body = await response.json() as { attachments?: UploadedChatImage[] };
-  if (!Array.isArray(body.attachments) || body.attachments.length !== input.images.length) {
-    throw new Error("The uploaded images could not be prepared for chat.");
+  const body = await response.json() as {
+    attachments?: UploadedChatImage[];
+    jobs?: Array<{ imageId: string; processingJobId: string | null; status: string; attachment?: UploadedChatImage | null; error?: string | null }>;
+  };
+  if (Array.isArray(body.jobs)) {
+    const uploaded = await Promise.all(body.jobs.map((job) => job.attachment
+      ? Promise.resolve(job.attachment)
+      : job.processingJobId
+        ? waitForImageJob({ conversationId: input.conversationId, jobId: job.processingJobId, signal: input.signal })
+        : Promise.reject(new Error(job.error ?? "The uploaded image could not be prepared."))));
+    if (uploaded.length !== input.images.length) throw new Error("The uploaded images could not be prepared for chat.");
+    return uploaded;
   }
+  if (!Array.isArray(body.attachments) || body.attachments.length !== input.images.length) throw new Error("The uploaded images could not be prepared for chat.");
   const failed = body.attachments.find(({ analysis }) => analysis.status !== "complete");
   if (failed) throw new Error(failed.analysis.error || "An image could not be analyzed. Remove it or try again.");
   return body.attachments;

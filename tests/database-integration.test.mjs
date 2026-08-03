@@ -65,7 +65,7 @@ test.after(async () => {
 
 test("local migrations, atomic chat jobs, document registration, and leased summaries work against real PostgreSQL", async () => {
   const migrationRows = await query("select version from schema_migrations order by version");
-  assert.deepEqual(migrationRows.map((row) => row.version), ["001_initial_schema", "002_seed_catalog", "003_atomic_functions", "004_owner_auth", "005_local_filesystem_storage", "006_durable_worker_queue"]);
+  assert.deepEqual(migrationRows.map((row) => row.version), ["001_initial_schema", "002_seed_catalog", "003_atomic_functions", "004_owner_auth", "005_local_filesystem_storage", "006_durable_worker_queue", "007_durable_image_processing_queue"]);
 
   const conversationId = `${testPrefix}-chat`;
   const jobId = `${testPrefix}-job`;
@@ -187,6 +187,61 @@ test("local migrations, atomic chat jobs, document registration, and leased summ
   await query("select cancel_document_processing_job($1,$2,$3) as result", [owner, processingConversation, processingJob]);
   const [cancelledDocument] = await query("select status from document_processing_jobs where owner_id=$1 and conversation_id=$2 and job_id=$3", [owner, processingConversation, processingJob]);
   assert.equal(cancelledDocument.status, "cancelled");
+
+  const imageConversation = `${testPrefix}-image-queue`;
+  const imageId = `${testPrefix}-image`;
+  const imageObject = randomUUID();
+  const imageJob = `${testPrefix}-image-job`;
+  const imageMessage = `${testPrefix}-image-message`;
+  conversationIds.add(imageConversation);
+  storageObjectIds.add(imageObject);
+  await query("insert into chat_conversations(owner_id,conversation_id) values($1,$2)", [owner, imageConversation]);
+  await query("insert into app_storage_objects(object_id,owner_id,conversation_id,message_id,kind,object_key,original_filename,content_type,size,sha256,state,completed_at) values($1::uuid,$2,$3,$4,'image',$5,$6,$7,$8,$9,'complete',now())", [
+    imageObject,
+    owner,
+    imageConversation,
+    imageMessage,
+    `objects/${imageObject}`,
+    "queued.png",
+    "image/png",
+    24,
+    "b".repeat(64),
+  ]);
+  await query("insert into chat_image_uploads(owner_id,conversation_id,image_id,user_message_id,job_id,storage_path,storage_object_id,name,content_type,size,status,content_hash) values($1,$2,$3,$4,$5,$6,$7::uuid,$8,$9,$10,'processing',$11)", [
+    owner,
+    imageConversation,
+    imageId,
+    imageMessage,
+    imageJob,
+    `objects/${imageObject}`,
+    imageObject,
+    "queued.png",
+    "image/png",
+    24,
+    "b".repeat(64),
+  ]);
+  const imageRequest = { imageId, userMessageId: imageMessage, chatJobId: null, storageObjectId: imageObject, name: "queued.png", contentType: "image/png" };
+  const [imageEnqueued] = await query("select enqueue_chat_image_processing_job($1,$2,$3,$4,$5,$6,$7,$8::uuid,$9::jsonb) as result", [owner, imageConversation, imageJob, `${imageId}:${imageObject}`, imageId, imageMessage, null, imageObject, jsonb(imageRequest)]);
+  assert.equal(imageEnqueued.result.status, "queued");
+  const [imageIdempotent] = await query("select enqueue_chat_image_processing_job($1,$2,$3,$4,$5,$6,$7,$8::uuid,$9::jsonb) as result", [owner, imageConversation, `${imageJob}-retry`, `${imageId}:${imageObject}`, imageId, imageMessage, null, imageObject, jsonb(imageRequest)]);
+  assert.equal(imageIdempotent.result.jobId, imageJob);
+  const imageClaims = await Promise.all([
+    query("select claim_next_chat_image_processing_job($1,$2::uuid,$3,$4) as result", [owner, randomUUID(), 15_000, 3]),
+    query("select claim_next_chat_image_processing_job($1,$2::uuid,$3,$4) as result", [owner, randomUUID(), 15_000, 3]),
+  ]);
+  const claimedImages = imageClaims.map(([row]) => row.result).filter((result) => result.claimed);
+  assert.equal(claimedImages.length, 1);
+  const imageClaim = claimedImages[0];
+  assert.equal(imageClaim.jobId, imageJob);
+  const [imageHeartbeat] = await query("select heartbeat_chat_image_processing_job($1,$2,$3,$4::uuid,$5,$6::jsonb) as result", [owner, imageConversation, imageJob, imageClaim.leaseToken, 15_000, jsonb({ stage: "waiting-for-upload" })]);
+  assert.equal(imageHeartbeat.result.active, true);
+  const [imageCancelled] = await query("select cancel_chat_image_processing_job($1,$2,$3) as result", [owner, imageConversation, imageJob]);
+  assert.equal(imageCancelled.result.status, "cancelled");
+  const [imageResumed] = await query("select resume_chat_image_processing_job($1,$2,$3) as result", [owner, imageConversation, imageJob]);
+  assert.equal(imageResumed.result.status, "queued");
+  const [imageStatus] = await query("select j.status as job_status,i.status as image_status from chat_image_processing_jobs j join chat_image_uploads i using(owner_id,conversation_id,image_id) where j.owner_id=$1 and j.conversation_id=$2 and j.job_id=$3", [owner, imageConversation, imageJob]);
+  assert.deepEqual(imageStatus, { job_status: "queued", image_status: "processing" });
+  await query("select cancel_chat_image_processing_job($1,$2,$3) as result", [owner, imageConversation, imageJob]);
 
   await enqueueChatSummaryTask({ ownerId: authOwnerId, conversationId, sourceJobId: jobId, sourceTurnId: request.persistence.turnId, sourceVersionId: request.persistence.versionId, sourcePosition: 0, mode: "incremental" });
   const tasks = await Promise.all([claimNextChatSummaryTask(authOwnerId, conversationId), claimNextChatSummaryTask(authOwnerId, conversationId)]);

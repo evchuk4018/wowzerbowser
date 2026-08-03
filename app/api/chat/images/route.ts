@@ -8,7 +8,11 @@ import {
   ChatImageError,
   isValidChatImageId,
 } from "../../../../lib/chat-image";
-import { analyzeAndStoreChatImages, type ChatImageUpload } from "../../../server/chat/chat-image-service";
+import {
+  queueChatImageProcessing,
+  type ChatImageUpload,
+  type QueuedChatImage,
+} from "../../../server/chat/chat-image-processing-service";
 import { cleanupExpiredChatImageUploads } from "../../../server/chat/chat-image-store";
 import { cleanupEmptyChatConversation } from "../../../server/chat/chat-conversation-service";
 
@@ -113,7 +117,7 @@ export function hasDuplicateImageIds(ids: unknown[]): boolean {
 
 export function createChatImageUploadHandler(dependencies = {
   authorizeOwnerSession,
-  analyzeAndStoreChatImages,
+  queueChatImageProcessing,
   cleanupExpiredChatImageUploads,
   cleanupEmptyChatConversation,
 }) {
@@ -160,11 +164,19 @@ export function createChatImageUploadHandler(dependencies = {
           bytes,
         });
       }
-      const attachments = await dependencies.analyzeAndStoreChatImages(owner.id, activeConversationId, userMessageId, uploads, { jobId });
+      const jobs = await dependencies.queueChatImageProcessing({
+        ownerId: owner.id,
+        conversationId: activeConversationId,
+        userMessageId,
+        chatJobId: jobId,
+        uploads,
+        signal: request.signal,
+      });
       if (dependencies.cleanupExpiredChatImageUploads) {
         after(() => dependencies.cleanupExpiredChatImageUploads?.(owner.id, activeConversationId)?.catch(() => undefined));
       }
-      return NextResponse.json({ attachments });
+      const attachments = jobs.flatMap(({ attachment }) => attachment ? [attachment] : []);
+      return NextResponse.json({ attachments, jobs } satisfies { attachments: QueuedChatImage["attachment"][]; jobs: QueuedChatImage[] }, { status: jobs.some(({ status }) => status === "queued" || status === "running") ? 202 : 200 });
     } catch (error) {
       if (conversationId) {
         const failedConversationId = conversationId;

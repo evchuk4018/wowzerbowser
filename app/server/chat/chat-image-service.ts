@@ -114,6 +114,48 @@ function normalizeImageFailure(error: unknown, signal?: AbortSignal): ChatImageE
   return new ChatImageError("analysis_failed", "Image analysis failed. Your draft was kept; please retry.", 502);
 }
 
+/** Analyze bytes that are already in local storage; callers may be worker jobs. */
+export async function analyzeStoredChatImage(input: {
+  ownerId: string;
+  conversationId: string;
+  userMessageId: string;
+  imageId: string;
+  jobId?: string | null;
+  bytes: Uint8Array;
+  contentType: ChatImageContentType;
+  signal?: AbortSignal;
+  visionModel?: string | null;
+}): Promise<ChatImageAttachment["analysis"]> {
+  if (input.signal?.aborted) throw new ChatImageError("cancelled", "Image analysis was cancelled.", 499);
+  const analysis = await analyzeOpenRouterImage(
+    IMAGE_ANALYSIS_PROMPT,
+    input.bytes,
+    input.contentType,
+    { signal: input.signal, model: input.visionModel ?? await configuredVisionModel(input.ownerId).catch(() => null) },
+  );
+  const visibleText = analysis.visibleText?.slice(0, MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH) ?? null;
+  const mainVisuals = analysis.mainVisuals.slice(0, MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH);
+  await recordImageUsage({
+    ownerId: input.ownerId,
+    conversationId: input.conversationId,
+    jobId: input.jobId ?? undefined,
+    requestId: `${input.imageId}:analysis`,
+    requestKind: "image_analysis",
+    model: analysis.model,
+    usage: analysis.usage,
+    prompt: IMAGE_ANALYSIS_PROMPT,
+    answer: JSON.stringify({ visibleText, mainVisuals }),
+  }).catch(() => undefined);
+  return {
+    status: "complete",
+    visibleText,
+    mainVisuals,
+    textModel: analysis.model,
+    visualModel: analysis.model,
+    analysisUsage: analysis.usage,
+  };
+}
+
 async function analyzeOneChatImage(input: {
   ownerId: string;
   conversationId: string;
@@ -164,28 +206,18 @@ async function analyzeOneChatImage(input: {
   try {
     await uploadChatImageObject({ ownerId, objectId: claimed.record.storageObjectId, bytes: upload.bytes, signal: options.signal });
     const storedBytes = await downloadChatImageObjectByPath(ownerId, conversationId, claimed.record.storagePath, contentType);
-    const analysis = await analyzeOpenRouterImage(IMAGE_ANALYSIS_PROMPT, storedBytes, contentType, { signal: options.signal, model: options.visionModel ?? await configuredVisionModel(ownerId).catch(() => null) });
-    const visibleText = analysis.visibleText?.slice(0, MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH) ?? null;
-    const mainVisuals = analysis.mainVisuals.slice(0, MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH);
-    await recordImageUsage({
+    const analysis = await analyzeStoredChatImage({
       ownerId,
       conversationId,
+      userMessageId,
+      imageId: upload.id,
       jobId: options.jobId,
-      requestId: `${upload.id}:analysis`,
-      requestKind: "image_analysis",
-      model: analysis.model,
-      usage: analysis.usage,
-      prompt: IMAGE_ANALYSIS_PROMPT,
-      answer: JSON.stringify({ visibleText, mainVisuals }),
-    }).catch(() => undefined);
-    const completed = await completeChatImageUpload(ownerId, conversationId, upload.id, claimToken, {
-      status: "complete",
-      visibleText,
-      mainVisuals,
-      textModel: analysis.model,
-      visualModel: analysis.model,
-      analysisUsage: analysis.usage,
+      bytes: storedBytes,
+      contentType,
+      signal: options.signal,
+      visionModel: options.visionModel,
     });
+    const completed = await completeChatImageUpload(ownerId, conversationId, upload.id, claimToken, analysis);
     const attachment = attachmentFromUploadRecord(completed);
     if (!attachment) throw new ChatImageError("storage", "Image analysis metadata is incomplete.", 503);
     return attachment;

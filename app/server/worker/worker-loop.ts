@@ -1,14 +1,17 @@
-export type WorkerLoopDependencies<ChatClaim, DocumentClaim> = {
+export type WorkerLoopDependencies<ChatClaim, DocumentClaim, ImageClaim> = {
   claimChat: () => Promise<ChatClaim | null>;
   executeChat: (claim: ChatClaim, shutdownSignal: AbortSignal) => Promise<unknown>;
   claimDocument: () => Promise<DocumentClaim | null>;
   executeDocument: (claim: DocumentClaim, shutdownSignal: AbortSignal) => Promise<unknown>;
+  claimImage: () => Promise<ImageClaim | null>;
+  executeImage: (claim: ImageClaim, shutdownSignal: AbortSignal) => Promise<unknown>;
   maintenance?: () => Promise<unknown>;
   pollIntervalMs?: number;
   maintenanceIntervalMs?: number;
   chatConcurrency?: number;
   documentConcurrency?: number;
-  onTaskError?: (kind: "chat" | "document" | "maintenance", error: unknown) => void;
+  imageConcurrency?: number;
+  onTaskError?: (kind: "chat" | "document" | "image" | "maintenance", error: unknown) => void;
   sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
 };
 
@@ -36,25 +39,28 @@ function bounded(value: number | undefined, fallback: number, minimum: number, m
  * Small single-process supervisor. PostgreSQL owns all durable state; this
  * loop only owns in-memory slots and abort signals for graceful shutdown.
  */
-export class BackgroundWorkerLoop<ChatClaim, DocumentClaim> {
+export class BackgroundWorkerLoop<ChatClaim, DocumentClaim, ImageClaim> {
   private readonly shutdownController = new AbortController();
   private readonly active = new Set<Promise<void>>();
   private readonly sleep: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   private readonly chatConcurrency: number;
   private readonly documentConcurrency: number;
+  private readonly imageConcurrency: number;
   private readonly pollIntervalMs: number;
   private readonly maintenanceIntervalMs: number;
-  private readonly onTaskError: (kind: "chat" | "document" | "maintenance", error: unknown) => void;
+  private readonly onTaskError: (kind: "chat" | "document" | "image" | "maintenance", error: unknown) => void;
   private stopped = false;
   private runningChats = 0;
   private runningDocuments = 0;
+  private runningImages = 0;
   private maintenanceRunning = false;
   private lastMaintenanceAt = 0;
 
-  constructor(private readonly dependencies: WorkerLoopDependencies<ChatClaim, DocumentClaim>) {
+  constructor(private readonly dependencies: WorkerLoopDependencies<ChatClaim, DocumentClaim, ImageClaim>) {
     this.sleep = dependencies.sleep ?? defaultSleep;
     this.chatConcurrency = bounded(dependencies.chatConcurrency, 1, 1, 1);
     this.documentConcurrency = bounded(dependencies.documentConcurrency, 1, 1, 1);
+    this.imageConcurrency = bounded(dependencies.imageConcurrency, 1, 1, 1);
     this.pollIntervalMs = bounded(dependencies.pollIntervalMs, 1_000, 250, 10_000);
     this.maintenanceIntervalMs = bounded(dependencies.maintenanceIntervalMs, 60_000, 10_000, 3_600_000);
     this.onTaskError = dependencies.onTaskError ?? (() => undefined);
@@ -74,17 +80,19 @@ export class BackgroundWorkerLoop<ChatClaim, DocumentClaim> {
     this.shutdownController.abort(new Error(reason));
   }
 
-  private launch(kind: "chat" | "document", task: () => Promise<unknown>): void {
+  private launch(kind: "chat" | "document" | "image", task: () => Promise<unknown>): void {
     if (this.stopped) return;
     if (kind === "chat") this.runningChats += 1;
-    else this.runningDocuments += 1;
+    else if (kind === "document") this.runningDocuments += 1;
+    else this.runningImages += 1;
     const tracked: Promise<void> = Promise.resolve()
       .then(task)
       .then(() => undefined)
       .catch((error) => this.onTaskError(kind, error))
       .finally(() => {
         if (kind === "chat") this.runningChats -= 1;
-        else this.runningDocuments -= 1;
+        else if (kind === "document") this.runningDocuments -= 1;
+        else this.runningImages -= 1;
         this.active.delete(tracked);
       });
     this.active.add(tracked);
@@ -103,6 +111,12 @@ export class BackgroundWorkerLoop<ChatClaim, DocumentClaim> {
       if (!document) break;
       claimed = true;
       this.launch("document", () => this.dependencies.executeDocument(document, this.shutdownController.signal));
+    }
+    while (!this.stopped && this.runningImages < this.imageConcurrency) {
+      const image = await this.dependencies.claimImage();
+      if (!image) break;
+      claimed = true;
+      this.launch("image", () => this.dependencies.executeImage(image, this.shutdownController.signal));
     }
     return claimed;
   }

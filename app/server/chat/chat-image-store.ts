@@ -256,6 +256,39 @@ export async function failChatImageUpload(ownerId: string, conversationId: strin
   await query("update chat_image_uploads set status='failed',analysis=null,error=$1,claim_token=null,claim_expires_at=null,updated_at=$2 where owner_id=$3 and conversation_id=$4 and image_id=$5 and status='processing' and claim_token=$6::uuid", [errorMessage.slice(0, 2_000), new Date().toISOString(), databaseOwnerId(ownerId), conversationId, imageId, claimToken]);
 }
 
+export async function releaseChatImageUploadClaim(ownerId: string, conversationId: string, imageId: string, claimToken: string): Promise<void> {
+  await query(
+    "update chat_image_uploads set claim_token=null,claim_expires_at=null,updated_at=$1 where owner_id=$2 and conversation_id=$3 and image_id=$4 and status='processing' and claim_token=$5::uuid",
+    [new Date().toISOString(), databaseOwnerId(ownerId), conversationId, imageId, claimToken],
+  );
+}
+
+/** Complete an image from the durable image worker, which owns the queue lease. */
+export async function completeQueuedChatImageUpload(
+  ownerId: string,
+  conversationId: string,
+  imageId: string,
+  analysis: ChatImageAttachment["analysis"],
+): Promise<ChatImageUploadRecord> {
+  const [updated] = await query<Record<string, unknown>>(
+    `update chat_image_uploads set status='complete',analysis=$1::jsonb,error=null,claim_token=null,claim_expires_at=null,updated_at=$2
+     where owner_id=$3 and conversation_id=$4 and image_id=$5 and status='processing' returning *`,
+    [jsonb(analysis), new Date().toISOString(), databaseOwnerId(ownerId), conversationId, imageId],
+  );
+  if (updated) return recordFromRow(updated, ownerId);
+  const current = await getChatImageUploadRecord(ownerId, conversationId, imageId);
+  if (current?.status === "complete") return current;
+  throw new ChatImageError("storage", "Image analysis metadata could not be saved.", 503);
+}
+
+/** Mark a queued image failed when the worker lease or provider attempt is terminal. */
+export async function failQueuedChatImageUpload(ownerId: string, conversationId: string, imageId: string, errorMessage: string): Promise<void> {
+  await query(
+    "update chat_image_uploads set status='failed',analysis=null,error=$1,claim_token=null,claim_expires_at=null,updated_at=$2 where owner_id=$3 and conversation_id=$4 and image_id=$5 and status='processing'",
+    [errorMessage.slice(0, 2_000), new Date().toISOString(), databaseOwnerId(ownerId), conversationId, imageId],
+  );
+}
+
 async function isActiveChatImageUpload(record: ChatImageUploadRecord): Promise<boolean> {
   if (!record.jobId) return false;
   try {

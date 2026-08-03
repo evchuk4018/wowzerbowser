@@ -50,7 +50,7 @@ test("multipart transport rejects non-multipart content and oversized declared r
 
   const handler = createChatImageUploadHandler({
     authorizeOwnerSession: async () => ({ id: "owner-1" }),
-    analyzeAndStoreChatImages: async () => {
+    queueChatImageProcessing: async () => {
       throw new Error("service must not be called");
     },
   });
@@ -91,7 +91,7 @@ test("upload transport rejects duplicate IDs, mismatched counts, and too many fi
   const calls = [];
   const handler = createChatImageUploadHandler({
     authorizeOwnerSession: async () => ({ id: "owner-1" }),
-    analyzeAndStoreChatImages: async (...args) => {
+    queueChatImageProcessing: async (...args) => {
       calls.push(args);
       return [];
     },
@@ -123,28 +123,31 @@ test("upload transport forwards the authenticated owner, conversation, MIME decl
       assert.ok(request instanceof Request);
       return { id: "owner-from-session" };
     },
-    analyzeAndStoreChatImages: async (...args) => {
-      call = args;
-      return [{ id: "image-1" }];
+    queueChatImageProcessing: async (input) => {
+      call = input;
+      return [{ imageId: "image-1", processingJobId: "processing-job-1", status: "queued", error: null, attachment: null }];
     },
   });
   const response = await handler(uploadRequest());
-  assert.equal(response.status, 200);
-  assert.deepEqual(await json(response), { attachments: [{ id: "image-1" }] });
-  assert.equal(call[0], "owner-from-session");
-  assert.equal(call[1], "conversation-1");
-  assert.equal(call[2], "message-1");
-  assert.equal(call[3][0].id, "image-1");
-  assert.equal(call[3][0].declaredType, "image/png");
-  assert.deepEqual(call[3][0].bytes, png);
-  assert.equal(call[4].jobId, "job-1");
+  assert.equal(response.status, 202);
+  assert.deepEqual(await json(response), {
+    attachments: [],
+    jobs: [{ imageId: "image-1", processingJobId: "processing-job-1", status: "queued", error: null, attachment: null }],
+  });
+  assert.equal(call.ownerId, "owner-from-session");
+  assert.equal(call.conversationId, "conversation-1");
+  assert.equal(call.userMessageId, "message-1");
+  assert.equal(call.uploads[0].id, "image-1");
+  assert.equal(call.uploads[0].declaredType, "image/png");
+  assert.deepEqual(call.uploads[0].bytes, png);
+  assert.equal(call.chatJobId, "job-1");
 });
 
 test("upload transport rejects an oversized file before the service call", async () => {
   let called = false;
   const handler = createChatImageUploadHandler({
     authorizeOwnerSession: async () => ({ id: "owner-1" }),
-    analyzeAndStoreChatImages: async () => {
+    queueChatImageProcessing: async () => {
       called = true;
       return [];
     },

@@ -51,8 +51,10 @@ test("background worker runs the PostgreSQL queue with bounded maintenance", asy
   assert.match(worker, /claimNextDocumentProcessingJob/);
   assert.match(worker, /runClaimedChatJob/);
   assert.match(worker, /runClaimedDocumentProcessingJob/);
+  assert.match(worker, /runClaimedChatImageProcessingJob/);
   assert.match(worker, /runStorageMaintenance/);
   assert.match(worker, /chatConcurrency/);
+  assert.match(worker, /imageConcurrency/);
   assert.match(worker, /ocrConcurrency/);
   assert.match(worker, /background-worker-queue-poll/);
   assert.match(wrapper, /--health/);
