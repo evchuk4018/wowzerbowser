@@ -47,6 +47,22 @@ function request(overrides = {}) {
   };
 }
 
+function localArtifactDependencies() {
+  return {
+    registerArtifact: async (input) => ({
+      id: `artifact-${input.name}`,
+      name: input.name,
+      contentType: input.contentType,
+      size: input.bytes.byteLength,
+      ...(input.projectId ? { projectId: input.projectId } : {}),
+      ...(input.revisionId ? { revisionId: input.revisionId } : {}),
+      ...(input.origin ? { origin: input.origin } : {}),
+      ...(input.editable !== undefined ? { editable: input.editable } : {}),
+    }),
+    readArtifactDescriptor: () => ({ objectId: "11111111-1111-4111-8111-111111111111" }),
+  };
+}
+
 test("buildDeepSeekMessages orders conditional tool instructions and replays rounds", () => {
   const result = buildDeepSeekMessages(
     request({
@@ -315,7 +331,7 @@ test("generated PDFs fall back to downloadable artifacts when provenance registr
       "owner-1",
       "conversation-1",
       undefined,
-      { registerProvenance: async () => { throw new Error("database details must not escape"); } },
+      { ...localArtifactDependencies(), registerProvenance: async () => { throw new Error("database details must not escape"); } },
     );
     assert.equal(result.ok, true);
     assert.equal(result.stdout, "created\n");
@@ -361,6 +377,7 @@ test("generated PDFs retain editable provenance when registration succeeds", asy
         ingested.push({ artifact, text: new TextDecoder().decode(bytes) });
       },
       {
+        ...localArtifactDependencies(),
         registerProvenance: async () => ({
           projectId: "project-1",
           revisionId: "revision-1",
@@ -412,7 +429,7 @@ test("generated PDFs remain downloadable when document attachment ingestion fail
       async () => {
         throw new Error("indexing details and secret-token must not escape");
       },
-      { registerProvenance: async () => { throw new Error("provenance unavailable"); } },
+      { ...localArtifactDependencies(), registerProvenance: async () => { throw new Error("provenance unavailable"); } },
     );
     assert.equal(result.ok, true);
     assert.equal(result.stdout, "created\n");

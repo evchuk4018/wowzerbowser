@@ -17,11 +17,14 @@ export function createChatImageReadHandler(dependencies = {
     }
     try {
       const image = await dependencies.readChatImagePreviewForOwner({ ownerId: owner.id, conversationId, imageId });
-      return new Response(new Blob([Buffer.from(image.bytes)]), {
+      const streamImage = image as { stream?: ReadableStream<Uint8Array>; bytes?: Uint8Array; size?: number; contentType: string };
+      const body = streamImage.stream ?? new Blob([Buffer.from(streamImage.bytes ?? new Uint8Array())]);
+      return new Response(body, {
         status: 200,
         headers: {
           "content-type": image.contentType,
           "cache-control": "private, no-store",
+          ...(typeof streamImage.size === "number" ? { "content-length": String(streamImage.size) } : {}),
           "x-content-type-options": "nosniff",
         },
       });

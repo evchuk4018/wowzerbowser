@@ -72,7 +72,7 @@ test("structured logging keeps only bounded, safe metadata and never includes er
     ocrPageCount: 2,
     cacheStatus: "cached-by-attacker\nsecret",
   }, { now: time.now });
-  timing.markFailed(DOCUMENT_INGESTION_STAGES.SUPABASE_DOWNLOAD, 9);
+  timing.markFailed(DOCUMENT_INGESTION_STAGES.STORAGE_READ, 9);
   const entry = timing.toLogEntry();
   const serialized = JSON.stringify(entry);
 
@@ -84,9 +84,9 @@ test("structured logging keeps only bounded, safe metadata and never includes er
     ocrPageCount: 2,
     cacheStatus: "unknown",
     durationMs: 0,
-    failedStage: DOCUMENT_INGESTION_STAGES.SUPABASE_DOWNLOAD,
-    failedStages: [DOCUMENT_INGESTION_STAGES.SUPABASE_DOWNLOAD],
-    stages: { [DOCUMENT_INGESTION_STAGES.SUPABASE_DOWNLOAD]: 9 },
+    failedStage: DOCUMENT_INGESTION_STAGES.STORAGE_READ,
+    failedStages: [DOCUMENT_INGESTION_STAGES.STORAGE_READ],
+    stages: { [DOCUMENT_INGESTION_STAGES.STORAGE_READ]: 9 },
   });
   assert.doesNotMatch(serialized, /secret|private|provider details|file\.pdf/);
 

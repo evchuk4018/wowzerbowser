@@ -356,31 +356,6 @@ async function createWorkspaceSandbox(
   }
 }
 
-export async function readConversationArtifact(
-  ownerId: string,
-  conversationId: string,
-  pathValue: string,
-): Promise<Uint8Array> {
-  const path = relativeWorkspacePath(pathValue);
-  const deadlineAt = Date.now() + PYTHON_TOOL_LIMITS.callTimeoutMs;
-  const { client, sandbox } = await createWorkspaceSandbox(ownerId, conversationId, {
-    readOnly: true,
-    blockNetwork: true,
-    name: `chat-artifact-${randomUUID().replaceAll("-", "").slice(0, 24)}`,
-    deadlineAt,
-  });
-  try {
-    return await waitForPythonDeadline(
-      readBoundedArtifactBytes(sandbox, path, deadlineAt),
-      deadlineAt,
-      PYTHON_DEADLINE_ERROR,
-    );
-  } finally {
-    await sandbox.terminate().catch(() => undefined);
-    client.close();
-  }
-}
-
 /** Execute an account-created API tool in a fresh sandbox with no mounted volumes. */
 export async function runIsolatedPythonTool(
   source: string,

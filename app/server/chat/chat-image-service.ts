@@ -19,9 +19,10 @@ import { recordUsage } from "../usage/usage-store";
 import { analyzeOpenRouterImage, askOpenRouterAboutImage } from "../../providers/openrouter/openrouter-image-adapter";
 import { OPENROUTER_QWEN_FLASH_MODEL } from "../../providers/openrouter/openrouter-config";
 import { configuredVisionModel } from "./chat-model-catalog-service";
+import { createStorageObject, getStorageObjectById } from "../storage/storage-repository";
+import { deleteOwnedStorageObject } from "../storage/storage-service";
 import {
   attachmentFromUploadRecord,
-  chatImageStoragePath,
   claimChatImageUpload,
   completeChatImageUpload,
   downloadChatImageObject,
@@ -30,6 +31,8 @@ import {
   failChatImageUpload,
   findChatImageAttachment,
   findChatImagePreviewAttachment,
+  getChatImageUploadRecord,
+  openChatImageObject,
   waitForChatImageUpload,
   uploadChatImageObject,
 } from "./chat-image-store";
@@ -121,13 +124,20 @@ async function analyzeOneChatImage(input: {
   options: ChatImageServiceOptions;
 }): Promise<ChatImageAttachment> {
   const { ownerId, conversationId, userMessageId, upload, contentType, contentHash, options } = input;
+  const existing = await getChatImageUploadRecord(ownerId, conversationId, upload.id);
+  const provisional = !existing || existing.status === "failed"
+    ? await createStorageObject({ ownerId, conversationId, messageId: userMessageId, kind: "image", originalFilename: sanitizeChatImageName(upload.name), contentType })
+    : null;
+  const storageObject = provisional ?? (existing ? await getStorageObjectById({ ownerId, objectId: existing.storageObjectId, conversationId, state: existing.status === "complete" ? "complete" : undefined }) : null);
+  if (!storageObject) throw new ChatImageError("storage", "The image storage object could not be loaded.", 503);
   const claimed = await claimChatImageUpload({
     ownerId,
     conversationId,
     imageId: upload.id,
     userMessageId,
     jobId: options.jobId,
-    storagePath: chatImageStoragePath(ownerId, conversationId, userMessageId, upload.id),
+    storagePath: storageObject.objectKey,
+    storageObjectId: storageObject.objectId,
     name: sanitizeChatImageName(upload.name),
     contentType,
     size: upload.bytes.byteLength,
@@ -135,6 +145,7 @@ async function analyzeOneChatImage(input: {
   });
 
   if (!claimed.claimed) {
+    if (provisional && provisional.objectId !== claimed.record.storageObjectId) await deleteOwnedStorageObject({ ownerId, objectId: provisional.objectId }).catch(() => undefined);
     const settled = claimed.record.status === "processing"
       ? await waitForChatImageUpload(ownerId, conversationId, upload.id, options.signal)
       : claimed.record;
@@ -151,8 +162,8 @@ async function analyzeOneChatImage(input: {
   const claimToken = claimed.record.claimToken;
   if (!claimToken) throw new ChatImageError("storage", "Image upload claim is incomplete.", 503);
   try {
-    await uploadChatImageObject(claimed.record.storagePath, upload.bytes, contentType, options.signal);
-    const storedBytes = await downloadChatImageObjectByPath(claimed.record.storagePath, contentType);
+    await uploadChatImageObject({ ownerId, objectId: claimed.record.storageObjectId, bytes: upload.bytes, signal: options.signal });
+    const storedBytes = await downloadChatImageObjectByPath(ownerId, conversationId, claimed.record.storagePath, contentType);
     const analysis = await analyzeOpenRouterImage(IMAGE_ANALYSIS_PROMPT, storedBytes, contentType, { signal: options.signal, model: options.visionModel ?? await configuredVisionModel(ownerId).catch(() => null) });
     const visibleText = analysis.visibleText?.slice(0, MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH) ?? null;
     const mainVisuals = analysis.mainVisuals.slice(0, MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH);
@@ -232,10 +243,12 @@ export async function readChatImagePreviewForOwner(input: {
   ownerId: string;
   conversationId: string;
   imageId: string;
-}): Promise<{ bytes: Uint8Array; contentType: ChatImageContentType }> {
+}): Promise<{ stream: ReadableStream<Uint8Array>; size: number; contentType: ChatImageContentType }> {
   const image = await findChatImagePreviewAttachment(input.ownerId, input.conversationId, input.imageId);
+  const opened = await openChatImageObject(input.ownerId, input.conversationId, image);
   return {
-    bytes: await downloadChatImageObject(input.ownerId, input.conversationId, image),
+    stream: opened.stream,
+    size: opened.size,
     contentType: image.contentType,
   };
 }

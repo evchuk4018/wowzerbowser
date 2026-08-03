@@ -1,6 +1,8 @@
 import "server-only";
 import { ChatDocumentError, DOCX_CONTENT_TYPE, estimatePdfTokens, MAX_PDF_BYTES, type ChatDocumentAttachment, type ChatDocumentPage, type NativePdfExtraction } from "../../../lib/chat-document";
-import { assertSignedDocumentDownloadUrl, createSignedDocumentDownloadUrl, documentStoragePath, registerDocument, uploadDocumentBytes } from "./chat-document-store";
+import { getStorageObjectById } from "../storage/storage-repository";
+import type { StorageObject } from "../../../lib/storage-protocol";
+import { registerDocument, uploadDocumentBytes } from "./chat-document-store";
 import { parsePdfWithOpenRouter } from "../../providers/openrouter/openrouter-document-adapter";
 import { parseDocx } from "./docx-parser";
 import { analyzeDocumentImage } from "./chat-image-service";
@@ -52,7 +54,7 @@ export type PdfIngestionInput = {
   pdfId: string;
   filename: string;
   bytes: Uint8Array;
-  downloadUrl?: string;
+  storageObjectId?: string;
   userMessageId?: string;
   jobId?: string;
   alreadyUploaded?: boolean;
@@ -64,10 +66,9 @@ export type PdfIngestionInput = {
 export type PdfIngestionDependencies = {
   parsePdfNatively: typeof parsePdfNatively;
   parsePdfWithOpenRouter: typeof parsePdfWithOpenRouter;
-  assertSignedDocumentDownloadUrl: typeof assertSignedDocumentDownloadUrl;
-  createSignedDocumentDownloadUrl: typeof createSignedDocumentDownloadUrl;
   uploadDocumentBytes: typeof uploadDocumentBytes;
   registerDocument: typeof registerDocument;
+  getStorageObjectById: typeof getStorageObjectById;
 };
 
 const PDF_SKIPPED_STAGES = [
@@ -97,22 +98,27 @@ function createPdfDocument(input: PdfIngestionInput, pages: ChatDocumentPage[], 
   };
 }
 
-async function uploadPdfIfNeeded(input: PdfIngestionInput, deps: PdfIngestionDependencies, timing: DocumentIngestionTiming): Promise<void> {
-  if (input.alreadyUploaded) return;
-  await timing.measure(DOCUMENT_INGESTION_STAGES.SUPABASE_UPLOAD, () => deps.uploadDocumentBytes(
-    documentStoragePath(input.ownerId, input.conversationId, input.pdfId, "application/pdf"),
-    input.bytes,
-    "application/pdf",
-  ));
+async function storedPdfObject(input: PdfIngestionInput, deps: PdfIngestionDependencies, timing: DocumentIngestionTiming): Promise<StorageObject> {
+  if (input.alreadyUploaded) {
+    if (!input.storageObjectId) throw new ChatDocumentError("document_storage_invalid", "The uploaded document object is missing.", 409);
+    const object = await deps.getStorageObjectById({ ownerId: input.ownerId, objectId: input.storageObjectId, conversationId: input.conversationId, state: "complete" });
+    if (!object || object.kind !== "document" || (object.documentId !== null && object.documentId !== input.pdfId) || object.contentType !== "application/pdf" || object.size !== input.bytes.byteLength) throw new ChatDocumentError("document_storage_invalid", "The uploaded document object is invalid.", 409);
+    return object;
+  }
+  return timing.measure(DOCUMENT_INGESTION_STAGES.STORAGE_UPLOAD, () => deps.uploadDocumentBytes({
+    ownerId: input.ownerId,
+    conversationId: input.conversationId,
+    documentId: input.pdfId,
+    filename: input.filename,
+    bytes: input.bytes,
+    contentType: "application/pdf",
+    projectId: input.projectId,
+    revisionId: input.revisionId,
+  }));
 }
 
 async function parsePdfExternally(input: PdfIngestionInput, deps: PdfIngestionDependencies, timing: DocumentIngestionTiming): Promise<ChatDocumentPage[]> {
-  const pages = await timing.measure(DOCUMENT_INGESTION_STAGES.EXTERNAL_PARSING, async () => {
-    const signedUrl = input.downloadUrl
-      ? deps.assertSignedDocumentDownloadUrl({ ownerId: input.ownerId, conversationId: input.conversationId, documentId: input.pdfId, contentType: "application/pdf", signedUrl: input.downloadUrl })
-      : await deps.createSignedDocumentDownloadUrl({ ownerId: input.ownerId, conversationId: input.conversationId, documentId: input.pdfId, contentType: "application/pdf" });
-    return deps.parsePdfWithOpenRouter(signedUrl, input.filename, input.signal);
-  });
+  const pages = await timing.measure(DOCUMENT_INGESTION_STAGES.EXTERNAL_PARSING, () => deps.parsePdfWithOpenRouter(input.bytes, input.filename, input.signal));
   return pages.map((page, index) => ({
     pageNumber: index + 1,
     text: page.text,
@@ -120,8 +126,8 @@ async function parsePdfExternally(input: PdfIngestionInput, deps: PdfIngestionDe
   }));
 }
 
-async function registerPdf(input: PdfIngestionInput, deps: PdfIngestionDependencies, timing: DocumentIngestionTiming, document: ChatDocumentAttachment, pages: ChatDocumentPage[]): Promise<ChatDocumentAttachment> {
-  await deps.registerDocument({ ownerId: input.ownerId, conversationId: input.conversationId, userMessageId: input.userMessageId ?? null, jobId: input.jobId ?? null, document, pages, timing });
+async function registerPdf(input: PdfIngestionInput, deps: PdfIngestionDependencies, timing: DocumentIngestionTiming, document: ChatDocumentAttachment, pages: ChatDocumentPage[], object: StorageObject): Promise<ChatDocumentAttachment> {
+  await deps.registerDocument({ ownerId: input.ownerId, conversationId: input.conversationId, userMessageId: input.userMessageId ?? null, jobId: input.jobId ?? null, document, pages, storageObjectId: object.objectId, timing });
   return document;
 }
 
@@ -129,10 +135,9 @@ export function createPdfIngestor(overrides: Partial<PdfIngestionDependencies> =
   const deps: PdfIngestionDependencies = {
     parsePdfNatively,
     parsePdfWithOpenRouter,
-    assertSignedDocumentDownloadUrl,
-    createSignedDocumentDownloadUrl,
     uploadDocumentBytes,
     registerDocument,
+    getStorageObjectById,
     ...overrides,
   };
 
@@ -147,17 +152,17 @@ export function createPdfIngestor(overrides: Partial<PdfIngestionDependencies> =
       } catch (error) {
         if (!recoverableNativePdfFailure(error)) throw error;
         timing.updateMetadata({ fallbackUsed: true });
-        await uploadPdfIfNeeded(input, deps, timing);
+        const object = await storedPdfObject(input, deps, timing);
         const pages = await parsePdfExternally(input, deps, timing);
         timing.updateMetadata({ pageCount: pages.length, ocrPageCount: 0 });
         const document = createPdfDocument(input, pages, { pageCount: pages.length, imageCount: 0 });
-        await registerPdf(input, deps, timing, document, pages);
+        await registerPdf(input, deps, timing, document, pages, object);
         markSkippedStages(timing, [DOCUMENT_INGESTION_STAGES.PAGE_RENDERING, DOCUMENT_INGESTION_STAGES.OCR, DOCUMENT_INGESTION_STAGES.DOCX_IMAGE_ANALYSIS]);
         if (ownsTiming) finishOwnedTiming(timing, [DOCUMENT_INGESTION_STAGES.PAGE_RENDERING, DOCUMENT_INGESTION_STAGES.OCR, DOCUMENT_INGESTION_STAGES.DOCX_IMAGE_ANALYSIS]);
         return document;
       }
 
-      await uploadPdfIfNeeded(input, deps, timing);
+      const object = await storedPdfObject(input, deps, timing);
       const ocrInputs = native.pages.map((page, index) => ({
         pageNumber: page.pageNumber,
         nativeText: page.text,
@@ -173,7 +178,7 @@ export function createPdfIngestor(overrides: Partial<PdfIngestionDependencies> =
       }
       timing.updateMetadata({ pageCount: native.pageCount, ocrPageCount: native.pageOcrDecisions.filter((decision) => decision.needsOcr).length });
       const document = createPdfDocument(input, pages, { pageCount: native.pageCount, imageCount: native.imageObjectCount });
-      await registerPdf(input, deps, timing, document, pages);
+      await registerPdf(input, deps, timing, document, pages, object);
       markSkippedStages(timing, PDF_SKIPPED_STAGES);
       if (ownsTiming) finishOwnedTiming(timing, PDF_SKIPPED_STAGES);
       return document;
@@ -187,7 +192,7 @@ export function createPdfIngestor(overrides: Partial<PdfIngestionDependencies> =
 
 export const ingestPdf = createPdfIngestor();
 
-export async function ingestDocx(input: { ownerId: string; conversationId: string; documentId: string; filename: string; bytes: Uint8Array; userMessageId?: string; jobId?: string; alreadyUploaded?: boolean; signal?: AbortSignal; timing?: DocumentIngestionTiming; projectId?: string; revisionId?: string; parentRevisionId?: string | null; origin?: "generated" | "uploaded"; editable?: boolean; sourceCompleteness?: "complete" | "entrypoint-only" }): Promise<ChatDocumentAttachment> {
+export async function ingestDocx(input: { ownerId: string; conversationId: string; documentId: string; filename: string; bytes: Uint8Array; storageObjectId?: string; userMessageId?: string; jobId?: string; alreadyUploaded?: boolean; signal?: AbortSignal; timing?: DocumentIngestionTiming; projectId?: string; revisionId?: string; parentRevisionId?: string | null; origin?: "generated" | "uploaded"; editable?: boolean; sourceCompleteness?: "complete" | "entrypoint-only" }): Promise<ChatDocumentAttachment> {
   const timing = createTiming({ documentType: DOCX_CONTENT_TYPE, byteSize: input.bytes.length, alreadyUploaded: input.alreadyUploaded, timing: input.timing });
   const ownsTiming = !input.timing;
   try {
@@ -197,14 +202,17 @@ export async function ingestDocx(input: { ownerId: string; conversationId: strin
       return parseDocx(input.bytes);
     });
     timing.updateMetadata({ pageCount: parsed.pages.length });
-    if (!input.alreadyUploaded) await timing.measure(DOCUMENT_INGESTION_STAGES.SUPABASE_UPLOAD, () => uploadDocumentBytes(documentStoragePath(input.ownerId, input.conversationId, input.documentId, DOCX_CONTENT_TYPE), input.bytes, DOCX_CONTENT_TYPE));
+    const object = input.alreadyUploaded
+      ? (input.storageObjectId ? await getStorageObjectById({ ownerId: input.ownerId, objectId: input.storageObjectId, conversationId: input.conversationId, state: "complete" }) : null)
+      : await timing.measure(DOCUMENT_INGESTION_STAGES.STORAGE_UPLOAD, () => uploadDocumentBytes({ ownerId: input.ownerId, conversationId: input.conversationId, documentId: input.documentId, filename: input.filename, bytes: input.bytes, contentType: DOCX_CONTENT_TYPE, projectId: input.projectId, revisionId: input.revisionId }));
+    if (!object || object.kind !== "document" || (object.documentId !== null && object.documentId !== input.documentId) || object.contentType !== DOCX_CONTENT_TYPE || object.size !== input.bytes.byteLength) throw new ChatDocumentError("document_storage_invalid", "The uploaded document object is invalid.", 409);
     const settled = await timing.measure(DOCUMENT_INGESTION_STAGES.DOCX_IMAGE_ANALYSIS, () => Promise.allSettled(parsed.images.map((image) => analyzeDocumentImage(image.bytes, image.contentType, input.signal, visionModel).then((analysis) => ({ imageNumber: image.imageNumber, ...analysis })))));
     if (settled.some((result) => result.status === "rejected")) timing.markFailed(DOCUMENT_INGESTION_STAGES.DOCX_IMAGE_ANALYSIS);
     const imageAnalyses = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
     const ocrPageCount = imageAnalyses.filter((analysis) => Boolean(analysis.visibleText?.trim())).length;
     timing.updateMetadata({ ocrPageCount });
     const document: ChatDocumentAttachment = { id: input.documentId, name: input.filename, contentType: DOCX_CONTENT_TYPE, size: input.bytes.length, pageCount: parsed.pages.length, tokenEstimate: estimatePdfTokens(parsed.pages.map((page) => page.text).join("")), hasImages: parsed.imageCount > 0, imageCount: parsed.imageCount, analyzedImageCount: imageAnalyses.length, imageAnalyses, ...(input.projectId ? { projectId: input.projectId, revisionId: input.revisionId, parentRevisionId: input.parentRevisionId, origin: input.origin, editable: input.editable, sourceCompleteness: input.sourceCompleteness } : {}) };
-    await registerDocument({ ownerId: input.ownerId, conversationId: input.conversationId, userMessageId: input.userMessageId ?? null, jobId: input.jobId ?? null, document, pages: parsed.pages, timing });
+    await registerDocument({ ownerId: input.ownerId, conversationId: input.conversationId, userMessageId: input.userMessageId ?? null, jobId: input.jobId ?? null, document, pages: parsed.pages, storageObjectId: object.objectId, timing });
     markSkippedStages(timing, [DOCUMENT_INGESTION_STAGES.EXTERNAL_PARSING, DOCUMENT_INGESTION_STAGES.PAGE_RENDERING, DOCUMENT_INGESTION_STAGES.OCR]);
     if (ownsTiming) finishOwnedTiming(timing, [DOCUMENT_INGESTION_STAGES.EXTERNAL_PARSING, DOCUMENT_INGESTION_STAGES.PAGE_RENDERING, DOCUMENT_INGESTION_STAGES.OCR]);
     return document;

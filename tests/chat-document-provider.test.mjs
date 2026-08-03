@@ -18,10 +18,10 @@ test("inline page loader skips large documents and deduplicates small document r
  assert.deepEqual(calls,["small"]);
 });
 
-test("external PDF parsing sends the signed URL to the free parser and records no request contents",async()=>{
+test("external PDF parsing sends a local byte data URL to the free parser and records no request contents",async()=>{
  const originalFetch=globalThis.fetch;
  const originalKey=process.env.OPENROUTER_API_KEY;
- const signedUrl="https://storage.test/storage/v1/object/sign/chat-documents/owner/conversation/document.pdf?token=secret-download-token";
+ const bytes=Uint8Array.from([37,80,68,70,45]);
  let requestBody;
  process.env.OPENROUTER_API_KEY="secret-provider-key";
  globalThis.fetch=async(_url,init)=>{
@@ -30,15 +30,14 @@ test("external PDF parsing sends the signed URL to the free parser and records n
  };
  try {
   const timing=new DocumentIngestionTiming({documentType:"application/pdf",byteSize:5});
-  const pages=await parsePdfWithOpenRouter(signedUrl,"document.pdf",undefined,timing);
+  const pages=await parsePdfWithOpenRouter(bytes,"document.pdf",undefined,timing);
   assert.equal(pages.length,1);
   assert.equal(requestBody.model,"openrouter/free");
   assert.equal(requestBody.plugins[0].id,"file-parser");
   assert.equal(requestBody.plugins[0].pdf.engine,"cloudflare-ai");
-  assert.equal(requestBody.messages[0].content[0].file.file_data,signedUrl);
-  assert.doesNotMatch(JSON.stringify(requestBody),/base64|JVBERi0/);
+  assert.equal(requestBody.messages[0].content[0].file.file_data,"data:application/pdf;base64,JVBERi0=");
   assert.equal(timing.snapshot().stageDurations[DOCUMENT_INGESTION_STAGES.EXTERNAL_PARSING]!==undefined,true);
-  assert.doesNotMatch(JSON.stringify(timing.toLogEntry()),/secret-provider-key|secret-download-token|page text|document\.pdf/);
+  assert.doesNotMatch(JSON.stringify(timing.toLogEntry()),/secret-provider-key|page text|document\.pdf/);
  } finally {
   globalThis.fetch=originalFetch;
   if(originalKey===undefined)delete process.env.OPENROUTER_API_KEY;else process.env.OPENROUTER_API_KEY=originalKey;
@@ -52,7 +51,7 @@ test("external PDF provider transport failures remain ChatDocumentError instance
  globalThis.fetch=async()=>{throw new Error("provider secret");};
  try {
   await assert.rejects(
-   parsePdfWithOpenRouter("https://storage.test/document.pdf?token=secret-download-token","document.pdf"),
+   parsePdfWithOpenRouter(Uint8Array.from([1,2,3]),"document.pdf"),
    (error)=>error instanceof ChatDocumentError && error.code==="parser_unavailable" && error.status===502,
   );
  } finally {

@@ -12,16 +12,18 @@ import {
 import { applyChatStreamEvent } from "../lib/chat-history.ts";
 import {
   attachmentFromUploadRecord,
-  chatImageStoragePath,
   chatImageUploadIdentityMatches,
 } from "../app/server/chat/chat-image-store.ts";
+import { validateStorageObjectKey } from "../lib/storage-protocol.ts";
+
+const objectId = "11111111-1111-4111-8111-111111111111";
 
 const attachment = (overrides = {}) => ({
   id: "img_123",
   name: "screen.png",
   contentType: "image/png",
   size: 128,
-  storagePath: "owner-1/conversation-1/message-1/img_123",
+  storagePath: `objects/${objectId}`,
   analysis: {
     status: "complete",
     visibleText: "NONE",
@@ -48,7 +50,7 @@ function request(overrides = {}) {
 test("image attachments are normalized into provider-neutral request metadata", () => {
   const parsed = parseChatRequest(request());
   assert.equal(parsed.messages[0].attachments?.[0]?.analysis.visibleText, null);
-  assert.equal(parsed.messages[0].attachments?.[0]?.storagePath, "owner-1/conversation-1/message-1/img_123");
+  assert.equal(parsed.messages[0].attachments?.[0]?.storagePath, `objects/${objectId}`);
   assert.equal(parsed.messages[0].attachments?.[0]?.analysis.mainVisuals, "A settings page with a save button.");
   assert.equal(parsed.messages[0].attachments?.[0]?.analysis.analysisUsage?.totalTokens, 15);
 });
@@ -201,7 +203,8 @@ function uploadRecord(overrides = {}) {
     imageId: "img_123",
     userMessageId: "message-1",
     jobId: "job-1",
-    storagePath: "owner-1/conversation-1/message-1/img_123",
+    storagePath: `objects/${objectId}`,
+    storageObjectId: objectId,
     name: "screen.png",
     contentType: "image/png",
     size: 128,
@@ -218,7 +221,7 @@ function uploadRecord(overrides = {}) {
 
 test("authoritative upload records reject forged paths and inactive analysis", () => {
   const record = uploadRecord();
-  assert.equal(chatImageStoragePath(record.ownerId, record.conversationId, record.userMessageId, record.imageId), record.storagePath);
+  assert.doesNotThrow(() => validateStorageObjectKey(record.storagePath));
   assert.ok(attachmentFromUploadRecord(record));
   assert.equal(attachmentFromUploadRecord({ ...record, storagePath: "owner-1/conversation-1/other-message/img_123" }), null);
   assert.equal(attachmentFromUploadRecord({ ...record, analysis: { ...record.analysis, status: "failed" } }), null);
@@ -228,7 +231,7 @@ test("image ID reuse is bound to message, job, storage, and content identity", (
   const record = uploadRecord();
   const expected = { ...record };
   assert.equal(chatImageUploadIdentityMatches(record, expected), true);
-  for (const field of ["userMessageId", "jobId", "storagePath", "contentType", "size", "contentHash"]) {
+  for (const field of ["userMessageId", "jobId", "storagePath", "storageObjectId", "contentType", "size", "contentHash"]) {
     const changed = { ...expected, [field]: field === "size" ? 129 : `${expected[field]}-changed` };
     assert.equal(chatImageUploadIdentityMatches(record, changed), false, field);
   }

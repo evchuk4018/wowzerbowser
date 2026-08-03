@@ -429,10 +429,10 @@ export async function generateChatResponse(
             if (call.name === "run_python" && activePythonTools.length) {
               if (!isModalConfigured()) throw new Error("Python execution is not configured.");
               if (!executor) executor = new ModalPythonExecutor(ownerId, conversationId, responseDeadlineAt);
-              return executePythonTool(call, executor, ownerId, conversationId, async (artifact, bytes) => {
+              return executePythonTool(call, executor, ownerId, conversationId, async (artifact, bytes, storageObjectId) => {
                 const pdfId = artifact.id;
-                if (artifact.contentType === DOCX_CONTENT_TYPE) await ingestDocx({ ownerId, conversationId, documentId: pdfId, filename: artifact.name, bytes, jobId: responseId, signal: roundSignal, projectId: artifact.projectId, revisionId: artifact.revisionId, parentRevisionId: artifact.parentRevisionId, origin: artifact.origin, editable: artifact.editable, sourceCompleteness: artifact.sourceCompleteness });
-                else await ingestPdf({ ownerId, conversationId, pdfId, filename: artifact.name, bytes, jobId: responseId, projectId: artifact.projectId, revisionId: artifact.revisionId, parentRevisionId: artifact.parentRevisionId, origin: artifact.origin, editable: artifact.editable, sourceCompleteness: artifact.sourceCompleteness });
+                if (artifact.contentType === DOCX_CONTENT_TYPE) await ingestDocx({ ownerId, conversationId, documentId: pdfId, filename: artifact.name, bytes, storageObjectId, alreadyUploaded: true, jobId: responseId, signal: roundSignal, projectId: artifact.projectId, revisionId: artifact.revisionId, parentRevisionId: artifact.parentRevisionId, origin: artifact.origin, editable: artifact.editable, sourceCompleteness: artifact.sourceCompleteness });
+                else await ingestPdf({ ownerId, conversationId, pdfId, filename: artifact.name, bytes, storageObjectId, alreadyUploaded: true, jobId: responseId, projectId: artifact.projectId, revisionId: artifact.revisionId, parentRevisionId: artifact.parentRevisionId, origin: artifact.origin, editable: artifact.editable, sourceCompleteness: artifact.sourceCompleteness });
                 allowedPdfIds.add(pdfId);
               });
             }

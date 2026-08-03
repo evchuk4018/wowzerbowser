@@ -18,12 +18,12 @@ test("owner passwords use salted scrypt and reject wrong or altered values", asy
   assert.equal(await verifyPassword(password, "not-a-password-hash"), false);
 });
 
-test("Auth.js is the only browser authentication path and Supabase stays storage-only", async () => {
+test("Auth.js is the only browser authentication path and storage is local", async () => {
   const [auth, client, login, storage, owner, bootstrap, reset] = await Promise.all([
     readFile(new URL("../auth.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/auth/auth-service.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/auth/login-form.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/server/storage/supabase-storage-adapter.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/server/storage/local-filesystem-storage.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/auth/owner-auth-service.ts", import.meta.url), "utf8"),
     readFile(new URL("../scripts/bootstrap-owner.mjs", import.meta.url), "utf8"),
     readFile(new URL("../scripts/reset-owner-password.mjs", import.meta.url), "utf8"),
@@ -41,8 +41,9 @@ test("Auth.js is the only browser authentication path and Supabase stays storage
   assert.doesNotMatch(client, /@supabase|signInWithOtp|signUp|magic/i);
   assert.match(login, /type="password"/);
   assert.doesNotMatch(login, /Create account|magic link|signUp/i);
-  assert.match(storage, /@supabase\/supabase-js/);
-  assert.doesNotMatch(storage, /supabase\.auth|signIn|signUp|magic/i);
+  assert.match(storage, /atomic|rename/);
+  assert.match(storage, /O_NOFOLLOW/);
+  assert.doesNotMatch(storage, /supabase|storage\.from|signed.?url/i);
   assert.match(owner, /sameOriginRequest/);
   assert.match(owner, /authorizeOwnerSession/);
   assert.match(bootstrap, /bootstrapOwner/);

@@ -4,7 +4,8 @@ import { ChatDocumentError } from "../lib/chat-document.ts";
 import { createPdfIngestor } from "../app/server/chat/chat-document-service.ts";
 import { DOCUMENT_INGESTION_STAGES, DocumentIngestionTiming } from "../app/server/chat/document-ingestion-timing.ts";
 
-const signedUrl = "https://storage.test/storage/v1/object/sign/chat-documents/owner/conversation/document.pdf?token=secret";
+const objectId = "11111111-1111-4111-8111-111111111111";
+const storedObject = { objectId, ownerId: "owner", conversationId: "conversation", documentId: "document", messageId: null, projectId: null, revisionId: null, kind: "document", objectKey: `objects/${objectId}`, originalFilename: "document.pdf", contentType: "application/pdf", size: 5, sha256: "a".repeat(64), state: "complete", createdAt: new Date().toISOString(), completedAt: new Date().toISOString() };
 
 function documentInput(overrides = {}) {
   return {
@@ -31,45 +32,39 @@ function nativeExtraction() {
   };
 }
 
-test("native PDF ingestion does not call the external parser or sign a URL", async () => {
+test("native PDF ingestion does not call the external parser and uses the local object", async () => {
   const calls = [];
   let registered;
   const ingestPdf = createPdfIngestor({
     parsePdfNatively: async () => { calls.push("native"); return nativeExtraction(); },
-    createSignedDocumentDownloadUrl: async () => { calls.push("signed"); return signedUrl; },
+    getStorageObjectById: async () => { calls.push("storage-read"); return storedObject; },
     parsePdfWithOpenRouter: async () => { calls.push("external"); throw new Error("not called"); },
     registerDocument: async (input) => { calls.push("register"); registered = input; },
   });
 
-  const result = await ingestPdf(documentInput({ alreadyUploaded: true }));
+  const result = await ingestPdf(documentInput({ alreadyUploaded: true, storageObjectId: objectId }));
 
-  assert.deepEqual(calls, ["native", "register"]);
+  assert.deepEqual(calls, ["native", "storage-read", "register"]);
   assert.equal(result.pageCount, 1);
   assert.equal(result.imageCount, 0);
+  assert.equal(registered.storageObjectId, objectId);
   assert.equal(registered.pages[0].text, "native text");
 });
 
-test("recoverable native PDF failures use the free parser after uploading and lazily signing", async () => {
+test("recoverable native PDF failures use the free parser after storing bytes", async () => {
   const calls = [];
   let registered;
   const ingestPdf = createPdfIngestor({
     parsePdfNatively: async () => { calls.push("native"); throw new ChatDocumentError("pdf_parser_failed", "native parser failed", 400); },
-    uploadDocumentBytes: async (path) => { calls.push(["upload", path]); },
-    createSignedDocumentDownloadUrl: async (input) => { calls.push(["signed", input.documentId]); return signedUrl; },
-    parsePdfWithOpenRouter: async (url) => { calls.push(["external", url]); return [{ pageNumber: 99, text: "fallback text", extractionMethod: "native" }]; },
+    uploadDocumentBytes: async (input) => { calls.push(["upload", input.documentId, input.contentType]); return storedObject; },
+    parsePdfWithOpenRouter: async (bytes) => { calls.push(["external", bytes instanceof Uint8Array]); return [{ pageNumber: 99, text: "fallback text", extractionMethod: "native" }]; },
     registerDocument: async (input) => { calls.push("register"); registered = input; },
   });
 
   const result = await ingestPdf(documentInput({ alreadyUploaded: false }));
-  const timing = result && registered.timing.toLogEntry();
+  const timing = registered.timing.toLogEntry();
 
-  assert.deepEqual(calls, [
-    "native",
-    ["upload", "owner/conversation/document.pdf"],
-    ["signed", "document"],
-    ["external", signedUrl],
-    "register",
-  ]);
+  assert.deepEqual(calls, ["native", ["upload", "document", "application/pdf"], ["external", true], "register"]);
   assert.equal(result.pageCount, 1);
   assert.equal(result.tokenEstimate, 4);
   assert.deepEqual(registered.pages, [{ pageNumber: 1, text: "fallback text", extractionMethod: "native" }]);
@@ -97,11 +92,11 @@ test("external fallback failures do not register a partial PDF", async () => {
   let registerCalls = 0;
   const ingestPdf = createPdfIngestor({
     parsePdfNatively: async () => { throw new ChatDocumentError("pdf_parser_failed", "native parser failed", 400); },
-    createSignedDocumentDownloadUrl: async () => signedUrl,
+    getStorageObjectById: async () => storedObject,
     parsePdfWithOpenRouter: async () => { throw new ChatDocumentError("parser_unavailable", "provider unavailable", 502); },
     registerDocument: async () => { registerCalls += 1; },
   });
 
-  await assert.rejects(ingestPdf(documentInput({ alreadyUploaded: true })), (error) => error instanceof ChatDocumentError && error.code === "parser_unavailable");
+  await assert.rejects(ingestPdf(documentInput({ alreadyUploaded: true, storageObjectId: objectId })), (error) => error instanceof ChatDocumentError && error.code === "parser_unavailable");
   assert.equal(registerCalls, 0);
 });

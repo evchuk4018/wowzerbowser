@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { ChatArtifact, ChatToolCall, ChatToolResult } from "../../../lib/chat-protocol";
-import { registerArtifact } from "../artifacts/artifact-store";
+import { readArtifactDescriptor, registerArtifact } from "../artifacts/artifact-store";
 import { isModalConfigured, ModalPythonExecutor } from "../modal/modal-python-executor";
 import { validatePythonToolInput } from "../../../lib/python-tool-policy";
 import { registerGeneratedDocumentProvenance } from "../documents/generated-document-provenance";
@@ -14,10 +14,14 @@ export { PYTHON_TOOL_DEFINITION, PYTHON_TOOL_NAME } from "./python-tool-manifest
 
 type PythonToolDependencies = {
   registerProvenance: typeof registerGeneratedDocumentProvenance;
+  registerArtifact: typeof registerArtifact;
+  readArtifactDescriptor: typeof readArtifactDescriptor;
 };
 
 const DEFAULT_DEPENDENCIES: PythonToolDependencies = {
   registerProvenance: registerGeneratedDocumentProvenance,
+  registerArtifact,
+  readArtifactDescriptor,
 };
 
 export function availableChatTools() {
@@ -37,9 +41,10 @@ export async function executePythonTool(
   executor: ModalPythonExecutor,
   ownerId: string,
   conversationId: string,
-  onDocumentArtifact?: (artifact: ChatArtifact, bytes: Uint8Array) => Promise<void>,
-  dependencies: PythonToolDependencies = DEFAULT_DEPENDENCIES,
+  onDocumentArtifact?: (artifact: ChatArtifact, bytes: Uint8Array, storageObjectId: string) => Promise<void>,
+  dependencies: Partial<PythonToolDependencies> = {},
 ): Promise<ChatToolResult> {
+  const activeDependencies: PythonToolDependencies = { ...DEFAULT_DEPENDENCIES, ...dependencies };
   const startedAt = Date.now();
   if (call.name !== PYTHON_TOOL_NAME) {
     return {
@@ -55,18 +60,22 @@ export async function executePythonTool(
     const pythonInput = validatePythonToolInput(parseArguments(call.arguments));
     const result = await executor.run(pythonInput);
     const artifacts: ChatArtifact[] = [];
+    const artifactBytes = new Map<string, Uint8Array>();
     for (const item of result.artifacts ?? []) {
       const contentType = contentTypeFor(item.path);
       if (contentType === "application/pdf" || contentType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
         try {
-          const provenance = await dependencies.registerProvenance({ ownerId, conversationId, jobId: call.id, pythonInput, executor, artifact: item });
-          artifacts.push(registerArtifact({
+          const provenance = await activeDependencies.registerProvenance({ ownerId, conversationId, jobId: call.id, pythonInput, executor, artifact: item });
+          const bytes = await executor.readArtifact(provenance.canonicalOutputPath);
+          const artifact = await activeDependencies.registerArtifact({
             ownerId, conversationId, name: item.path.split("/").pop() || "artifact",
-            path: provenance.canonicalOutputPath, size: item.size, sha256: item.sha256, contentType,
+            bytes, contentType, storageKind: "document",
             projectId: provenance.projectId, revisionId: provenance.revisionId,
             parentRevisionId: provenance.manifest.parentRevisionId, origin: "generated", editable: true,
             ...(provenance.sourceCompleteness === null ? {} : { sourceCompleteness: provenance.sourceCompleteness }),
-          }));
+          });
+          artifacts.push(artifact);
+          artifactBytes.set(artifact.id, bytes);
         } catch (error) {
           console.warn({
             event: "generated-document-provenance-fallback",
@@ -76,45 +85,49 @@ export async function executePythonTool(
             artifactType: contentType,
             failure: error instanceof Error ? error.name : "UnknownError",
           });
-          artifacts.push(registerArtifact({
+          const bytes = await executor.readArtifact(item.path);
+          const artifact = await activeDependencies.registerArtifact({
             ownerId,
             conversationId,
             name: item.path.split("/").pop() || "artifact",
-            path: item.path,
-            size: item.size,
-            sha256: item.sha256,
+            bytes,
             contentType,
+            storageKind: "document",
             origin: "generated",
             editable: false,
-          }));
+          });
+          artifacts.push(artifact);
+          artifactBytes.set(artifact.id, bytes);
         }
-      } else artifacts.push(registerArtifact({
-        ownerId,
-        conversationId,
-        name: item.path.split("/").pop() || "artifact",
-        path: item.path,
-        size: item.size,
-        sha256: item.sha256,
-        contentType,
-      }));
+      } else {
+        const bytes = await executor.readArtifact(item.path);
+        const artifact = await activeDependencies.registerArtifact({
+          ownerId,
+          conversationId,
+          name: item.path.split("/").pop() || "artifact",
+          bytes,
+          contentType,
+        });
+        artifacts.push(artifact);
+        artifactBytes.set(artifact.id, bytes);
+      }
     }
     if (onDocumentArtifact) {
       for (const artifact of artifacts.filter((item) => item.contentType === "application/pdf" || item.contentType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document")) {
-        const descriptor = (result.artifacts ?? []).find((item) => item.path.split("/").pop() === artifact.name);
-        if (descriptor) {
-          const provenancePath = artifact.projectId && artifact.revisionId ? `documents/${artifact.projectId}/revisions/${artifact.revisionId}/output/${artifact.name}` : descriptor.path;
-          try {
-            await onDocumentArtifact(artifact, await executor.readArtifact(provenancePath));
-          } catch (error) {
-            console.warn({
-              event: "generated-document-attachment-fallback",
-              ownerId,
-              conversationId,
-              jobId: call.id,
-              artifactType: artifact.contentType,
-              failure: error instanceof Error ? error.name : "UnknownError",
-            });
-          }
+        const descriptor = activeDependencies.readArtifactDescriptor(artifact.id, ownerId);
+        const bytes = artifactBytes.get(artifact.id);
+        if (!descriptor || !bytes) continue;
+        try {
+          await onDocumentArtifact(artifact, bytes, descriptor.objectId);
+        } catch (error) {
+          console.warn({
+            event: "generated-document-attachment-fallback",
+            ownerId,
+            conversationId,
+            jobId: call.id,
+            artifactType: artifact.contentType,
+            failure: error instanceof Error ? error.name : "UnknownError",
+          });
         }
       }
     }

@@ -1,6 +1,6 @@
--- Transactional operations retained from the Supabase migrations. These are
+-- Transactional operations retained from the original hosted schema. These are
 -- ordinary PostgreSQL functions called only by the server-side repository
--- layer; no grants or Supabase roles are required.
+-- layer; no hosted-provider roles are required.
 
 create or replace function public.submit_and_claim_chat_job(
   p_owner_id uuid,

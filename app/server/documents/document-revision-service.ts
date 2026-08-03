@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { parsePdfNatively } from "../chat/pdf-native-parser";
 import { renderPdfPages } from "../chat/pdf-page-renderer";
 import { ingestPdf } from "../chat/chat-document-service";
+import { getAuthorizedDocumentStorageObject } from "../chat/chat-document-store";
 import { createDocumentProjectStore } from "./document-project-store";
 import { documentRevisionOutputPath, documentRevisionSourcePath, validateDocumentProjectManifest, type DocumentProjectManifestV1 } from "../../../lib/document-project";
 import { registerArtifact } from "../artifacts/artifact-store";
@@ -63,7 +64,9 @@ export async function finalizeDocumentRevision(input: RevisionFinalizeInput): Pr
     const documentId = randomUUID();
     const document = await ingestPdf({ ownerId: input.ownerId, conversationId: input.conversationId, pdfId: documentId, filename, bytes: input.bytes, jobId: input.jobId ?? undefined, projectId: input.projectId, revisionId: input.revisionId, parentRevisionId: input.parentRevisionId, origin: input.origin ?? "generated", editable: true, sourceCompleteness: manifest.sourceCompleteness ?? undefined });
     await store.updateRenderedDocumentId({ ownerId: input.ownerId, conversationId: input.conversationId, projectId: input.projectId, revisionId: input.revisionId, renderedDocumentId: document.id });
-    const artifact = registerArtifact({ ownerId: input.ownerId, conversationId: input.conversationId, name: filename, path: manifest.outputPath, size: input.bytes.byteLength, sha256: sha256(input.bytes), contentType: "application/pdf", projectId: input.projectId, revisionId: input.revisionId, parentRevisionId: input.parentRevisionId, origin: input.origin ?? "generated", editable: true, sourceCompleteness: manifest.sourceCompleteness ?? undefined });
+    const storedDocument = await getAuthorizedDocumentStorageObject(input.ownerId, input.conversationId, document.id);
+    if (!storedDocument) throw new Error("The rendered document storage object could not be loaded.");
+    const artifact = await registerArtifact({ ownerId: input.ownerId, conversationId: input.conversationId, name: filename, storageObjectId: storedDocument.objectId, contentType: "application/pdf", projectId: input.projectId, revisionId: input.revisionId, parentRevisionId: input.parentRevisionId, origin: input.origin ?? "generated", editable: true, sourceCompleteness: manifest.sourceCompleteness ?? undefined });
     await store.finalizeRevision({ ownerId: input.ownerId, conversationId: input.conversationId, projectId: input.projectId, revisionId: input.revisionId });
     return { result: { kind: "revision", projectId: input.projectId, revisionId: input.revisionId, parentRevisionId: input.parentRevisionId, documentId: document.id, method: input.method, changedPages: pagesToRender, warnings: input.warnings ?? [] }, artifact, manifest };
   } catch (error) {

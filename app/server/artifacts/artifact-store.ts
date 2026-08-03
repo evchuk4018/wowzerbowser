@@ -2,12 +2,14 @@ import "server-only";
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { ChatArtifact } from "../../../lib/chat-protocol";
-import { relativeWorkspacePath } from "../../../lib/python-tool-policy";
+import { isStorageObjectId, type StorageObjectKind } from "../../../lib/storage-protocol";
+import { getStorageObjectById } from "../storage/storage-repository";
+import { storeStorageObject } from "../storage/storage-service";
 
-type ArtifactDescriptor = {
+export type ArtifactDescriptor = {
   ownerId: string;
   conversationId: string;
-  path: string;
+  objectId: string;
   name: string;
   contentType: string;
   size: number;
@@ -30,15 +32,58 @@ function signature(payload: string): string {
   return createHmac("sha256", signingKey()).update(payload).digest("base64url");
 }
 
-export function registerArtifact(input: ArtifactDescriptor): ChatArtifact {
+function safeName(value: string): string {
+  return value.normalize("NFKC").replace(/[\\/\u0000-\u001f\u007f]/g, "_").slice(0, 160) || "artifact";
+}
+
+export async function registerArtifact(input: {
+  ownerId: string;
+  conversationId: string;
+  name: string;
+  contentType: string;
+  bytes?: Uint8Array;
+  storageObjectId?: string;
+  storageKind?: StorageObjectKind;
+  documentId?: string;
+  messageId?: string;
+  projectId?: string;
+  revisionId?: string;
+  parentRevisionId?: string | null;
+  origin?: "generated" | "uploaded";
+  editable?: boolean;
+  sourceCompleteness?: "complete" | "entrypoint-only";
+}): Promise<ChatArtifact> {
+  const object = input.storageObjectId
+    ? await getStorageObjectById({ ownerId: input.ownerId, objectId: input.storageObjectId, conversationId: input.conversationId, state: "complete" })
+    : input.bytes
+      ? await storeStorageObject({
+        metadata: {
+          ownerId: input.ownerId,
+          conversationId: input.conversationId,
+          documentId: input.documentId,
+          messageId: input.messageId,
+          projectId: input.projectId,
+          revisionId: input.revisionId,
+          kind: input.storageKind ?? "artifact",
+          originalFilename: safeName(input.name),
+          contentType: input.contentType || "application/octet-stream",
+        },
+        source: input.bytes,
+        maxBytes: 100 * 1024 * 1024,
+      })
+      : null;
+  if (!object) throw new Error("The artifact storage object could not be loaded.");
+  if (object.conversationId !== input.conversationId || object.contentType !== (input.contentType || "application/octet-stream") || !isStorageObjectId(object.objectId)) {
+    throw new Error("The artifact storage object is not available to this owner.");
+  }
   const descriptor: ArtifactDescriptor = {
     ownerId: input.ownerId,
     conversationId: input.conversationId,
-    path: relativeWorkspacePath(input.path),
-    name: input.name.replace(/[\\/]/g, "_").slice(0, 160) || "artifact",
-    contentType: input.contentType || "application/octet-stream",
-    size: input.size,
-    sha256: input.sha256,
+    objectId: object.objectId,
+    name: safeName(input.name),
+    contentType: object.contentType,
+    size: object.size,
+    sha256: object.sha256 ?? "",
     ...(input.projectId ? { projectId: input.projectId } : {}),
     ...(input.revisionId ? { revisionId: input.revisionId } : {}),
     ...(input.parentRevisionId !== undefined ? { parentRevisionId: input.parentRevisionId } : {}),
@@ -46,6 +91,7 @@ export function registerArtifact(input: ArtifactDescriptor): ChatArtifact {
     ...(input.editable !== undefined ? { editable: input.editable } : {}),
     ...(input.sourceCompleteness ? { sourceCompleteness: input.sourceCompleteness } : {}),
   };
+  if (!/^[0-9a-f]{64}$/.test(descriptor.sha256)) throw new Error("Artifact storage metadata is missing a SHA-256 digest.");
   const payload = Buffer.from(JSON.stringify(descriptor), "utf8").toString("base64url");
   return {
     id: `${payload}.${signature(payload)}`,
@@ -74,16 +120,16 @@ export function readArtifactDescriptor(id: string, ownerId: string): ArtifactDes
 
     const value = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as ArtifactDescriptor;
     if (
-      value.ownerId !== ownerId ||
-      typeof value.conversationId !== "string" ||
-      typeof value.name !== "string" ||
-      typeof value.contentType !== "string" ||
-      typeof value.size !== "number" ||
-      !/^[0-9a-f]{64}$/.test(value.sha256)
-    ) {
-      return null;
-    }
-    return { ...value, path: relativeWorkspacePath(value.path) };
+      value.ownerId !== ownerId
+      || typeof value.conversationId !== "string"
+      || !isStorageObjectId(value.objectId)
+      || typeof value.name !== "string"
+      || typeof value.contentType !== "string"
+      || !Number.isSafeInteger(value.size)
+      || value.size < 0
+      || !/^[0-9a-f]{64}$/.test(value.sha256)
+    ) return null;
+    return value;
   } catch {
     return null;
   }

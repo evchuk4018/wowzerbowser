@@ -43,9 +43,10 @@ test("startup is guarded by the host mount check and container isolation check",
   assert.match(entrypoint, /\/srv\/storage\/media/);
 });
 
-test("background worker is explicit about the later migration limitation", async () => {
+test("background worker runs bounded local-storage maintenance", async () => {
   const worker = await read("scripts/background-worker.mjs");
-  assert.match(worker, /mode: "placeholder"/);
-  assert.match(worker, /issues 63-67/);
+  assert.match(worker, /mode: "local-storage-maintenance"/);
+  assert.match(worker, /runStorageMaintenance/);
+  assert.match(worker, /storageMaintenanceIntervalMs/);
   assert.match(worker, /--health/);
 });

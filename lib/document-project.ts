@@ -6,7 +6,6 @@ export const DOCUMENT_PROJECT_LIMITS = {
   maxFileBytes: 25 * 1024 * 1024,
   maxSourceBytes: 50 * 1024 * 1024,
 } as const;
-export const DOCUMENT_SOURCE_BUCKET = "chat-document-sources";
 export const DOCUMENT_OUTPUT_CONTENT_TYPES = [
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",

@@ -10,11 +10,12 @@ import {
   shouldUseOpenRouterQuotaFallback,
 } from "./openrouter-config";
 
-export async function parsePdfWithOpenRouter(downloadUrl: string, filename: string, signal?: AbortSignal, timing?: DocumentIngestionTiming): Promise<ChatDocumentPage[]> {
+export async function parsePdfWithOpenRouter(bytes: Uint8Array, filename: string, signal?: AbortSignal, timing?: DocumentIngestionTiming): Promise<ChatDocumentPage[]> {
  const parse = async (): Promise<ChatDocumentPage[]> => {
   const key = process.env.OPENROUTER_API_KEY?.trim();
   if (!key) throw new ChatDocumentError("parser_unavailable", "The PDF parser is not configured.", 503);
   let response: Response | undefined;
+  const fileData = `data:application/pdf;base64,${Buffer.from(bytes).toString("base64")}`;
   for (const model of [OPENROUTER_FREE_MODEL, OPENROUTER_QUOTA_FALLBACK_MODEL]) {
    try {
     response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
@@ -23,7 +24,7 @@ export async function parsePdfWithOpenRouter(downloadUrl: string, filename: stri
       body: JSON.stringify({
         model,
         messages: [{ role: "user", content: [
-          { type: "file", file: { filename, file_data: downloadUrl } },
+          { type: "file", file: { filename, file_data: fileData } },
           { type: "text", text: "Return the extracted PDF verbatim as JSON only: {\"pages\":[{\"pageNumber\":1,\"text\":\"...\"}]}. Preserve every page and do not summarize." },
         ] }],
         plugins: [{ id: "file-parser", pdf: { engine: "cloudflare-ai" } }],

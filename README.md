@@ -89,23 +89,22 @@ HDD mount is present before any application container is started.
 The app uses Auth.js Credentials authentication for exactly one owner. There is
 no signup, magic-link flow, or browser Supabase Auth client. Auth.js stores the
 encrypted session in an HttpOnly cookie, while the owner email and Node scrypt
-password hash live in local PostgreSQL. Supabase is retained only as the private
-object-storage adapter until issue #65 is complete.
+password hash live in local PostgreSQL. Application binaries live in the local
+filesystem under `/srv/storage/wowzerbowser/files` and their ownership,
+associations, MIME types, sizes, and hashes live in PostgreSQL.
 
 Copy `.env.example` to an ignored `.env` and provide these settings before
 starting the app:
 
 ```bash
-SUPABASE_URL=your-project-url
-SUPABASE_SECRET_KEY=your-server-secret-key
 APP_OWNER_EMAIL=the-only-email-allowed-to-sign-in
 APP_OWNER_ID=stable-owner-uuid
 AUTH_SECRET=at-least-32-random-characters
 NEXT_PUBLIC_SITE_URL=https://homelab.tail861ffd.ts.net
 ```
 
-Keep `AUTH_SECRET`, `APP_OWNER_ID`, and `SUPABASE_SECRET_KEY` server-only. On a
-new installation, create the one owner with the private CLI after migrations:
+Keep `AUTH_SECRET` and `APP_OWNER_ID` server-only. On a new installation, create
+the one owner with the private CLI after migrations:
 
 ```bash
 node scripts/bootstrap-owner.mjs --env-file /srv/storage/wowzerbowser/deployment.env
@@ -251,13 +250,14 @@ then returns a clear "not configured" result.
 - [Vercel Documentation](https://vercel.com/docs)
 
 ### Document attachments
-PDF and DOCX documents (up to 25 MiB) upload directly from the browser to the private `chat-documents` Supabase bucket through a signed upload URL. PDF text uses local PDF.js extraction and bounded OCR first, with the free OpenRouter parser as a recovery path and Qwen3.7 Flash as a paid fallback when the free quota is exhausted. DOCX text is extracted locally with Mammoth and divided into bounded logical pages that do not claim to match Word's rendered pages. Embedded DOCX images use the free OpenRouter image analyzer with the same Qwen3.7 Flash quota fallback. Configure `OPENROUTER_API_KEY` for Qwen background text tasks, vision, OCR, PDF parsing, and user-memory dreaming; configure `DEEPSEEK_API_KEY` only when using the built-in foreground DeepSeek chat models. Apply the local PostgreSQL migrations. Small documents are included verbatim in context, while large documents are available through gated `search_document` and `read_document_pages` tools.
+PDF and DOCX documents (up to 25 MiB) stream from the authenticated browser route into the local application filesystem. PostgreSQL records the UUID object key and document association; finalization reads only through the owner- and conversation-scoped storage service. PDF text uses local PDF.js extraction and bounded OCR first, with the free OpenRouter parser as a recovery path and Qwen3.7 Flash as a paid fallback when the free quota is exhausted. DOCX text is extracted locally with Mammoth and divided into bounded logical pages that do not claim to match Word's rendered pages. Embedded DOCX images use the free OpenRouter image analyzer with the same Qwen3.7 Flash quota fallback. Configure `OPENROUTER_API_KEY` for Qwen background text tasks, vision, OCR, PDF parsing, and user-memory dreaming; configure `DEEPSEEK_API_KEY` only when using the built-in foreground DeepSeek chat models. Apply the local PostgreSQL migrations. Small documents are included verbatim in context, while large documents are available through gated `search_document` and `read_document_pages` tools.
 
 Durable user memory is stored as a private, audited `User Profile` folder tree. Hidden chat summaries are consolidated after every three completed generations by Qwen3.7 Flash with reasoning disabled; repeated turns from one conversation contribute only its newest summary. The main agent can browse and maintain the same profile through server-side memory tools, and chat-history recall uses the same Qwen model. Dreaming is enabled by default when the schema and provider keys are configured and uses Qwen reasoning; it can be disabled with `USER_MEMORY_DREAMING_ENABLED=false`. Provider or persistence failures are isolated from normal chat delivery.
 
 PDF finalization runs on the Node.js runtime because PDF.js and `@napi-rs/canvas` require native server dependencies. The production build runs `npm run verify:pdf-runtime` before Next.js build output is generated and inspects both emitted function traces afterward; a missing native canvas package must fail the deployment rather than first appearing as a document-upload 500. After changing native dependencies, deploy with a clean dependency install and verify the emitted Vercel function trace contains the Linux canvas package. The configured 300-second duration remains subject to the active Vercel plan's maximum.
 
-The document metadata schema is included in the local PostgreSQL migrations and
-is applied by `scripts/migrate.mjs`. Supabase remains the private object-storage
-provider for the `chat-documents` bucket; keep that bucket configured and use
-the signed upload/download adapters in the server.
+The document and binary-object metadata schema is included in the local
+PostgreSQL migrations and is applied by `scripts/migrate.mjs`. The filesystem
+adapter validates UUID object keys, rejects traversal and symlink paths, writes
+through a temporary file followed by an atomic rename, and never exposes the
+files directory as a static web path.

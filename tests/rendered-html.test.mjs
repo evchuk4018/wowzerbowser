@@ -248,7 +248,7 @@ test("keeps PWA icon references and service worker behavior safe", async () => {
   assert.match(styles, /height: 100dvh;/);
 });
 
-test("keeps Auth.js credentials and object storage separate", async () => {
+test("keeps Auth.js credentials and local object storage separate", async () => {
   const [page, authConfig, authRoute, ownerService, authService, authForm, storageAdapter] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../auth.ts", import.meta.url), "utf8"),
@@ -256,7 +256,7 @@ test("keeps Auth.js credentials and object storage separate", async () => {
     readFile(new URL("../app/auth/owner-auth-service.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/auth/auth-service.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/auth/login-form.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/server/storage/supabase-storage-adapter.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/server/storage/local-filesystem-storage.ts", import.meta.url), "utf8"),
   ]);
 
   assert.doesNotMatch(page, /@supabase\/supabase-js|createClient\(/);
@@ -271,8 +271,8 @@ test("keeps Auth.js credentials and object storage separate", async () => {
   assert.doesNotMatch(authService, /supabase|magic|signUp/i);
   assert.match(authForm, /Password/);
   assert.doesNotMatch(authForm, /Create password account|magic link|signUp/i);
-  assert.match(storageAdapter, /@supabase\/supabase-js/);
-  assert.doesNotMatch(storageAdapter, /supabase\.auth|signIn|signUp|magic/i);
+  assert.match(storageAdapter, /atomic|rename/);
+  assert.doesNotMatch(storageAdapter, /supabase|storage\.from|signed.?url/i);
 });
 
 test("renders a non-blocking startup shell before remote chat bootstrap", async () => {
@@ -641,7 +641,7 @@ test("keeps Python execution isolated, persistent, bounded, and server-only", as
   assert.match(executor, /stream\.getReader\(\)/);
   assert.doesNotMatch(executor, /stdout\.readText\(\)|stderr\.readText\(\)/);
   assert.match(executor, /relativeWorkspacePath/);
-  assert.match(executor, /readConversationArtifact/);
+  assert.doesNotMatch(executor, /readConversationArtifact/);
   assert.doesNotMatch(executor, /process\.env\.DEEPSEEK_API_KEY|SUPABASE_SECRET_KEY/);
   assert.match(tool, /python-tool-manifest/);
   assert.match(manifest, /PYTHON_TOOL_NAME = "run_python"/);
@@ -654,7 +654,7 @@ test("keeps Python execution isolated, persistent, bounded, and server-only", as
   assert.match(artifactStore, /ARTIFACT_SIGNING_SECRET/);
   assert.match(artifactStore, /sha256/);
   assert.match(artifactRoute, /authorizeOwnerSession/);
-  assert.match(artifactRoute, /readConversationArtifact/);
+  assert.match(artifactRoute, /openOwnedStorageObject/);
   assert.match(artifactRoute, /Artifact has changed since it was created/);
   assert.match(client, /\/api\/chat\/artifacts\/\$\{encodeURIComponent\(artifact\.id\)\}/);
   assert.doesNotMatch(client, /artifact\.downloadUrl/);

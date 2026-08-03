@@ -14,6 +14,7 @@ import {
 import { deleteConversationWorkspace } from "../modal/modal-conversation-cleanup";
 import { deleteChatImagesForConversation } from "./chat-image-store";
 import { deleteChatDocumentsForConversation } from "./chat-document-store";
+import { deleteStorageObjectsForConversation } from "../storage/storage-service";
 
 export const CHAT_EMPTY_CONVERSATION_RETENTION_MS = 24 * 60 * 60 * 1_000;
 export const CHAT_EMPTY_CONVERSATION_CLEANUP_LIMIT = 50;
@@ -28,6 +29,7 @@ export async function deleteChatConversation(ownerId: string, conversationId: st
 
   await cancelChatJobsForConversation(ownerId, conversationId);
   await deleteConversationWorkspace(ownerId, conversationId);
+  await deleteStorageObjectsForConversation(ownerId, conversationId);
   await deleteChatImagesForConversation(ownerId, conversationId);
   await deleteChatDocumentsForConversation(ownerId, conversationId);
   await deleteChatConversationRecord(ownerId, conversationId);

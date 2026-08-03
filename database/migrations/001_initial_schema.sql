@@ -1,5 +1,5 @@
 -- Clean local PostgreSQL schema for the server-only application database.
--- Supabase Auth and Supabase Storage remain external provider services.
+-- Auth.js and local filesystem storage are layered above this PostgreSQL schema.
 
 create table if not exists public.chat_conversations (
   owner_id uuid not null,

@@ -70,10 +70,11 @@ chmod 600 /srv/storage/wowzerbowser/deployment.env
 ```
 
 Set `APP_UID` and `APP_GID` from `id -u` and `id -g`. Set a random
-`POSTGRES_PASSWORD`, make `DATABASE_URL` use the same password, and set the
-provider values required by the application, including `SUPABASE_URL`,
-`SUPABASE_SECRET_KEY`, and `APP_OWNER_EMAIL`. Set a random `AUTH_SECRET` and
-keep `NEXT_PUBLIC_SITE_URL` on the private Tailscale HTTPS origin.
+`POSTGRES_PASSWORD`, make `DATABASE_URL` use the same password, and set
+`APP_OWNER_EMAIL`. Set a random `AUTH_SECRET` and keep
+`NEXT_PUBLIC_SITE_URL` on the private Tailscale HTTPS origin. Local binaries
+are stored below `/srv/storage/wowzerbowser/files`; do not configure that path
+to point at `/srv/storage/media`.
 
 Generate or verify the stable server-only database owner key:
 
@@ -152,9 +153,11 @@ docker inspect wowzerbowser-web-1 --format '{{json .Mounts}}'
 docker inspect wowzerbowser-background-worker-1 --format '{{json .Mounts}}'
 ```
 
-The application retains Supabase Storage only for private object uploads until
-issue #65 is complete. Auth.js credentials and all structured application state
-are persisted through the private local PostgreSQL service.
+Auth.js credentials, structured application state, and binary object metadata
+are persisted through the private local PostgreSQL service. Binary contents are
+stored atomically below `/srv/storage/wowzerbowser/files` and are served only
+through authenticated application routes. The background worker removes
+bounded batches of abandoned temporary uploads.
 
 ## Tailscale Serve
 

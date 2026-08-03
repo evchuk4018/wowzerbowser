@@ -27,10 +27,14 @@ test("document preparation uploads and finalizes immediately for PDF/DOCX flows"
   const stages = [];
   globalThis.fetch = async (url, init = {}) => {
     calls.push({ url: String(url), method: init.method ?? "GET" });
-    if (String(url).endsWith("/upload-url")) {
-      return new Response(JSON.stringify({ signedUrl: "https://storage.test/document" }), { status: 200 });
+    if (String(url).endsWith("/upload")) {
+      assert.equal(init.method, "POST");
+      const uploadHeaders = new Headers(init.headers);
+      assert.equal(uploadHeaders.get("content-type"), DOCX_CONTENT_TYPE);
+      assert.equal(uploadHeaders.get("x-conversation-id"), "conversation-1");
+      assert.equal(uploadHeaders.get("x-document-id"), "document-1");
+      return new Response(JSON.stringify({ storageObjectId: "11111111-1111-4111-8111-111111111111" }), { status: 200 });
     }
-    if (String(url) === "https://storage.test/document") return new Response(null, { status: 200 });
     if (String(url).endsWith("/finalize")) {
       return new Response(JSON.stringify({ document: attachment }), { status: 200 });
     }
@@ -49,8 +53,7 @@ test("document preparation uploads and finalizes immediately for PDF/DOCX flows"
 
     assert.deepEqual(result, attachment);
     assert.deepEqual(calls.map(({ url, method }) => [url, method]), [
-      ["/api/chat/documents/upload-url", "POST"],
-      ["https://storage.test/document", "PUT"],
+      ["/api/chat/documents/upload", "POST"],
       ["/api/chat/documents/finalize", "POST"],
     ]);
     assert.deepEqual(stages, ["uploading", "parsing"]);

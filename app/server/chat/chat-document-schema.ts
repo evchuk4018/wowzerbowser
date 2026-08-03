@@ -1,7 +1,7 @@
 import "server-only";
 
-import { CHAT_DOCUMENT_BUCKET, DOCX_CONTENT_TYPE, ChatDocumentError } from "../../../lib/chat-document";
-import { getServerClient } from "../storage/supabase-storage-adapter";
+import { ChatDocumentError } from "../../../lib/chat-document";
+import { ensureApplicationStorageDirectories } from "../storage/local-filesystem-storage";
 import { assertChatDocumentTables } from "./chat-document-store";
 
 const SCHEMA_CACHE_MS = 5 * 60 * 1_000;
@@ -9,22 +9,15 @@ const SCHEMA_CACHE_MS = 5 * 60 * 1_000;
 let validUntil = 0;
 let validation: Promise<void> | null = null;
 
-async function validate(db: ReturnType<typeof getServerClient>): Promise<void> {
+async function validate(): Promise<void> {
   await assertChatDocumentTables();
-  const { data, error: bucketError } = await db.storage.getBucket(CHAT_DOCUMENT_BUCKET);
-  if (bucketError || !data) throw bucketError ?? new Error("The document bucket was not found.");
-  const allowedMimeTypes = data.allowed_mime_types ?? [];
-  if (!allowedMimeTypes.includes("application/pdf") || !allowedMimeTypes.includes(DOCX_CONTENT_TYPE)) {
-    throw new Error("The document bucket does not allow PDF and DOCX uploads.");
-  }
+  await ensureApplicationStorageDirectories();
 }
 
-export async function ensureChatDocumentSchema(
-  db: ReturnType<typeof getServerClient> = getServerClient(),
-): Promise<void> {
+export async function ensureChatDocumentSchema(): Promise<void> {
   if (Date.now() < validUntil) return;
   if (!validation) {
-    validation = validate(db)
+    validation = validate()
       .then(() => {
         validUntil = Date.now() + SCHEMA_CACHE_MS;
       })

@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { createHash } from "node:crypto";
 import { authorizeOwnerSession } from "../../../../auth/owner-auth-service";
 import { readArtifactDescriptor } from "../../../../server/artifacts/artifact-store";
-import { readConversationArtifact } from "../../../../server/modal/modal-python-executor";
+import { openOwnedStorageObject } from "../../../../server/storage/storage-service";
 
 function unauthorizedResponse() {
   return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
@@ -24,16 +23,15 @@ export async function GET(
   if (!artifact) return NextResponse.json({ error: "Artifact not found." }, { status: 404 });
 
   try {
-    const bytes = await readConversationArtifact(user.id, artifact.conversationId, artifact.path);
-    const digest = createHash("sha256").update(bytes).digest("hex");
-    if (bytes.byteLength !== artifact.size || digest !== artifact.sha256) {
+    const opened = await openOwnedStorageObject({ ownerId: user.id, objectId: artifact.objectId, conversationId: artifact.conversationId });
+    if (opened.size !== artifact.size || opened.object.sha256 !== artifact.sha256) {
       return NextResponse.json({ error: "Artifact has changed since it was created." }, { status: 409 });
     }
-    return new Response(Buffer.from(bytes), {
+    return new Response(opened.stream, {
       headers: {
         "cache-control": "private, no-store",
-        "content-disposition": `attachment; filename="${artifact.name.replace(/"/g, "")}"`,
-        "content-length": String(bytes.byteLength),
+        "content-disposition": `attachment; filename="${artifact.name.replace(/[\"\\\r\n]/g, "_")}"`,
+        "content-length": String(opened.size),
         "content-type": artifact.contentType,
         "x-content-type-options": "nosniff",
       },

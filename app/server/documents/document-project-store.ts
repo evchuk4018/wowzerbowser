@@ -1,16 +1,25 @@
 import "server-only";
 
-import { DOCUMENT_SOURCE_BUCKET, validateDocumentProjectManifest, type DocumentProjectManifestV1 } from "../../../lib/document-project";
-import { getServerClient } from "../storage/supabase-storage-adapter";
+import { DOCUMENT_PROJECT_LIMITS, validateDocumentProjectManifest, type DocumentProjectManifestV1 } from "../../../lib/document-project";
 import { databaseOwnerId, jsonb, query } from "../database/database";
+import { localFilesystemStorageProvider } from "../storage/local-filesystem-storage";
+import { getStorageObjectById } from "../storage/storage-repository";
+import { deleteOwnedStorageObject, storeStorageObject } from "../storage/storage-service";
+import { downloadAuthorizedDocumentBytes } from "../chat/chat-document-store";
 
-type Db = ReturnType<typeof getServerClient>;
+const MAX_STORAGE_OBJECT_BYTES = DOCUMENT_PROJECT_LIMITS.maxFileBytes;
 
-export function revisionSourceStoragePath(input: { ownerId: string; conversationId: string; projectId: string; revisionId: string; relativePath: string }) {
-  return `${input.ownerId}/${input.conversationId}/${input.projectId}/${input.revisionId}/${input.relativePath}`;
+/**
+ * The revision source path is now represented by a UUID-keyed storage object.
+ * Keep this helper as a compatibility boundary for callers that need a
+ * logical label, but never use the returned value as a filesystem path.
+ */
+export function revisionSourceStoragePath(input: { relativePath: string }): string {
+  return `revision-source:${input.relativePath}`;
 }
 
-export function createDocumentProjectStore(db: Db = getServerClient()) {
+export function createDocumentProjectStore(_unusedDependency?: unknown) {
+  void _unusedDependency;
   return {
     async createProject(input: { ownerId: string; conversationId: string; projectId: string; title: string; origin?: "generated" | "uploaded" }) {
       await query("insert into chat_document_projects(owner_id,conversation_id,project_id,title,origin) values($1,$2,$3,$4,$5)", [databaseOwnerId(input.ownerId), input.conversationId, input.projectId, input.title, input.origin ?? "generated"]);
@@ -25,10 +34,30 @@ export function createDocumentProjectStore(db: Db = getServerClient()) {
       for (const file of input.manifest.sourceFiles) {
         const bytes = input.files.get(file.path);
         if (!bytes) throw new Error(`Missing captured source file: ${file.path}`);
-        const storagePath = revisionSourceStoragePath({ ...input, projectId: input.manifest.projectId, revisionId: input.manifest.revisionId, relativePath: file.path });
-        const { error: uploadError } = await db.storage.from(DOCUMENT_SOURCE_BUCKET).upload(storagePath, bytes, { contentType: file.contentType, upsert: false });
-        if (uploadError) throw uploadError;
-        await query("insert into chat_document_revision_files(owner_id,conversation_id,project_id,revision_id,relative_path,storage_path,content_type,size,sha256) values($1,$2,$3,$4,$5,$6,$7,$8,$9)", [owner, input.conversationId, input.manifest.projectId, input.manifest.revisionId, file.path, storagePath, file.contentType, file.size, file.sha256]);
+        if (bytes.byteLength !== file.size) throw new Error(`Captured source file size does not match the manifest: ${file.path}`);
+        const object = await storeStorageObject({
+          metadata: {
+            ownerId: input.ownerId,
+            conversationId: input.conversationId,
+            projectId: input.manifest.projectId,
+            revisionId: input.manifest.revisionId,
+            kind: "revision-source",
+            originalFilename: file.path.split("/").pop() ?? "source",
+            contentType: file.contentType,
+          },
+          source: bytes,
+          maxBytes: MAX_STORAGE_OBJECT_BYTES,
+        });
+        if (object.size !== file.size || object.sha256 !== file.sha256) {
+          await deleteOwnedStorageObject({ ownerId: input.ownerId, objectId: object.objectId }).catch(() => undefined);
+          throw new Error(`Captured source file hash does not match the manifest: ${file.path}`);
+        }
+        try {
+          await query("insert into chat_document_revision_files(owner_id,conversation_id,project_id,revision_id,relative_path,storage_path,storage_object_id,content_type,size,sha256) values($1,$2,$3,$4,$5,$6,$7::uuid,$8,$9,$10)", [owner, input.conversationId, input.manifest.projectId, input.manifest.revisionId, file.path, object.objectKey, object.objectId, file.contentType, file.size, file.sha256]);
+        } catch (error) {
+          await deleteOwnedStorageObject({ ownerId: input.ownerId, objectId: object.objectId }).catch(() => undefined);
+          throw error;
+        }
       }
     },
     async finalizeRevision(input: { ownerId: string; conversationId: string; projectId: string; revisionId: string }) {
@@ -54,23 +83,21 @@ export function createDocumentProjectStore(db: Db = getServerClient()) {
       return project && revision ? { origin: project.origin, sourceCompleteness: revision.source_completeness as "complete" | "entrypoint-only" } : null;
     },
     async listRevisionFiles(input: { ownerId: string; conversationId: string; projectId: string; revisionId: string }) {
-      return query<Record<string, unknown>>("select relative_path,storage_path,content_type,size,sha256 from chat_document_revision_files where owner_id=$1 and conversation_id=$2 and project_id=$3 and revision_id=$4 order by relative_path", [databaseOwnerId(input.ownerId), input.conversationId, input.projectId, input.revisionId]);
+      return query<Record<string, unknown>>("select relative_path,storage_path,storage_object_id,content_type,size,sha256 from chat_document_revision_files where owner_id=$1 and conversation_id=$2 and project_id=$3 and revision_id=$4 order by relative_path", [databaseOwnerId(input.ownerId), input.conversationId, input.projectId, input.revisionId]);
     },
     async downloadRevisionSourceFile(input: { ownerId: string; conversationId: string; projectId: string; revisionId: string; relativePath: string }) {
-      const [row] = await query<{ storage_path: string }>("select storage_path from chat_document_revision_files where owner_id=$1 and conversation_id=$2 and project_id=$3 and revision_id=$4 and relative_path=$5", [databaseOwnerId(input.ownerId), input.conversationId, input.projectId, input.revisionId, input.relativePath]);
-      if (!row) return null;
-      const result = await db.storage.from(DOCUMENT_SOURCE_BUCKET).download(row.storage_path);
-      if (result.error) throw result.error;
-      return new Uint8Array(await result.data.arrayBuffer());
+      const [row] = await query<{ storage_object_id: string | null }>("select storage_object_id from chat_document_revision_files where owner_id=$1 and conversation_id=$2 and project_id=$3 and revision_id=$4 and relative_path=$5", [databaseOwnerId(input.ownerId), input.conversationId, input.projectId, input.revisionId, input.relativePath]);
+      if (!row?.storage_object_id) return null;
+      const object = await getStorageObjectById({ ownerId: input.ownerId, objectId: row.storage_object_id, conversationId: input.conversationId, state: "complete" });
+      if (!object || object.kind !== "revision-source" || object.projectId !== input.projectId || object.revisionId !== input.revisionId) return null;
+      const bytes = await localFilesystemStorageProvider.readObjectBytes(object);
+      if (bytes.byteLength !== object.size) throw new Error("The revision source storage object size does not match its metadata.");
+      return bytes;
     },
     async downloadRevisionOutput(input: { ownerId: string; conversationId: string; projectId: string; revisionId: string }) {
       const revision = await this.getRevision(input);
       if (!revision || typeof revision.rendered_document_id !== "string") return null;
-      const [document] = await query<{ storage_path: string }>("select storage_path from chat_documents where owner_id=$1 and conversation_id=$2 and document_id=$3", [databaseOwnerId(input.ownerId), input.conversationId, revision.rendered_document_id]);
-      if (!document?.storage_path) return null;
-      const result = await db.storage.from("chat-documents").download(document.storage_path);
-      if (result.error) throw result.error;
-      return new Uint8Array(await result.data.arrayBuffer());
+      return downloadAuthorizedDocumentBytes(input.ownerId, input.conversationId, revision.rendered_document_id);
     },
   };
 }
