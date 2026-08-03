@@ -12,6 +12,38 @@ export type DreamingConsolidation = {
 };
 type SourceRow = { job_id: string; sequence: number | string; conversation_id: string; completed_at: unknown };
 
+export type CompletedChatJobForMemory = {
+  conversationId: string;
+  jobId: string;
+};
+
+export async function listCompletedChatJobsForMemory(ownerId: string, limit = 8): Promise<CompletedChatJobForMemory[]> {
+  const rows = await query<{ conversation_id: string; job_id: string }>(
+    `select jobs.conversation_id,jobs.job_id
+       from chat_jobs jobs
+      where jobs.owner_id=$1
+        and jobs.status='completed'
+        and jobs.completed_at is not null
+        and (
+          not exists (
+            select 1 from chat_summary_jobs summaries
+             where summaries.owner_id=jobs.owner_id
+               and summaries.conversation_id=jobs.conversation_id
+               and summaries.source_job_id=jobs.job_id
+               and summaries.status='completed'
+          )
+          or not exists (
+            select 1 from dreaming_completed_jobs completed
+             where completed.owner_id=jobs.owner_id and completed.job_id=jobs.job_id
+          )
+        )
+      order by jobs.completed_at,jobs.job_id
+      limit $2`,
+    [databaseOwnerId(ownerId), Math.max(1, Math.min(limit, 16))],
+  );
+  return rows.map((row) => ({ conversationId: row.conversation_id, jobId: row.job_id }));
+}
+
 export async function registerCompletedJobForDreaming(ownerId: string, conversationId: string, jobId: string): Promise<void> {
   const [job] = await query<{ status: string; completed_at: unknown }>("select status,completed_at from chat_jobs where owner_id=$1 and conversation_id=$2 and job_id=$3", [databaseOwnerId(ownerId), conversationId, jobId]);
   if (!job || job.status !== "completed" || !job.completed_at) return;
@@ -38,7 +70,7 @@ export async function claimDreamingConsolidation(ownerId: string, cycleNumber?: 
   if (cycleNumber !== undefined) { parameters.push(cycleNumber); cycleClause = ` and cycle_number=$${parameters.length}`; }
   const [row] = await query<Record<string, unknown>>(`with candidate as (
       select owner_id,cycle_number from dreaming_consolidations
-       where owner_id=$1 and (status='queued' or (status='running' and lease_expires_at < $2))${cycleClause}
+       where owner_id=$1 and (status='queued' or (status='running' and (lease_expires_at is null or lease_expires_at < $2)))${cycleClause}
        order by cycle_number for update skip locked limit 1
     ) update dreaming_consolidations d set status='running',lease_expires_at=$3,updated_at=$2 from candidate
       where d.owner_id=candidate.owner_id and d.cycle_number=candidate.cycle_number

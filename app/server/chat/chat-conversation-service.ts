@@ -69,7 +69,7 @@ export async function cleanupStaleEmptyChatConversations(
   const cutoff = now.getTime() - maxAgeMs;
   const summaries = await listChatConversations(ownerId);
   const candidates = summaries
-    .filter((conversation) => !conversation.hasMessages && Number.isFinite(Date.parse(conversation.updatedAt)) && Date.parse(conversation.updatedAt) <= cutoff)
+    .filter((conversation) => !conversation.hasMessages && !conversation.isStreaming && Number.isFinite(Date.parse(conversation.updatedAt)) && Date.parse(conversation.updatedAt) <= cutoff)
     .sort((left, right) => Date.parse(left.updatedAt) - Date.parse(right.updatedAt))
     .slice(0, limit);
   let deleted = 0;

@@ -9,9 +9,10 @@ import { runClaimedDocumentProcessingJob } from "../app/server/chat/document-pro
 import { claimNextChatImageProcessingJob } from "../app/server/chat/chat-image-processing-job-store";
 import { runClaimedChatImageProcessingJob } from "../app/server/chat/chat-image-processing-job-runner";
 import { processChatSummaryForCompletedJob } from "../app/server/chat/chat-summary-service";
-import { processDreamingForCompletedJob } from "../app/server/memory/dreaming-service";
-import { logBackgroundTaskFailure } from "../app/server/observability/background-error";
-import { runStorageMaintenance } from "./storage-maintenance.mjs";
+import { processDreamingForCompletedJob, processScheduledMemoryWork } from "../app/server/memory/dreaming-service";
+import { runAutomationSchedulerTickForOwner } from "../app/server/automations/automation-scheduler";
+import { runAbandonedUploadMaintenance, runIncompleteFileMaintenance as runStorageMaintenance, runStaleChatMaintenance } from "../app/server/maintenance/maintenance-service";
+import { describeBackgroundError, logBackgroundTaskFailure } from "../app/server/observability/background-error";
 
 function boundedInteger(value: string | undefined, fallback: number, minimum: number, maximum: number): number {
   const parsed = Number.parseInt(value ?? "", 10);
@@ -24,6 +25,10 @@ const heartbeatFile = process.env.WORKER_HEARTBEAT_FILE || "/tmp/wowzerbowser-ba
 const heartbeatIntervalMs = boundedInteger(process.env.WORKER_HEARTBEAT_INTERVAL_MS, 5_000, 1_000, 60_000);
 const pollIntervalMs = boundedInteger(process.env.WORKER_POLL_INTERVAL_MS, 1_000, 250, 10_000);
 const maintenanceIntervalMs = boundedInteger(process.env.STORAGE_MAINTENANCE_INTERVAL_MS, 60_000, 10_000, 3_600_000);
+const automationSchedulerIntervalMs = boundedInteger(process.env.AUTOMATION_SCHEDULER_INTERVAL_MS, 30_000, 5_000, 3_600_000);
+const memorySchedulerIntervalMs = boundedInteger(process.env.MEMORY_SCHEDULER_INTERVAL_MS, 60_000, 10_000, 3_600_000);
+const schedulerBatch = boundedInteger(process.env.AUTOMATION_SCHEDULER_BATCH, 1, 1, 4);
+const maintenanceLimit = boundedInteger(process.env.WORKER_MAINTENANCE_LIMIT, 50, 1, 50);
 const chatConcurrency = boundedInteger(process.env.WORKER_CHAT_CONCURRENCY, 1, 1, 1);
 const documentConcurrency = boundedInteger(process.env.WORKER_DOCUMENT_CONCURRENCY, 1, 1, 1);
 const imageConcurrency = boundedInteger(process.env.WORKER_IMAGE_CONCURRENCY, 1, 1, 1);
@@ -52,6 +57,49 @@ function logPoll(chatClaimed: boolean, documentClaimed: boolean, imageClaimed: b
       ocrPageLimit: ocrConcurrency,
     }));
   }
+}
+
+function schedulerTask<T>(task: string, run: () => Promise<T>): () => Promise<T> {
+  return async () => {
+    const startedAt = Date.now();
+    try {
+      const result = await run();
+      const recordRuns = result && typeof result === "object" && "runs" in result && Array.isArray(result.runs)
+        ? result.runs as Array<{ id?: unknown; outcome?: unknown; durationMs?: unknown }>
+        : [];
+      for (const record of recordRuns) {
+        console.log(JSON.stringify({
+          event: "background-worker-scheduler",
+          task,
+          recordId: typeof record.id === "string" ? record.id : "batch",
+          durationMs: Number.isFinite(Number(record.durationMs)) ? Number(record.durationMs) : Date.now() - startedAt,
+          outcome: typeof record.outcome === "string" ? record.outcome : "completed",
+        }));
+      }
+      if (!recordRuns.length) {
+        console.log(JSON.stringify({
+          event: "background-worker-scheduler",
+          task,
+          recordId: "batch",
+          durationMs: Date.now() - startedAt,
+          outcome: "completed",
+          ...(result && typeof result === "object" ? result : {}),
+        }));
+      }
+      return result;
+    } catch (error) {
+      const details = describeBackgroundError(error);
+      console.warn(JSON.stringify({
+        event: "background-worker-scheduler",
+        task,
+        recordId: "batch",
+        durationMs: Date.now() - startedAt,
+        outcome: "failed",
+        errorCode: details.code ?? "UnknownError",
+      }));
+      throw error;
+    }
+  };
 }
 
 writeHeartbeat();
@@ -96,11 +144,39 @@ const loop = new BackgroundWorkerLoop({
     const image = await runClaimedChatImageProcessingJob(ownerId, claim, { shutdownSignal });
     if (image) console.log(JSON.stringify({ event: "background-worker-image-terminal", workerId, conversationId: claim.conversationId, jobId: claim.jobId, imageId: claim.imageId, status: "completed" }));
   },
-  maintenance: async () => {
-    const cleaned = await runStorageMaintenance();
-    if (cleaned) console.log(JSON.stringify({ event: "storage-maintenance", cleaned }));
-  },
+  schedulerTasks: [
+    {
+      name: "automation",
+      intervalMs: automationSchedulerIntervalMs,
+      run: schedulerTask("automation", async () => runAutomationSchedulerTickForOwner(ownerId, { batchSize: schedulerBatch })),
+    },
+    {
+      name: "memory",
+      intervalMs: memorySchedulerIntervalMs,
+      run: schedulerTask("memory", async () => processScheduledMemoryWork(ownerId, 8)),
+    },
+    {
+      name: "stale-chat",
+      intervalMs: maintenanceIntervalMs,
+      run: schedulerTask("stale-chat", async () => ({ deleted: await runStaleChatMaintenance({ ownerId, limit: maintenanceLimit }) })),
+    },
+    {
+      name: "abandoned-upload",
+      intervalMs: maintenanceIntervalMs,
+      run: schedulerTask("abandoned-upload", async () => ({ cleaned: await runAbandonedUploadMaintenance({ ownerId, limit: maintenanceLimit }) })),
+    },
+    {
+      name: "incomplete-file",
+      intervalMs: maintenanceIntervalMs,
+      run: schedulerTask("incomplete-file", async () => ({ cleaned: await runStorageMaintenance({ ownerId, limit: maintenanceLimit }) })),
+    },
+  ],
   onTaskError: (kind, error) => {
+    if (kind === "scheduler") {
+      const details = describeBackgroundError(error);
+      console.warn(JSON.stringify({ event: "background-worker-scheduler-loop-failed", workerId, errorCode: details.code ?? "UnknownError" }));
+      return;
+    }
     logBackgroundTaskFailure("background-worker-task-failed", { workerId, kind }, error);
   },
 });
@@ -114,6 +190,10 @@ console.log(JSON.stringify({
   imageConcurrency,
   ocrConcurrency,
   pollIntervalMs,
+  automationSchedulerIntervalMs,
+  memorySchedulerIntervalMs,
+  maintenanceIntervalMs,
+  schedulerBatch,
   leaseRecovery: true,
 }));
 

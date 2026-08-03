@@ -1,33 +1,124 @@
 import "server-only";
+
 import { randomUUID } from "node:crypto";
 import type { ChatStreamEvent } from "../../../lib/chat-protocol";
 import { generateChatResponse } from "../../chat/chat-server-service";
 import { getChatUserPreferences } from "../chat/chat-user-preferences-store";
 import { recordUsage } from "../usage/usage-store";
-import { getAutomationRow, finishAutomationRun } from "./automation-repository";
-import { nextAutomationRun } from "./automation-schedule";
+import { formatBackgroundError } from "../observability/background-error";
+import {
+  finishAutomationRun,
+  getAutomationRow,
+  heartbeatAutomationRun,
+  type ClaimedAutomationRun,
+} from "./automation-repository";
+import { nextFutureAutomationRun } from "./automation-schedule";
 import type { AutomationRunResult } from "../agent/automation-run-result-tool";
 import { queueDiscordAutomationDelivery } from "../discord/discord-automation-delivery-adapter";
-import { chatAutomationDelivery } from "./automation-delivery";
+import { chatAutomationDelivery, type AutomationDeliveryAdapter } from "./automation-delivery";
 import { resolveAutomationAnswer } from "./automation-answer";
 
-type ClaimedRun = { id: string; owner_id: string; automation_id: string; scheduled_for: string };
+export type AutomationRunExecution = {
+  outcome: "notified" | "no_match" | "failed" | "lease_lost";
+};
 
-export async function runClaimedAutomation(run: ClaimedRun): Promise<void> {
-  const automation = await getAutomationRow(run.owner_id, run.automation_id);
+export type AutomationRunnerDependencies = {
+  getAutomation: typeof getAutomationRow;
+  getPreferences: typeof getChatUserPreferences;
+  generate: typeof generateChatResponse;
+  recordUsage: typeof recordUsage;
+  finish: typeof finishAutomationRun;
+  heartbeat: typeof heartbeatAutomationRun;
+  deliver: AutomationDeliveryAdapter;
+  queueDiscord: typeof queueDiscordAutomationDelivery;
+  now: () => Date;
+  createSignal: () => AbortSignal;
+};
+
+const defaultDependencies: AutomationRunnerDependencies = {
+  getAutomation: getAutomationRow,
+  getPreferences: getChatUserPreferences,
+  generate: generateChatResponse,
+  recordUsage,
+  finish: finishAutomationRun,
+  heartbeat: heartbeatAutomationRun,
+  deliver: chatAutomationDelivery,
+  queueDiscord: queueDiscordAutomationDelivery,
+  now: () => new Date(),
+  createSignal: () => AbortSignal.timeout(240_000),
+};
+
+function mergeDependencies(overrides?: Partial<AutomationRunnerDependencies>): AutomationRunnerDependencies {
+  return { ...defaultDependencies, ...overrides };
+}
+
+async function finish(
+  run: ClaimedAutomationRun,
+  dependencies: AutomationRunnerDependencies,
+  input: Omit<Parameters<typeof finishAutomationRun>[1], "ownerId" | "leaseToken">,
+): Promise<AutomationRunExecution> {
+  const applied = await dependencies.finish(run.id, {
+    ...input,
+    ownerId: run.owner_id,
+    leaseToken: run.lease_token,
+  });
+  return { outcome: applied ? input.outcome : "lease_lost" };
+}
+
+/** Execute one PostgreSQL-owned occurrence outside the web request lifecycle. */
+export async function runClaimedAutomation(
+  run: ClaimedAutomationRun,
+  overrides?: Partial<AutomationRunnerDependencies>,
+): Promise<AutomationRunExecution> {
+  const dependencies = mergeDependencies(overrides);
+  const automation = await dependencies.getAutomation(run.owner_id, run.automation_id);
   if (!automation || automation.status !== "active") {
-    await finishAutomationRun(run.id, { outcome: "failed", error: "Automation is no longer active.", nextRunAt: null, pause: true });
-    return;
+    return finish(run, dependencies, {
+      outcome: "failed",
+      error: "Automation is no longer active.",
+      nextRunAt: null,
+      pause: true,
+    });
   }
-  const nextRunAt = nextAutomationRun(automation.schedule, automation.timeZone, new Date(run.scheduled_for)).toISOString();
+
+  let initialNextRunAt: string;
   try {
-    const preferences = await getChatUserPreferences(run.owner_id);
+    initialNextRunAt = nextFutureAutomationRun(
+      automation.schedule,
+      automation.timeZone,
+      new Date(run.scheduled_for),
+      dependencies.now(),
+    ).toISOString();
+  } catch (error) {
+    return finish(run, dependencies, {
+      outcome: "failed",
+      error: formatBackgroundError(error),
+      nextRunAt: null,
+      pause: true,
+    });
+  }
+  const nextRunAt = (): string => nextFutureAutomationRun(
+    automation.schedule,
+    automation.timeZone,
+    new Date(run.scheduled_for),
+    dependencies.now(),
+  ).toISOString();
+
+  // A normal run is shorter than this lease, but refreshing it makes a
+  // provider retry or a future longer model deadline recoverable without
+  // allowing an expired worker to publish a duplicate outcome.
+  const heartbeatTimer = setInterval(() => {
+    void dependencies.heartbeat(run.owner_id, run.id, run.lease_token).catch(() => undefined);
+  }, 60_000);
+
+  try {
+    const preferences = await dependencies.getPreferences(run.owner_id);
     const jobId = randomUUID();
     let content = "";
     let reasoning = "";
     let generationError = "";
     let structuredAnswer: AutomationRunResult | null = null;
-    await generateChatResponse({
+    await dependencies.generate({
       systemPrompt: [
         "You are executing a recurring automation without a live user.",
         "Use available tools when current information is required.",
@@ -45,14 +136,14 @@ export async function runClaimedAutomation(run: ClaimedRun): Promise<void> {
       contextMode: "full",
       conversationId: `automation-${automation.id}`,
       jobId,
-    }, run.owner_id, AbortSignal.timeout(240_000), async (event: ChatStreamEvent) => {
+    }, run.owner_id, dependencies.createSignal(), async (event: ChatStreamEvent) => {
       if (event.type === "content") content += event.delta;
       if (event.type === "reasoning") reasoning += event.delta;
       if (event.type === "error") generationError = event.message;
     }, async ({ round, usage, estimatedUsage, provider, model, exactCostUsd, pricing }) => {
       const recordedUsage = usage ?? estimatedUsage;
       if (!recordedUsage) return;
-      await recordUsage({
+      await dependencies.recordUsage({
         ownerId: run.owner_id, provider, model, requestKind: "automation", requestId: run.id, round,
         usage: recordedUsage, source: usage ? "exact" : "estimated", exactCostUsd,
         pricingSnapshot: pricing ? { provider, model, label: model, inputUsdPerMillion: pricing.inputUsdPerMillion ?? 0, cachedInputUsdPerMillion: pricing.cachedInputUsdPerMillion, outputUsdPerMillion: pricing.outputUsdPerMillion ?? 0 } : null,
@@ -63,35 +154,45 @@ export async function runClaimedAutomation(run: ClaimedRun): Promise<void> {
     const answer = resolveAutomationAnswer(structuredAnswer, content, automation.name);
     const matched = automation.kind === "report" ? true : answer.matched;
     if (!matched) {
-      await finishAutomationRun(run.id, { outcome: "no_match", matched: false, title: answer.title, output: answer.message, nextRunAt, pause: false });
-      return;
+      return finish(run, dependencies, { outcome: "no_match", matched: false, title: answer.title, output: answer.message, nextRunAt: nextRunAt(), pause: false });
     }
-    const { conversationId } = await chatAutomationDelivery.deliver({
+    /*
+      The old request dispatcher expressed this same durable branch as:
+      if (!matched) { finish({ outcome: "no_match" }); return; }
+      queueDiscordAutomationDelivery is reached only after a match.
+    */
+    // The default path is chatAutomationDelivery.deliver; tests and worker
+    // deployments may inject a deterministic adapter at this boundary.
+    const { conversationId } = await dependencies.deliver.deliver({
       ownerId: run.owner_id, runId: run.id, title: answer.title || automation.name, prompt: automation.instructions, message: answer.message,
       thinkingEnabled: preferences.automationThinking,
       ...(preferences.automationThinking && reasoning ? { reasoning } : {}),
     });
     if (conversationId) {
-      await queueDiscordAutomationDelivery({
+      await dependencies.queueDiscord({
         ownerId: run.owner_id,
         runId: run.id,
         conversationId,
         title: answer.title || automation.name,
         prompt: automation.instructions,
         message: answer.message,
-      }).catch((error) => {
-        console.error({
-          event: "discord-automation-enqueue-failed",
-          automationRunId: run.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
+      }).catch(() => {
+        // Delivery failure is observable through the durable notification
+        // state; the scheduler log deliberately excludes message content.
+        console.error({ event: "discord-automation-enqueue-failed", automationRunId: run.id });
       });
     }
-    await finishAutomationRun(run.id, { outcome: "notified", matched: true, title: answer.title, output: answer.message, conversationId, nextRunAt, pause: automation.kind === "live_check" });
+    return finish(run, dependencies, { outcome: "notified", matched: true, title: answer.title, output: answer.message, conversationId, nextRunAt: nextRunAt(), pause: automation.kind === "live_check" });
   } catch (error) {
-    await finishAutomationRun(run.id, {
-      outcome: "failed", error: error instanceof Error ? error.message.slice(0, 2000) : "Automation execution failed.",
-      nextRunAt, pause: false,
+    return finish(run, dependencies, {
+      outcome: "failed",
+      error: formatBackgroundError(error),
+      nextRunAt: (() => {
+        try { return nextRunAt(); } catch { return initialNextRunAt; }
+      })(),
+      pause: false,
     });
+  } finally {
+    clearInterval(heartbeatTimer);
   }
 }

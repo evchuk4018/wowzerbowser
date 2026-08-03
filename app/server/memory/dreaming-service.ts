@@ -22,7 +22,9 @@ import {
   getConsolidatedPrompt,
   completeDreamingConsolidation,
   failDreamingConsolidation,
+  listCompletedChatJobsForMemory,
 } from "./dreaming-repository";
+import { processChatSummaryForCompletedJob } from "../chat/chat-summary-service";
 import { buildDreamingConsolidationPrompt, buildDreamingPrompt } from "./dreaming-prompt";
 import {
   createUserMemory,
@@ -33,8 +35,16 @@ import {
   updateUserMemory,
 } from "./user-memory-service";
 
-function enabled(): boolean {
+function dreamingEnabled(): boolean {
   return !["0", "false", "no", "off"].includes(process.env.USER_MEMORY_DREAMING_ENABLED?.trim().toLowerCase() ?? "");
+}
+
+function summaryEnabled(): boolean {
+  return ["1", "true", "yes", "on"].includes(process.env.CHAT_DURABLE_SUMMARIES_ENABLED?.trim().toLowerCase() ?? "");
+}
+
+function enabled(): boolean {
+  return dreamingEnabled();
 }
 
 function sourceFor(sources: DreamingSource[], chatId: string): DreamingSource {
@@ -131,9 +141,7 @@ async function executeRun(
   }
 }
 
-async function processDreamingConsolidation(ownerId: string, cycleNumber: number): Promise<void> {
-  const job = await claimDreamingConsolidation(ownerId, cycleNumber);
-  if (!job || job.cycleNumber !== cycleNumber) return;
+async function executeDreamingConsolidation(ownerId: string, job: NonNullable<Awaited<ReturnType<typeof claimDreamingConsolidation>>>): Promise<void> {
   try {
     const [tree, sources, previousSummary] = await Promise.all([
       getUserMemoryTree(ownerId),
@@ -142,15 +150,43 @@ async function processDreamingConsolidation(ownerId: string, cycleNumber: number
     ]);
     const answer = await consolidateDreamingMemoryWithQwen(buildDreamingConsolidationPrompt(tree, sources, previousSummary));
     const prompt = answer.summary.trim().slice(0, 8_000);
-    await completeDreamingConsolidation(ownerId, cycleNumber, prompt, answer.model);
+    await completeDreamingConsolidation(ownerId, job.cycleNumber, prompt, answer.model);
     if (answer.usage) await recordUsage({
-      ownerId, provider: "openrouter", model: answer.model, requestKind: "dreaming", requestId: `consolidation-${cycleNumber}`,
+      ownerId, provider: "openrouter", model: answer.model, requestKind: "dreaming", requestId: `consolidation-${job.cycleNumber}`,
       round: 0, usage: answer.usage, source: "exact", exactCostUsd: answer.exactCostUsd, unpriced: answer.exactCostUsd === undefined,
     }).catch(() => undefined);
   } catch (error) {
-    await failDreamingConsolidation(ownerId, cycleNumber, formatBackgroundError(error)).catch(() => undefined);
+    await failDreamingConsolidation(ownerId, job.cycleNumber, formatBackgroundError(error)).catch(() => undefined);
     throw error;
   }
+}
+
+async function processDreamingConsolidation(ownerId: string, cycleNumber: number): Promise<void> {
+  const job = await claimDreamingConsolidation(ownerId, cycleNumber);
+  if (!job || job.cycleNumber !== cycleNumber) return;
+  await executeDreamingConsolidation(ownerId, job);
+}
+
+async function processPendingDreamingConsolidation(ownerId: string): Promise<boolean> {
+  const job = await claimDreamingConsolidation(ownerId);
+  if (!job) return false;
+  await executeDreamingConsolidation(ownerId, job);
+  return true;
+}
+
+async function processDreamingRuns(
+  ownerId: string,
+  trigger: { conversationId: string; jobId: string },
+  limit = 8,
+): Promise<number> {
+  let processed = 0;
+  for (; processed < limit; processed += 1) {
+    const runId = await claimDreamingRun(ownerId);
+    if (!runId) break;
+    const shouldContinue = await executeRun(ownerId, runId, trigger);
+    if (!shouldContinue) break;
+  }
+  return processed;
 }
 
 export async function processDreamingForCompletedJob(
@@ -160,10 +196,46 @@ export async function processDreamingForCompletedJob(
 ): Promise<void> {
   if (!enabled()) return;
   await registerCompletedJobForDreaming(ownerId, conversationId, jobId);
-  for (let processed = 0; processed < 8; processed += 1) {
-    const runId = await claimDreamingRun(ownerId);
-    if (!runId) return;
-    const shouldContinue = await executeRun(ownerId, runId, { conversationId, jobId });
-    if (!shouldContinue) return;
+  await processDreamingRuns(ownerId, { conversationId, jobId });
+}
+
+/**
+ * Recover summaries, dreaming runs, and consolidation after a worker restart.
+ * Every source and action is persisted before this sweep returns, so rerunning
+ * the sweep is idempotent and never re-applies an action plan.
+ */
+export async function processScheduledMemoryWork(ownerId: string, limit = 8): Promise<{
+  candidates: number;
+  summaries: number;
+  runs: number;
+  consolidations: number;
+}> {
+  if (!dreamingEnabled() && !summaryEnabled()) return { candidates: 0, summaries: 0, runs: 0, consolidations: 0 };
+  const candidates = await listCompletedChatJobsForMemory(ownerId, limit);
+  let summaries = 0;
+  for (const candidate of candidates) {
+    try {
+      await processChatSummaryForCompletedJob(ownerId, candidate.conversationId, candidate.jobId);
+      summaries += 1;
+    } catch (error) {
+      logBackgroundTaskFailure("chat-summary-scheduler-failed", { task: "memory", recordId: candidate.jobId }, error);
+    }
+    if (dreamingEnabled()) {
+      await registerCompletedJobForDreaming(ownerId, candidate.conversationId, candidate.jobId).catch((error) => {
+        logBackgroundTaskFailure("user-memory-registration-failed", { task: "memory", recordId: candidate.jobId }, error);
+      });
+    }
   }
+  const runs = dreamingEnabled()
+    ? await processDreamingRuns(ownerId, { conversationId: "scheduler", jobId: "memory-scheduler" })
+    : 0;
+  let consolidations = 0;
+  if (dreamingEnabled()) {
+    try {
+      consolidations = (await processPendingDreamingConsolidation(ownerId)) ? 1 : 0;
+    } catch (error) {
+      logBackgroundTaskFailure("user-memory-consolidation-scheduler-failed", { task: "memory" }, error);
+    }
+  }
+  return { candidates: candidates.length, summaries, runs, consolidations };
 }

@@ -143,7 +143,37 @@ export async function listStorageObjectsForConversation(ownerId: string, convers
 
 export async function listAbandonedStorageObjects(ownerId: string, cutoff: Date, limit = 100): Promise<StorageObject[]> {
   const rows = await query<Record<string, unknown>>(
-    "select * from app_storage_objects where owner_id=$1 and state in ('uploading','failed') and created_at < $2 order by created_at limit $3",
+    `select objects.*
+       from app_storage_objects objects
+      where objects.owner_id=$1
+        and objects.state in ('uploading','failed')
+        and objects.created_at < $2
+        and not exists (
+          select 1 from document_processing_jobs jobs
+           where jobs.owner_id=objects.owner_id
+             and jobs.storage_object_id=objects.object_id
+             and jobs.status in ('queued','running')
+        )
+        and not exists (
+          select 1 from chat_image_processing_jobs jobs
+           where jobs.owner_id=objects.owner_id
+             and jobs.storage_object_id=objects.object_id
+             and jobs.status in ('queued','running')
+        )
+        and not exists (
+          select 1 from chat_documents documents
+           where documents.owner_id=objects.owner_id
+             and documents.storage_object_id=objects.object_id
+             and documents.status='processing'
+        )
+        and not exists (
+          select 1 from chat_image_uploads uploads
+           where uploads.owner_id=objects.owner_id
+             and uploads.storage_object_id=objects.object_id
+             and uploads.status='processing'
+        )
+      order by objects.created_at
+      limit $3`,
     [databaseOwnerId(ownerId), cutoff.toISOString(), Math.max(1, Math.min(limit, 100))],
   );
   return rows.map(storageObjectFromRow);

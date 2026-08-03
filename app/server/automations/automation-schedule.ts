@@ -32,3 +32,31 @@ export function nextAutomationRun(schedule: AutomationSchedule, timeZone: string
   }
   throw new Error("Could not calculate the next automation run.");
 }
+
+/**
+ * Return the next occurrence after an already-claimed occurrence. During a
+ * long outage an interval may have many missed occurrences; the scheduler
+ * executes the claimed one once and skips directly to the first future slot.
+ */
+export function nextFutureAutomationRun(
+  schedule: AutomationSchedule,
+  timeZone: string,
+  claimedFor: Date,
+  now = new Date(),
+): Date {
+  if (schedule.kind === "interval") {
+    const intervalMs = schedule.everyMinutes * 60_000;
+    const elapsed = now.getTime() - claimedFor.getTime();
+    const intervals = Math.max(1, Math.floor(elapsed / intervalMs) + 1);
+    return new Date(claimedFor.getTime() + intervals * intervalMs);
+  }
+
+  let candidate = nextAutomationRun(schedule, timeZone, claimedFor);
+  // Calendar schedules advance at most seven days per iteration. The bound
+  // also prevents malformed persisted schedules from making a worker spin.
+  for (let attempt = 0; attempt < 4_000 && candidate.getTime() <= now.getTime(); attempt += 1) {
+    candidate = nextAutomationRun(schedule, timeZone, candidate);
+  }
+  if (candidate.getTime() <= now.getTime()) throw new Error("Could not advance the automation to a future occurrence.");
+  return candidate;
+}

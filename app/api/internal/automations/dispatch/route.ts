@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { configuredOwner } from "../../../../auth/owner-auth-service";
 import { claimDueAutomationRuns } from "../../../../server/automations/automation-repository";
 import { runClaimedAutomation } from "../../../../server/automations/automation-runner";
 
@@ -10,7 +11,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
   try {
-    const runs = await claimDueAutomationRuns(4);
+    const owner = await configuredOwner();
+    const runs = await claimDueAutomationRuns(owner.id, 1);
     await Promise.allSettled(runs.map((run) => runClaimedAutomation(run)));
     return NextResponse.json({ claimed: runs.length });
   } catch {

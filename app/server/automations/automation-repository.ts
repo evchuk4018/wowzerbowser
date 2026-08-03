@@ -29,7 +29,7 @@ export async function insertAutomationRow(ownerId: string, input: AutomationMuta
 }
 
 export async function updateAutomationRow(ownerId: string, id: string, values: Record<string, unknown>): Promise<Automation | null> {
-  const allowed = ["name", "kind", "instructions", "schedule", "time_zone", "status", "next_run_at"];
+  const allowed = ["name", "kind", "instructions", "schedule", "time_zone", "status", "next_run_at", "consecutive_failures", "last_error"];
   const entries = Object.entries(values).filter(([key]) => allowed.includes(key));
   if (!entries.length) return getAutomationRow(ownerId, id);
   const parameters: unknown[] = [];
@@ -48,21 +48,71 @@ export async function softDeleteAutomationRow(ownerId: string, id: string): Prom
   return rows.length > 0;
 }
 
-export async function claimDueAutomationRuns(limit = 4): Promise<Array<{ id: string; owner_id: string; automation_id: string; scheduled_for: string }>> {
-  return query<{ id: string; owner_id: string; automation_id: string; scheduled_for: string }>("select id,owner_id,automation_id,scheduled_for from claim_due_automations($1)", [limit]);
+export type ClaimedAutomationRun = {
+  id: string;
+  owner_id: string;
+  automation_id: string;
+  scheduled_for: string;
+  lease_token: string;
+  attempt_count: number;
+};
+
+export async function claimDueAutomationRuns(ownerId: string, limit = 1, leaseMs = 900_000): Promise<ClaimedAutomationRun[]> {
+  return query<ClaimedAutomationRun>(
+    "select id,owner_id,automation_id,scheduled_for,lease_token,attempt_count from claim_due_automations($1,$2,$3)",
+    [databaseOwnerId(ownerId), Math.max(1, Math.min(limit, 4)), Math.max(60_000, Math.min(leaseMs, 3_600_000))],
+  );
 }
 
-export async function finishAutomationRun(runId: string, input: { outcome: "notified" | "no_match" | "failed"; matched?: boolean; title?: string; output?: string; error?: string; conversationId?: string; nextRunAt: string | null; pause: boolean }): Promise<void> {
-  const now = new Date().toISOString();
-  await withTransaction(async (tx) => {
-    const [run] = await tx.unsafe<{ owner_id: string; automation_id: string }>("select owner_id,automation_id from automation_runs where id=$1 for update", [runId]);
-    if (!run) throw new Error("Automation run not found.");
-  const runStatus = input.outcome;
-    await tx.unsafe("update automation_runs set status=$1,matched=$2,title=$3,output=$4,error=$5,conversation_id=$6,lease_expires_at=null,completed_at=$7,updated_at=$7 where id=$8", [runStatus, input.matched ?? null, input.title ?? null, input.output ?? null, input.error ?? null, input.conversationId ?? null, now, runId]);
-    const [automation] = await tx.unsafe<{ consecutive_failures: number }>("select consecutive_failures from automations where id=$1 and owner_id=$2 for update", [run.automation_id, run.owner_id]);
+export async function heartbeatAutomationRun(ownerId: string, runId: string, leaseToken: string, leaseMs = 900_000): Promise<boolean> {
+  const [row] = await query<{ heartbeat_automation_run: boolean }>(
+    "select heartbeat_automation_run($1,$2::uuid,$3::uuid,$4) as heartbeat_automation_run",
+    [databaseOwnerId(ownerId), runId, leaseToken, Math.max(60_000, Math.min(leaseMs, 3_600_000))],
+  );
+  return row?.heartbeat_automation_run === true;
+}
+
+export async function finishAutomationRun(
+  runId: string,
+  input: {
+    ownerId: string;
+    leaseToken: string;
+    outcome: "notified" | "no_match" | "failed";
+    matched?: boolean;
+    title?: string;
+    output?: string;
+    error?: string;
+    conversationId?: string;
+    nextRunAt: string | null;
+    pause: boolean;
+    now?: Date;
+  },
+): Promise<boolean> {
+  const now = (input.now ?? new Date()).toISOString();
+  return withTransaction(async (tx) => {
+    const [run] = await tx.unsafe<{ owner_id: string; automation_id: string }>(
+      "select owner_id,automation_id from automation_runs where id=$1 and owner_id=$2 and status='running' and lease_token=$3::uuid for update",
+      [runId, databaseOwnerId(input.ownerId), input.leaseToken],
+    );
+    if (!run) return false;
+    const runStatus = input.outcome;
+    await tx.unsafe(
+      "update automation_runs set status=$1,matched=$2,title=$3,output=$4,error=$5,conversation_id=$6,lease_expires_at=null,lease_token=null,completed_at=$7,updated_at=$7 where id=$8 and owner_id=$9 and status='running'",
+      [runStatus, input.matched ?? null, input.title ?? null, input.output ?? null, input.error ?? null, input.conversationId ?? null, now, runId, databaseOwnerId(input.ownerId)],
+    );
+    const [automation] = await tx.unsafe<{ consecutive_failures: number; status: string; deleted_at: string | null; next_run_at: unknown }>(
+      "select consecutive_failures,status,deleted_at,next_run_at from automations where id=$1 and owner_id=$2 for update",
+      [run.automation_id, databaseOwnerId(input.ownerId)],
+    );
     if (!automation) throw new Error("Automation not found.");
     const failures = input.outcome === "failed" ? Number(automation.consecutive_failures) + 1 : 0;
-    const shouldPause = input.pause || failures >= 3;
-    await tx.unsafe("update automations set status=$1,next_run_at=$2,last_outcome=$3,last_error=$4,consecutive_failures=$5,updated_at=$6 where id=$7 and owner_id=$8", [shouldPause ? "paused" : "active", shouldPause ? null : input.nextRunAt, input.outcome, input.error ?? null, failures, now, run.automation_id, run.owner_id]);
+    const shouldPause = automation.status !== "active" || automation.deleted_at !== null || input.pause || failures >= 3;
+    const persistedNextRunAt = automation.next_run_at == null ? null : asIsoTimestamp(automation.next_run_at);
+    const nextRunAt = shouldPause ? null : (persistedNextRunAt ?? input.nextRunAt);
+    await tx.unsafe(
+      "update automations set status=$1,next_run_at=$2,last_outcome=$3,last_error=$4,consecutive_failures=$5,updated_at=$6 where id=$7 and owner_id=$8",
+      [shouldPause ? "paused" : "active", nextRunAt, input.outcome, input.error ?? null, failures, now, run.automation_id, databaseOwnerId(input.ownerId)],
+    );
+    return true;
   });
 }

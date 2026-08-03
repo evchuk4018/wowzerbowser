@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { closeDatabase, databaseOwnerId, jsonb, query } from "../app/server/database/database.ts";
 import { claimNextChatSummaryTask, completeChatSummaryTask, enqueueChatSummaryTask, replaceChatSummaryIfCurrent } from "../app/server/chat/chat-summary-store.ts";
+import { claimDueAutomationRuns, finishAutomationRun } from "../app/server/automations/automation-repository.ts";
+import { nextFutureAutomationRun } from "../app/server/automations/automation-schedule.ts";
 
 if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required for database integration tests.");
 if (!process.env.APP_OWNER_ID) throw new Error("APP_OWNER_ID is required for database integration tests.");
@@ -12,6 +14,7 @@ const owner = databaseOwnerId(authOwnerId);
 const testPrefix = `db-it-${randomUUID()}`;
 const conversationIds = new Set();
 const storageObjectIds = new Set();
+const automationIds = new Set();
 
 function requestFor(conversationId, jobId, index = 0) {
   return {
@@ -56,6 +59,10 @@ test.after(async () => {
   for (const objectId of storageObjectIds) {
     await query("delete from app_storage_objects where owner_id=$1 and object_id=$2::uuid", [owner, objectId]);
   }
+  for (const automationId of automationIds) {
+    await query("delete from automation_runs where owner_id=$1 and automation_id=$2", [owner, automationId]);
+    await query("delete from automations where owner_id=$1 and id=$2", [owner, automationId]);
+  }
   for (const conversationId of conversationIds) {
     await query("delete from chat_jobs where owner_id=$1 and conversation_id=$2", [owner, conversationId]);
     await query("delete from chat_conversations where owner_id=$1 and conversation_id=$2", [owner, conversationId]);
@@ -65,7 +72,7 @@ test.after(async () => {
 
 test("local migrations, atomic chat jobs, document registration, and leased summaries work against real PostgreSQL", async () => {
   const migrationRows = await query("select version from schema_migrations order by version");
-  assert.deepEqual(migrationRows.map((row) => row.version), ["001_initial_schema", "002_seed_catalog", "003_atomic_functions", "004_owner_auth", "005_local_filesystem_storage", "006_durable_worker_queue", "007_durable_image_processing_queue"]);
+  assert.deepEqual(migrationRows.map((row) => row.version), ["001_initial_schema", "002_seed_catalog", "003_atomic_functions", "004_owner_auth", "005_local_filesystem_storage", "006_durable_worker_queue", "007_durable_image_processing_queue", "008_background_scheduler"]);
 
   const conversationId = `${testPrefix}-chat`;
   const jobId = `${testPrefix}-job`;
@@ -254,4 +261,118 @@ test("local migrations, atomic chat jobs, document registration, and leased summ
   await completeChatSummaryTask(task, "hello world");
   const [summaryJob] = await query("select status from chat_summary_jobs where owner_id=$1 and conversation_id=$2 and source_job_id=$3", [owner, conversationId, jobId]);
   assert.equal(summaryJob.status, "completed");
+
+  const automationId = randomUUID();
+  automationIds.add(automationId);
+  const dueAt = new Date(Date.now() - 60_000).toISOString();
+  await query(
+    "insert into automations(id,owner_id,name,kind,instructions,schedule,time_zone,status,next_run_at) values($1,$2,'integration automation','report','deterministic report',$3::jsonb,'Etc/UTC','active',$4)",
+    [automationId, owner, jsonb({ kind: "interval", everyMinutes: 15 }), dueAt],
+  );
+  const automationClaims = await Promise.all([
+    claimDueAutomationRuns(authOwnerId, 1, 60_000),
+    claimDueAutomationRuns(authOwnerId, 1, 60_000),
+  ]);
+  const claimedRuns = automationClaims.flat();
+  assert.equal(claimedRuns.length, 1);
+  assert.equal(claimedRuns[0].automation_id, automationId);
+  const nextRun = nextFutureAutomationRun({ kind: "interval", everyMinutes: 15 }, "Etc/UTC", new Date(dueAt), new Date()).toISOString();
+  assert.equal(await finishAutomationRun(claimedRuns[0].id, {
+    ownerId: authOwnerId,
+    leaseToken: claimedRuns[0].lease_token,
+    outcome: "no_match",
+    matched: false,
+    title: "integration",
+    output: "not delivered",
+    nextRunAt: nextRun,
+    pause: false,
+  }), true);
+  const [advancedAutomation] = await query("select status,next_run_at,last_outcome,consecutive_failures from automations where id=$1", [automationId]);
+  assert.equal(advancedAutomation.status, "active");
+  assert.equal(advancedAutomation.last_outcome, "no_match");
+  assert.equal(Number(advancedAutomation.consecutive_failures), 0);
+  assert.equal(Date.parse(advancedAutomation.next_run_at) > Date.now(), true);
+
+  const pausedAutomationId = randomUUID();
+  const deletedAutomationId = randomUUID();
+  automationIds.add(pausedAutomationId);
+  automationIds.add(deletedAutomationId);
+  for (const id of [pausedAutomationId, deletedAutomationId]) {
+    await query(
+      "insert into automations(id,owner_id,name,kind,instructions,schedule,time_zone,status,next_run_at,deleted_at) values($1,$2,$3,'report','not runnable',$4::jsonb,'Etc/UTC',$5,$6,$7)",
+      [id, owner, id === pausedAutomationId ? "paused" : "deleted", jsonb({ kind: "interval", everyMinutes: 15 }), "paused", dueAt, id === deletedAutomationId ? new Date().toISOString() : null],
+    );
+  }
+  assert.equal((await claimDueAutomationRuns(authOwnerId, 4, 60_000)).some((claim) => [pausedAutomationId, deletedAutomationId].includes(claim.automation_id)), false);
+
+  const failureAutomationId = randomUUID();
+  automationIds.add(failureAutomationId);
+  await query(
+    "insert into automations(id,owner_id,name,kind,instructions,schedule,time_zone,status,next_run_at) values($1,$2,'failing integration automation','report','fails',$3::jsonb,'Etc/UTC','active',$4)",
+    [failureAutomationId, owner, jsonb({ kind: "interval", everyMinutes: 15 }), dueAt],
+  );
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const [failureClaim] = await claimDueAutomationRuns(authOwnerId, 1, 60_000);
+    assert.ok(failureClaim);
+    assert.equal(await finishAutomationRun(failureClaim.id, {
+      ownerId: authOwnerId,
+      leaseToken: failureClaim.lease_token,
+      outcome: "failed",
+      error: "deterministic failure",
+      nextRunAt: new Date(Date.now() - 1_000).toISOString(),
+      pause: false,
+    }), true);
+  }
+  const [failedAutomation] = await query("select status,last_outcome,consecutive_failures,next_run_at from automations where id=$1", [failureAutomationId]);
+  assert.equal(failedAutomation.status, "paused");
+  assert.equal(failedAutomation.last_outcome, "failed");
+  assert.equal(Number(failedAutomation.consecutive_failures), 3);
+  assert.equal(failedAutomation.next_run_at, null);
+
+  const pausedDuringRunId = randomUUID();
+  automationIds.add(pausedDuringRunId);
+  await query(
+    "insert into automations(id,owner_id,name,kind,instructions,schedule,time_zone,status,next_run_at) values($1,$2,'paused during run','report','pause test',$3::jsonb,'Etc/UTC','active',$4)",
+    [pausedDuringRunId, owner, jsonb({ kind: "interval", everyMinutes: 15 }), dueAt],
+  );
+  const [pausedDuringRunClaim] = await query("select id,lease_token,owner_id,automation_id,scheduled_for,attempt_count from claim_due_automations($1,$2,$3)", [owner, 1, 60_000]);
+  await query("update automations set status='paused',next_run_at=null where id=$1", [pausedDuringRunId]);
+  assert.equal(await finishAutomationRun(pausedDuringRunClaim.id, {
+    ownerId: authOwnerId,
+    leaseToken: pausedDuringRunClaim.lease_token,
+    outcome: "notified",
+    matched: true,
+    title: "paused",
+    output: "not reactivated",
+    nextRunAt: new Date(Date.now() + 900_000).toISOString(),
+    pause: false,
+  }), true);
+  const [pausedDuringRun] = await query("select status,next_run_at from automations where id=$1", [pausedDuringRunId]);
+  assert.deepEqual(pausedDuringRun, { status: "paused", next_run_at: null });
+
+  const scheduleChangedId = randomUUID();
+  automationIds.add(scheduleChangedId);
+  await query(
+    "insert into automations(id,owner_id,name,kind,instructions,schedule,time_zone,status,next_run_at) values($1,$2,'schedule changed during run','report','schedule test',$3::jsonb,'Etc/UTC','active',$4)",
+    [scheduleChangedId, owner, jsonb({ kind: "interval", everyMinutes: 15 }), dueAt],
+  );
+  const [scheduleChangedClaim] = await query("select id,lease_token from claim_due_automations($1,$2,$3)", [owner, 1, 60_000]);
+  const manuallyScheduled = new Date(Date.now() + 1_800_000).toISOString();
+  await query("update automations set next_run_at=$1 where id=$2", [manuallyScheduled, scheduleChangedId]);
+  assert.equal(await finishAutomationRun(scheduleChangedClaim.id, {
+    ownerId: authOwnerId,
+    leaseToken: scheduleChangedClaim.lease_token,
+    outcome: "no_match",
+    matched: false,
+    title: "schedule",
+    output: "preserve next run",
+    nextRunAt: new Date(Date.now() + 900_000).toISOString(),
+    pause: false,
+  }), true);
+  const [scheduleChanged] = await query("select status,next_run_at from automations where id=$1", [scheduleChangedId]);
+  assert.equal(scheduleChanged.status, "active");
+  const storedNextRunAt = scheduleChanged.next_run_at instanceof Date
+    ? scheduleChanged.next_run_at.getTime()
+    : Date.parse(scheduleChanged.next_run_at);
+  assert.equal(storedNextRunAt, Date.parse(manuallyScheduled));
 });

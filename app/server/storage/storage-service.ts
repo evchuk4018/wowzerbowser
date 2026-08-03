@@ -84,15 +84,16 @@ export async function deleteStorageObjectsForConversation(ownerId: string, conve
   }
 }
 
-export async function cleanupAbandonedStorage(input: { ownerId: string; olderThanMs?: number; limit?: number }): Promise<number> {
+export async function cleanupAbandonedStorage(input: { ownerId: string; now?: Date; olderThanMs?: number; limit?: number }): Promise<number> {
   const limit = Math.max(1, Math.min(input.limit ?? 100, 100));
-  const objects = await listAbandonedStorageObjects(input.ownerId, new Date(Date.now() - (input.olderThanMs ?? 60 * 60 * 1_000)), limit);
+  const olderThanMs = input.olderThanMs ?? 60 * 60 * 1_000;
+  const objects = await listAbandonedStorageObjects(input.ownerId, new Date((input.now ?? new Date()).getTime() - olderThanMs), limit);
   let cleaned = 0;
   for (const object of objects) {
     await localFilesystemStorageProvider.deleteObjectFile(object).catch(() => undefined);
     await deleteStorageObjectMetadata({ ownerId: input.ownerId, objectId: object.objectId }).catch(() => undefined);
     cleaned += 1;
   }
-  cleaned += await localFilesystemStorageProvider.cleanupTemporaryFiles({ olderThanMs: input.olderThanMs ?? 60 * 60 * 1_000, limit: Math.max(0, limit - cleaned) });
+  cleaned += await localFilesystemStorageProvider.cleanupTemporaryFiles({ olderThanMs, limit: Math.max(0, limit - cleaned) });
   return cleaned;
 }

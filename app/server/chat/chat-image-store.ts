@@ -322,16 +322,40 @@ async function isActiveChatImageUpload(record: ChatImageUploadRecord): Promise<b
   }
 }
 
-export async function cleanupExpiredChatImageUploads(ownerId: string, conversationId: string): Promise<void> {
+export async function listExpiredChatImageUploadConversations(
+  ownerId: string,
+  options: { now?: Date; limit?: number } = {},
+): Promise<string[]> {
+  const cutoff = new Date((options.now ?? new Date()).getTime() - CHAT_IMAGE_PRE_SEND_RETENTION_MS).toISOString();
+  const limit = Math.max(1, Math.min(options.limit ?? 25, 100));
+  const rows = await query<{ conversation_id: string }>(
+    `select conversation_id
+       from chat_image_uploads
+      where owner_id=$1 and updated_at < $2 and status <> 'processing'
+      group by conversation_id
+      order by min(updated_at)
+      limit $3`,
+    [databaseOwnerId(ownerId), cutoff, limit],
+  );
+  return rows.map((row) => row.conversation_id);
+}
+
+export async function cleanupExpiredChatImageUploads(
+  ownerId: string,
+  conversationId: string,
+  options: { now?: Date; limit?: number } = {},
+): Promise<number> {
   assertId(conversationId, "conversationId");
-  const cutoff = new Date(Date.now() - CHAT_IMAGE_PRE_SEND_RETENTION_MS).toISOString();
+  const cutoff = new Date((options.now ?? new Date()).getTime() - CHAT_IMAGE_PRE_SEND_RETENTION_MS).toISOString();
+  const limit = Math.max(1, Math.min(options.limit ?? STORAGE_PAGE_SIZE, STORAGE_PAGE_SIZE));
   let data: Record<string, unknown>[];
   try {
-    data = await query<Record<string, unknown>>("select * from chat_image_uploads where owner_id=$1 and conversation_id=$2 and updated_at < $3 and status <> 'processing' order by updated_at limit $4", [databaseOwnerId(ownerId), conversationId, cutoff, STORAGE_PAGE_SIZE]);
+    data = await query<Record<string, unknown>>("select * from chat_image_uploads where owner_id=$1 and conversation_id=$2 and updated_at < $3 and status <> 'processing' order by updated_at limit $4", [databaseOwnerId(ownerId), conversationId, cutoff, limit]);
   } catch {
     throw new ChatImageError("cleanup_failed", "Expired image uploads could not be listed.", 503);
   }
 
+  let removed = 0;
   for (const row of data) {
     const record = recordFromRow(row, ownerId);
     if (await isActiveChatImageUpload(record)) continue;
@@ -341,7 +365,9 @@ export async function cleanupExpiredChatImageUploads(ownerId: string, conversati
     } catch {
       throw new ChatImageError("cleanup_failed", "Expired image upload metadata could not be removed.", 503);
     }
+    removed += 1;
   }
+  return removed;
 }
 
 export async function waitForChatImageUpload(ownerId: string, conversationId: string, imageId: string, signal?: AbortSignal): Promise<ChatImageUploadRecord | null> {

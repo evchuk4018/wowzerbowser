@@ -1,3 +1,11 @@
+export type WorkerSchedulerTask = {
+  name: string;
+  intervalMs: number;
+  run: (shutdownSignal: AbortSignal) => Promise<unknown>;
+};
+
+type WorkerTaskKind = "chat" | "document" | "image" | "maintenance" | "scheduler";
+
 export type WorkerLoopDependencies<ChatClaim, DocumentClaim, ImageClaim> = {
   claimChat: () => Promise<ChatClaim | null>;
   executeChat: (claim: ChatClaim, shutdownSignal: AbortSignal) => Promise<unknown>;
@@ -11,8 +19,10 @@ export type WorkerLoopDependencies<ChatClaim, DocumentClaim, ImageClaim> = {
   chatConcurrency?: number;
   documentConcurrency?: number;
   imageConcurrency?: number;
-  onTaskError?: (kind: "chat" | "document" | "image" | "maintenance", error: unknown) => void;
+  schedulerTasks?: WorkerSchedulerTask[];
+  onTaskError?: (kind: WorkerTaskKind, error: unknown) => void;
   sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
+  now?: () => number;
 };
 
 function defaultSleep(milliseconds: number, signal: AbortSignal): Promise<void> {
@@ -35,6 +45,11 @@ function bounded(value: number | undefined, fallback: number, minimum: number, m
   return Number.isSafeInteger(value) ? Math.min(maximum, Math.max(minimum, value as number)) : fallback;
 }
 
+type ScheduledTaskState = WorkerSchedulerTask & {
+  nextRunAt: number;
+  running: boolean;
+};
+
 /**
  * Small single-process supervisor. PostgreSQL owns all durable state; this
  * loop only owns in-memory slots and abort signals for graceful shutdown.
@@ -43,27 +58,38 @@ export class BackgroundWorkerLoop<ChatClaim, DocumentClaim, ImageClaim> {
   private readonly shutdownController = new AbortController();
   private readonly active = new Set<Promise<void>>();
   private readonly sleep: (milliseconds: number, signal: AbortSignal) => Promise<void>;
+  private readonly now: () => number;
   private readonly chatConcurrency: number;
   private readonly documentConcurrency: number;
   private readonly imageConcurrency: number;
   private readonly pollIntervalMs: number;
   private readonly maintenanceIntervalMs: number;
-  private readonly onTaskError: (kind: "chat" | "document" | "image" | "maintenance", error: unknown) => void;
+  private readonly onTaskError: (kind: WorkerTaskKind, error: unknown) => void;
   private stopped = false;
   private runningChats = 0;
   private runningDocuments = 0;
   private runningImages = 0;
-  private maintenanceRunning = false;
-  private lastMaintenanceAt = 0;
+  private readonly scheduledTasks: ScheduledTaskState[];
+  private readonly scheduledActive = new Set<Promise<void>>();
 
   constructor(private readonly dependencies: WorkerLoopDependencies<ChatClaim, DocumentClaim, ImageClaim>) {
     this.sleep = dependencies.sleep ?? defaultSleep;
+    this.now = dependencies.now ?? Date.now;
     this.chatConcurrency = bounded(dependencies.chatConcurrency, 1, 1, 1);
     this.documentConcurrency = bounded(dependencies.documentConcurrency, 1, 1, 1);
     this.imageConcurrency = bounded(dependencies.imageConcurrency, 1, 1, 1);
     this.pollIntervalMs = bounded(dependencies.pollIntervalMs, 1_000, 250, 10_000);
     this.maintenanceIntervalMs = bounded(dependencies.maintenanceIntervalMs, 60_000, 10_000, 3_600_000);
     this.onTaskError = dependencies.onTaskError ?? (() => undefined);
+    this.scheduledTasks = [
+      ...(dependencies.maintenance ? [{ name: "maintenance", intervalMs: this.maintenanceIntervalMs, run: async () => dependencies.maintenance?.() }] : []),
+      ...(dependencies.schedulerTasks ?? []),
+    ].map((task) => ({
+      ...task,
+      intervalMs: bounded(task.intervalMs, 60_000, 1_000, 3_600_000),
+      nextRunAt: this.now(),
+      running: false,
+    }));
   }
 
   get shutdownSignal(): AbortSignal {
@@ -71,7 +97,7 @@ export class BackgroundWorkerLoop<ChatClaim, DocumentClaim, ImageClaim> {
   }
 
   get activeTaskCount(): number {
-    return this.active.size;
+    return this.active.size + this.scheduledActive.size;
   }
 
   requestShutdown(reason = "Worker shutdown requested."): void {
@@ -98,6 +124,28 @@ export class BackgroundWorkerLoop<ChatClaim, DocumentClaim, ImageClaim> {
     this.active.add(tracked);
   }
 
+  private launchScheduled(task: ScheduledTaskState): void {
+    if (this.stopped || task.running) return;
+    task.running = true;
+    task.nextRunAt = this.now() + task.intervalMs;
+    const tracked: Promise<void> = Promise.resolve()
+      .then(() => task.run(this.shutdownController.signal))
+      .then(() => undefined)
+      .catch((error) => this.onTaskError("scheduler", error))
+      .finally(() => {
+        task.running = false;
+        this.scheduledActive.delete(tracked);
+      });
+    this.scheduledActive.add(tracked);
+  }
+
+  private runScheduledTasks(): void {
+    const now = this.now();
+    for (const task of this.scheduledTasks) {
+      if (!task.running && now >= task.nextRunAt) this.launchScheduled(task);
+    }
+  }
+
   private async claimAvailable(): Promise<boolean> {
     let claimed = false;
     while (!this.stopped && this.runningChats < this.chatConcurrency) {
@@ -121,18 +169,9 @@ export class BackgroundWorkerLoop<ChatClaim, DocumentClaim, ImageClaim> {
     return claimed;
   }
 
-  private maybeMaintain(): void {
-    if (!this.dependencies.maintenance || this.maintenanceRunning || Date.now() - this.lastMaintenanceAt < this.maintenanceIntervalMs) return;
-    this.lastMaintenanceAt = Date.now();
-    this.maintenanceRunning = true;
-    void this.dependencies.maintenance()
-      .catch((error) => this.onTaskError("maintenance", error))
-      .finally(() => { this.maintenanceRunning = false; });
-  }
-
   async run(): Promise<void> {
     while (!this.stopped) {
-      this.maybeMaintain();
+      this.runScheduledTasks();
       const claimed = await this.claimAvailable().catch((error) => {
         this.onTaskError("maintenance", error);
         return false;
@@ -150,8 +189,8 @@ export class BackgroundWorkerLoop<ChatClaim, DocumentClaim, ImageClaim> {
 
   async shutdown(timeoutMs = 25_000): Promise<void> {
     this.requestShutdown();
-    if (!this.active.size) return;
-    const tasks = Promise.allSettled([...this.active]);
+    if (!this.active.size && !this.scheduledActive.size) return;
+    const tasks = Promise.allSettled([...this.active, ...this.scheduledActive]);
     await Promise.race([tasks, new Promise((resolve) => setTimeout(resolve, timeoutMs))]);
   }
 }

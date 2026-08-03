@@ -157,7 +157,17 @@ Auth.js credentials, structured application state, and binary object metadata
 are persisted through the private local PostgreSQL service. Binary contents are
 stored atomically below `/srv/storage/wowzerbowser/files` and are served only
 through authenticated application routes. The background worker removes
-bounded batches of abandoned temporary uploads.
+bounded batches of abandoned temporary uploads, stale empty chats, and
+incomplete file records. It also runs the automation, memory-summary, and
+memory-consolidation sweeps in the same worker process. Automation claims,
+leases, attempts, outcomes, next occurrences, and failures are persisted in
+PostgreSQL; no external scheduler or per-automation host cron is required.
+
+The scheduler intervals and bounded batch sizes are configured in
+`deployment.env` with `AUTOMATION_SCHEDULER_INTERVAL_MS`,
+`AUTOMATION_SCHEDULER_BATCH`, `MEMORY_SCHEDULER_INTERVAL_MS`,
+`STORAGE_MAINTENANCE_INTERVAL_MS`, and `WORKER_MAINTENANCE_LIMIT`. Keep the
+worker concurrency limits conservative on this host.
 
 ## Tailscale Serve
 
