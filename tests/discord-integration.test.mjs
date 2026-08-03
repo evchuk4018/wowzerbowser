@@ -171,5 +171,7 @@ test("Discord Gateway is optional and uses the local Compose network", async () 
   assert.match(packageJson, /build:discord-worker[^\n]*--external:discord\.js/);
   assert.match(dockerfile, /node_modules\/discord\.js/);
   assert.match(dockerfile, /node_modules\/@discordjs/);
+  assert.match(dockerfile, /node_modules\/@vladfrangu/);
+  assert.match(dockerfile, /node_modules\/ws/);
   assert.match(worker, /processPendingDiscordMessage/);
 });

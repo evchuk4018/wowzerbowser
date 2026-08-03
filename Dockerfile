@@ -43,11 +43,13 @@ COPY --from=builder --chown=nextjs:nodejs /app/node_modules/postgres ./node_modu
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/discord.js ./node_modules/discord.js
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@discordjs ./node_modules/@discordjs
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@sapphire ./node_modules/@sapphire
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@vladfrangu ./node_modules/@vladfrangu
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/discord-api-types ./node_modules/discord-api-types
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/fast-deep-equal ./node_modules/fast-deep-equal
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/lodash.snakecase ./node_modules/lodash.snakecase
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/magic-bytes.js ./node_modules/magic-bytes.js
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/tslib ./node_modules/tslib
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/ws ./node_modules/ws
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/pdfjs-dist ./node_modules/pdfjs-dist
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@napi-rs ./node_modules/@napi-rs
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/modal ./node_modules/modal
