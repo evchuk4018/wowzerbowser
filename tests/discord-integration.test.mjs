@@ -159,6 +159,7 @@ test("Discord Gateway is optional and uses the local Compose network", async () 
   ]);
   assert.match(compose, /discord:/);
   assert.match(compose, /profiles:\s*\["discord"\]/);
+  assert.match(compose, /target: discord-runner/);
   assert.match(compose, /DISCORD_APP_URL: http:\/\/web:3000/);
   assert.match(compose, /DISCORD_BOT_TOKEN: \$\{DISCORD_BOT_TOKEN:-\}/);
   assert.doesNotMatch(compose.slice(compose.indexOf("  discord:"), compose.indexOf("volumes:")), /env_file:/);
@@ -167,11 +168,10 @@ test("Discord Gateway is optional and uses the local Compose network", async () 
   const discordBlock = compose.slice(compose.indexOf("  discord:"), compose.indexOf("volumes:"));
   assert.doesNotMatch(discordBlock, /ports:/);
   assert.match(dockerfile, /build:discord-worker/);
+  assert.match(dockerfile, /AS discord-runner/);
+  assert.match(dockerfile, /npm ci --omit=dev/);
+  assert.match(dockerfile, /\.next\/worker\/discord-worker\.mjs \.\/worker\/discord-worker\.mjs/);
   assert.match(dockerfile, /\.next\/worker \.\/worker/);
   assert.match(packageJson, /build:discord-worker[^\n]*--external:discord\.js/);
-  assert.match(dockerfile, /node_modules\/discord\.js/);
-  assert.match(dockerfile, /node_modules\/@discordjs/);
-  assert.match(dockerfile, /node_modules\/@vladfrangu/);
-  assert.match(dockerfile, /node_modules\/ws/);
   assert.match(worker, /processPendingDiscordMessage/);
 });

@@ -143,7 +143,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: runner
+      target: discord-runner
     environment:
       NODE_ENV: production
       NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://homelab.tail861ffd.ts.net}

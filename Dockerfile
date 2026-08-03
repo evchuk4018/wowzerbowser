@@ -13,6 +13,25 @@ RUN npm run build
 RUN npm run build:worker
 RUN npm run build:discord-worker
 
+FROM node:22-bookworm-slim AS discord-dependencies
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+FROM discord-dependencies AS discord-runner
+
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1
+
+RUN groupadd --system --gid 1001 nodejs \
+  && useradd --system --uid 1001 --gid nodejs nextjs
+
+COPY --from=builder --chown=nextjs:nodejs /app/.next/worker/discord-worker.mjs ./worker/discord-worker.mjs
+
+USER nextjs
+
 FROM node:22-bookworm-slim AS runner
 
 WORKDIR /app
@@ -40,16 +59,6 @@ COPY --from=builder --chown=nextjs:nodejs /app/database ./database
 COPY --from=builder --chown=nextjs:nodejs /app/app/server/auth/password.mjs ./app/server/auth/password.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/app/server/auth/owner-auth-repository.mjs ./app/server/auth/owner-auth-repository.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/postgres ./node_modules/postgres
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/discord.js ./node_modules/discord.js
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@discordjs ./node_modules/@discordjs
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@sapphire ./node_modules/@sapphire
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@vladfrangu ./node_modules/@vladfrangu
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/discord-api-types ./node_modules/discord-api-types
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/fast-deep-equal ./node_modules/fast-deep-equal
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/lodash.snakecase ./node_modules/lodash.snakecase
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/magic-bytes.js ./node_modules/magic-bytes.js
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/tslib ./node_modules/tslib
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/ws ./node_modules/ws
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/pdfjs-dist ./node_modules/pdfjs-dist
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@napi-rs ./node_modules/@napi-rs
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/modal ./node_modules/modal
