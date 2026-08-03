@@ -1,238 +1,37 @@
 import "server-only";
 
-import { createHash, randomUUID } from "node:crypto";
-import { constants as fsConstants } from "node:fs";
-import { lstat, mkdir, open, opendir, realpath, rename, rm, unlink } from "node:fs/promises";
-import path from "node:path";
-import type { StorageObject, StorageProvider } from "../../../lib/storage-protocol";
-import { validateStorageObjectKey } from "../../../lib/storage-protocol";
+import type { StorageObject, StorageObjectSource, StorageProvider } from "../../../lib/storage-protocol";
+import * as filesystem from "../../../lib/local-filesystem-storage.mjs";
 
-export const APPLICATION_FILES_DIRECTORY = "files";
-export const APPLICATION_OBJECTS_DIRECTORY = "objects";
-export const APPLICATION_TEMP_DIRECTORY = ".tmp";
-export const DEFAULT_APPLICATION_STORAGE_ROOT = "/srv/storage/wowzerbowser";
-const FORBIDDEN_MEDIA_ROOT = path.resolve("/srv/storage/media");
+export const APPLICATION_FILES_DIRECTORY = filesystem.APPLICATION_FILES_DIRECTORY;
+export const APPLICATION_OBJECTS_DIRECTORY = filesystem.APPLICATION_OBJECTS_DIRECTORY;
+export const APPLICATION_TEMP_DIRECTORY = filesystem.APPLICATION_TEMP_DIRECTORY;
+export const DEFAULT_APPLICATION_STORAGE_ROOT = filesystem.DEFAULT_APPLICATION_STORAGE_ROOT;
 
-function assertOutsideForbiddenMedia(root: string): void {
-  const relativeToMedia = path.relative(FORBIDDEN_MEDIA_ROOT, root);
-  if (relativeToMedia === "" || (!relativeToMedia.startsWith("..") && !path.isAbsolute(relativeToMedia))) {
-    throw new Error("Application storage cannot use the media directory.");
-  }
-}
+export const applicationStorageRoot = filesystem.applicationStorageRoot;
+export const applicationFilesRoot = filesystem.applicationFilesRoot;
+export const ensureApplicationStorageDirectories = filesystem.ensureApplicationStorageDirectories;
+export const cleanupApplicationTemporaryFiles = filesystem.cleanupApplicationTemporaryFiles;
 
-export function applicationStorageRoot(): string {
-  const configured = process.env.APP_STORAGE_ROOT?.trim() || DEFAULT_APPLICATION_STORAGE_ROOT;
-  const root = path.resolve(configured);
-  assertOutsideForbiddenMedia(root);
-  return root;
-}
-
-export function applicationFilesRoot(): string {
-  return path.join(applicationStorageRoot(), APPLICATION_FILES_DIRECTORY);
-}
-
-function assertDirectoryNotSymlink(directory: string): Promise<void> {
-  return lstat(directory).then((value) => {
-    if (!value.isDirectory()) throw new Error(`Storage path is not a directory: ${directory}`);
-  });
-}
-
-async function ensureDirectory(directory: string): Promise<void> {
-  await mkdir(directory, { recursive: true });
-  await assertDirectoryNotSymlink(directory);
-}
-
-export async function ensureApplicationStorageDirectories(): Promise<void> {
-  const root = applicationStorageRoot();
-  await ensureDirectory(root);
-  const resolvedRoot = await realpath(root);
-  assertOutsideForbiddenMedia(resolvedRoot);
-  const filesRoot = applicationFilesRoot();
-  await ensureDirectory(filesRoot);
-  await ensureDirectory(path.join(filesRoot, APPLICATION_OBJECTS_DIRECTORY));
-  await ensureDirectory(path.join(filesRoot, APPLICATION_TEMP_DIRECTORY));
-}
-
-function relativeStoragePath(objectKey: string): string {
-  const key = validateStorageObjectKey(objectKey);
-  const absolute = path.resolve(applicationFilesRoot(), ...key.split("/"));
-  const relative = path.relative(applicationFilesRoot(), absolute);
-  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("The storage object path escapes the application root.");
-  return absolute;
-}
-
-async function assertRegularFileWithoutFollowingSymlinks(filePath: string): Promise<void> {
-  const value = await lstat(filePath);
-  if (!value.isFile() || value.isSymbolicLink()) throw new Error("The storage object is not a regular file.");
-}
-
-async function assertObjectDirectoriesAreSafe(): Promise<void> {
-  await assertDirectoryNotSymlink(applicationStorageRoot());
-  await assertDirectoryNotSymlink(applicationFilesRoot());
-  await assertDirectoryNotSymlink(path.join(applicationFilesRoot(), APPLICATION_OBJECTS_DIRECTORY));
-}
-
-async function readWebStream(stream: ReadableStream<Uint8Array>): Promise<AsyncGenerator<Uint8Array>> {
-  return (async function* () {
-    const reader = stream.getReader();
-    try {
-      while (true) {
-        const result = await reader.read();
-        if (result.done) return;
-        if (result.value?.byteLength) yield result.value;
-      }
-    } finally {
-      reader.releaseLock();
-    }
-  })();
-}
-
-async function* sourceChunks(source: Uint8Array | ReadableStream<Uint8Array> | AsyncIterable<Uint8Array>): AsyncGenerator<Uint8Array> {
-  if (source instanceof Uint8Array) {
-    if (source.byteLength) yield source;
-    return;
-  }
-  if (typeof (source as ReadableStream<Uint8Array>).getReader === "function") {
-    yield* await readWebStream(source as ReadableStream<Uint8Array>);
-    return;
-  }
-  for await (const chunk of source as AsyncIterable<Uint8Array>) {
-    if (!(chunk instanceof Uint8Array)) throw new Error("Storage streams must yield byte chunks.");
-    if (chunk.byteLength) yield chunk;
-  }
-}
-
-export async function writeApplicationObject(input: {
+export function writeApplicationObject(input: {
   object: StorageObject;
-  source: Uint8Array | ReadableStream<Uint8Array> | AsyncIterable<Uint8Array>;
+  source: StorageObjectSource;
   maxBytes: number;
   signal?: AbortSignal;
 }): Promise<{ size: number; sha256: string }> {
-  await ensureApplicationStorageDirectories();
-  const target = relativeStoragePath(input.object.objectKey);
-  const temporary = path.join(applicationFilesRoot(), APPLICATION_TEMP_DIRECTORY, `${randomUUID()}.uploading`);
-  const handle = await open(temporary, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | (fsConstants.O_NOFOLLOW ?? 0), 0o600);
-  const digest = createHash("sha256");
-  let size = 0;
-  try {
-    for await (const chunk of sourceChunks(input.source)) {
-      if (input.signal?.aborted) throw input.signal.reason ?? new Error("Storage upload was cancelled.");
-      size += chunk.byteLength;
-      if (size > input.maxBytes) throw new Error("The storage object exceeds its maximum size.");
-      digest.update(chunk);
-      await handle.write(chunk);
-    }
-    await handle.sync();
-    await handle.close();
-    await assertDirectoryNotSymlink(path.dirname(target));
-    await rename(temporary, target);
-    return { size, sha256: digest.digest("hex") };
-  } catch (error) {
-    await handle.close().catch(() => undefined);
-    await rm(temporary, { force: true }).catch(() => undefined);
-    throw error;
-  }
+  return filesystem.writeApplicationObject(input);
 }
 
-export async function readApplicationObject(object: StorageObject): Promise<{ stream: ReadableStream<Uint8Array>; size: number }> {
-  await assertObjectDirectoriesAreSafe();
-  const filePath = relativeStoragePath(object.objectKey);
-  await assertRegularFileWithoutFollowingSymlinks(filePath);
-  const handle = await open(filePath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
-  const details = await handle.stat();
-  if (!details.isFile()) {
-    await handle.close();
-    throw new Error("The storage object is not a regular file.");
-  }
-  let closed = false;
-  const close = async () => {
-    if (closed) return;
-    closed = true;
-    await handle.close().catch(() => undefined);
-  };
-  const stream = new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      try {
-        const buffer = Buffer.allocUnsafe(64 * 1024);
-        const result = await handle.read(buffer, 0, buffer.byteLength, null);
-        if (!result.bytesRead) {
-          await close();
-          controller.close();
-          return;
-        }
-        controller.enqueue(new Uint8Array(buffer.subarray(0, result.bytesRead)));
-      } catch (error) {
-        await close();
-        controller.error(error);
-      }
-    },
-    async cancel() {
-      await close();
-    },
-  });
-  return { stream, size: details.size };
+export function readApplicationObject(object: StorageObject): Promise<{ stream: ReadableStream<Uint8Array>; size: number }> {
+  return filesystem.readApplicationObject(object);
 }
 
-export async function readApplicationObjectBytes(object: StorageObject): Promise<Uint8Array> {
-  const opened = await readApplicationObject(object);
-  const reader = opened.stream.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    while (true) {
-      const result = await reader.read();
-      if (result.done) break;
-      chunks.push(result.value);
-      total += result.value.byteLength;
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
+export function readApplicationObjectBytes(object: StorageObject): Promise<Uint8Array> {
+  return filesystem.readApplicationObjectBytes(object);
 }
 
-export async function deleteApplicationObjectFile(object: StorageObject): Promise<void> {
-  await assertObjectDirectoriesAreSafe();
-  const filePath = relativeStoragePath(object.objectKey);
-  try {
-    const value = await lstat(filePath);
-    if (value.isSymbolicLink() || !value.isFile()) throw new Error("The storage object is not a regular file.");
-    await unlink(filePath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-}
-
-export async function cleanupApplicationTemporaryFiles(input: { olderThanMs: number; limit: number }): Promise<number> {
-  if (input.limit <= 0) return 0;
-  await ensureApplicationStorageDirectories();
-  const directory = path.join(applicationFilesRoot(), APPLICATION_TEMP_DIRECTORY);
-  const cutoff = Date.now() - Math.max(0, input.olderThanMs);
-  let removed = 0;
-  const inspectionLimit = Math.max(1, input.limit);
-  const handle = await opendir(directory);
-  try {
-    let inspected = 0;
-    for await (const entry of handle) {
-      if (inspected >= inspectionLimit) break;
-      inspected += 1;
-      if (removed >= inspectionLimit || !entry.name.endsWith(".uploading")) continue;
-      const target = path.join(directory, entry.name);
-      const details = await lstat(target).catch(() => null);
-      if (!details || details.isDirectory() || details.mtimeMs > cutoff) continue;
-      await unlink(target).catch((error) => { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; });
-      removed += 1;
-    }
-  } finally {
-    await handle.close().catch(() => undefined);
-  }
-  return removed;
+export function deleteApplicationObjectFile(object: StorageObject): Promise<void> {
+  return filesystem.deleteApplicationObjectFile(object);
 }
 
 export const localFilesystemStorageProvider: StorageProvider = {

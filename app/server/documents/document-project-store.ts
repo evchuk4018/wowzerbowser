@@ -86,10 +86,10 @@ export function createDocumentProjectStore(_unusedDependency?: unknown) {
       return query<Record<string, unknown>>("select relative_path,storage_path,storage_object_id,content_type,size,sha256 from chat_document_revision_files where owner_id=$1 and conversation_id=$2 and project_id=$3 and revision_id=$4 order by relative_path", [databaseOwnerId(input.ownerId), input.conversationId, input.projectId, input.revisionId]);
     },
     async downloadRevisionSourceFile(input: { ownerId: string; conversationId: string; projectId: string; revisionId: string; relativePath: string }) {
-      const [row] = await query<{ storage_object_id: string | null }>("select storage_object_id from chat_document_revision_files where owner_id=$1 and conversation_id=$2 and project_id=$3 and revision_id=$4 and relative_path=$5", [databaseOwnerId(input.ownerId), input.conversationId, input.projectId, input.revisionId, input.relativePath]);
+      const [row] = await query<{ storage_object_id: string | null; content_type: string; size: number; sha256: string }>("select storage_object_id,content_type,size,sha256 from chat_document_revision_files where owner_id=$1 and conversation_id=$2 and project_id=$3 and revision_id=$4 and relative_path=$5", [databaseOwnerId(input.ownerId), input.conversationId, input.projectId, input.revisionId, input.relativePath]);
       if (!row?.storage_object_id) return null;
       const object = await getStorageObjectById({ ownerId: input.ownerId, objectId: row.storage_object_id, conversationId: input.conversationId, state: "complete" });
-      if (!object || object.kind !== "revision-source" || object.projectId !== input.projectId || object.revisionId !== input.revisionId) return null;
+      if (!object || object.kind !== "revision-source" || object.projectId !== input.projectId || object.revisionId !== input.revisionId || object.contentType !== row.content_type || object.size !== Number(row.size) || object.sha256 !== row.sha256) return null;
       const bytes = await localFilesystemStorageProvider.readObjectBytes(object);
       if (bytes.byteLength !== object.size) throw new Error("The revision source storage object size does not match its metadata.");
       return bytes;

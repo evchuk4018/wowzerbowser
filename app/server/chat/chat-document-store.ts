@@ -113,9 +113,11 @@ export async function getAuthorizedDocument(ownerId: string, conversationId: str
 }
 
 export async function getAuthorizedDocumentStorageObject(ownerId: string, conversationId: string, documentId: string): Promise<StorageObject | null> {
-  const [row] = await query<{ storage_object_id: string | null }>("select storage_object_id from chat_documents where owner_id=$1 and conversation_id=$2 and document_id=$3 and status='complete'", [databaseOwnerId(ownerId), conversationId, documentId]);
+  const [row] = await query<{ storage_object_id: string | null; content_type: string }>("select storage_object_id,content_type from chat_documents where owner_id=$1 and conversation_id=$2 and document_id=$3 and status='complete'", [databaseOwnerId(ownerId), conversationId, documentId]);
   if (!row?.storage_object_id) return null;
-  return getStorageObjectById({ ownerId, objectId: row.storage_object_id, conversationId, state: "complete" });
+  const object = await getStorageObjectById({ ownerId, objectId: row.storage_object_id, conversationId, state: "complete" });
+  if (!object || object.kind !== "document" || object.documentId !== documentId || object.contentType !== row.content_type) return null;
+  return object;
 }
 
 export async function openAuthorizedDocument(ownerId: string, conversationId: string, documentId: string): Promise<{ object: StorageObject; stream: ReadableStream<Uint8Array>; size: number } | null> {
@@ -166,7 +168,7 @@ export async function uploadDocumentBytes(input: {
 }
 
 export async function deleteDocument(input: { ownerId: string; conversationId: string; documentId: string; contentType: ChatDocumentAttachment["contentType"] }): Promise<void> {
-  const [row] = await query<{ storage_object_id: string | null }>("select storage_object_id from chat_documents where owner_id=$1 and conversation_id=$2 and document_id=$3", [databaseOwnerId(input.ownerId), input.conversationId, input.documentId]);
+  const [row] = await query<{ storage_object_id: string | null }>("select storage_object_id from chat_documents where owner_id=$1 and conversation_id=$2 and document_id=$3 and content_type=$4", [databaseOwnerId(input.ownerId), input.conversationId, input.documentId, input.contentType]);
   if (row?.storage_object_id) await deleteOwnedStorageObject({ ownerId: input.ownerId, objectId: row.storage_object_id });
   await query("delete from chat_documents where owner_id=$1 and conversation_id=$2 and document_id=$3", [databaseOwnerId(input.ownerId), input.conversationId, input.documentId]);
 }

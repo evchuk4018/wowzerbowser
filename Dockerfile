@@ -27,6 +27,8 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/background-worker.mjs ./scripts/background-worker.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/storage-maintenance.mjs ./scripts/storage-maintenance.mjs
+COPY --from=builder --chown=nextjs:nodejs /app/lib/storage-protocol.mjs ./lib/storage-protocol.mjs
+COPY --from=builder --chown=nextjs:nodejs /app/lib/local-filesystem-storage.mjs ./lib/local-filesystem-storage.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/migrate.mjs ./scripts/migrate.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/owner-auth-cli.mjs ./scripts/owner-auth-cli.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/bootstrap-owner.mjs ./scripts/bootstrap-owner.mjs

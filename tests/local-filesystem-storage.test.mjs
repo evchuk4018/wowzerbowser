@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, readdir, rm, symlink, unlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, unlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
   applicationFilesRoot,
+  applicationStorageRoot,
   cleanupApplicationTemporaryFiles,
   deleteApplicationObjectFile,
   ensureApplicationStorageDirectories,
@@ -65,8 +66,14 @@ test("writes streamed bytes through a temporary file and atomically renames the 
 test("rejects traversal and absolute object keys before touching the filesystem", async () => {
   assert.throws(() => validateStorageObjectKey("objects/../outside"));
   assert.throws(() => validateStorageObjectKey("/srv/storage/media/file"));
+  assert.throws(() => validateStorageObjectKey("objects/11111111-1111-4111-8111-111111111111/child"));
   await assert.rejects(writeApplicationObject({ object: { ...object, objectKey: "objects/../outside" }, source: new Uint8Array([1]), maxBytes: 100 }));
   assert.deepEqual(await readdir(root), ["files"]);
+});
+
+test("rejects the protected media root as an application storage root", () => {
+  process.env.APP_STORAGE_ROOT = "/srv/storage/media";
+  assert.throws(() => applicationStorageRoot(), /media directory/);
 });
 
 test("enforces a bounded upload and removes its temporary file on failure", async () => {
@@ -74,6 +81,45 @@ test("enforces a bounded upload and removes its temporary file on failure", asyn
   await ensureApplicationStorageDirectories();
   assert.deepEqual(await readdir(path.join(applicationFilesRoot(), ".tmp")), []);
   assert.deepEqual(await readdir(path.join(applicationFilesRoot(), "objects")), []);
+});
+
+test("removes an interrupted upload without publishing a partial object", async () => {
+  async function* interruptedSource() {
+    yield Uint8Array.from([1, 2, 3]);
+    throw new Error("source interrupted");
+  }
+  await assert.rejects(
+    writeApplicationObject({ object, source: interruptedSource(), maxBytes: 100 }),
+    /source interrupted/,
+  );
+  await ensureApplicationStorageDirectories();
+  assert.deepEqual(await readdir(path.join(applicationFilesRoot(), ".tmp")), []);
+  assert.deepEqual(await readdir(path.join(applicationFilesRoot(), "objects")), []);
+});
+
+test("refuses an application object directory that is a symlink", async (t) => {
+  await ensureApplicationStorageDirectories();
+  const objects = path.join(applicationFilesRoot(), "objects");
+  const realObjects = path.join(applicationFilesRoot(), "objects-real");
+  const outside = path.join(root, "outside-objects");
+  await mkdir(outside);
+  await rename(objects, realObjects);
+  try {
+    try {
+      await symlink(outside, objects, "junction");
+    } catch (error) {
+      await rename(realObjects, objects);
+      if (error?.code === "EPERM" || error?.code === "EACCES") return t.skip("directory symlink creation is unavailable on this runner");
+      throw error;
+    }
+    await assert.rejects(
+      writeApplicationObject({ object, source: new Uint8Array([1]), maxBytes: 100 }),
+      /real directory/,
+    );
+  } finally {
+    await unlink(objects).catch(() => undefined);
+    await rename(realObjects, objects).catch(() => undefined);
+  }
 });
 
 test("refuses to delete a symlink presented as an object", async (t) => {

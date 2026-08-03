@@ -249,7 +249,7 @@ test("keeps PWA icon references and service worker behavior safe", async () => {
 });
 
 test("keeps Auth.js credentials and local object storage separate", async () => {
-  const [page, authConfig, authRoute, ownerService, authService, authForm, storageAdapter] = await Promise.all([
+  const [page, authConfig, authRoute, ownerService, authService, authForm, storageAdapter, storageRuntime] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../auth.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/auth/[...nextauth]/route.ts", import.meta.url), "utf8"),
@@ -257,6 +257,7 @@ test("keeps Auth.js credentials and local object storage separate", async () => 
     readFile(new URL("../app/auth/auth-service.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/auth/login-form.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/server/storage/local-filesystem-storage.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/local-filesystem-storage.mjs", import.meta.url), "utf8"),
   ]);
 
   assert.doesNotMatch(page, /@supabase\/supabase-js|createClient\(/);
@@ -271,8 +272,8 @@ test("keeps Auth.js credentials and local object storage separate", async () => 
   assert.doesNotMatch(authService, /supabase|magic|signUp/i);
   assert.match(authForm, /Password/);
   assert.doesNotMatch(authForm, /Create password account|magic link|signUp/i);
-  assert.match(storageAdapter, /atomic|rename/);
-  assert.doesNotMatch(storageAdapter, /supabase|storage\.from|signed.?url/i);
+  assert.match(storageAdapter + "\n" + storageRuntime, /atomic|rename/);
+  assert.doesNotMatch(storageAdapter + "\n" + storageRuntime, /supabase|storage\.from|signed.?url/i);
 });
 
 test("renders a non-blocking startup shell before remote chat bootstrap", async () => {

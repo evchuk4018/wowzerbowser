@@ -73,7 +73,13 @@ export async function registerArtifact(input: {
       })
       : null;
   if (!object) throw new Error("The artifact storage object could not be loaded.");
-  if (object.conversationId !== input.conversationId || object.contentType !== (input.contentType || "application/octet-stream") || !isStorageObjectId(object.objectId)) {
+  const expectedContentType = input.contentType || "application/octet-stream";
+  const kindMatches = input.storageKind ? object.kind === input.storageKind : object.kind === "artifact" || object.kind === "document";
+  const associationsMatch = (input.documentId === undefined || object.documentId === input.documentId)
+    && (input.messageId === undefined || object.messageId === input.messageId)
+    && (input.projectId === undefined || object.projectId === input.projectId)
+    && (input.revisionId === undefined || object.revisionId === input.revisionId);
+  if (object.ownerId !== input.ownerId || object.conversationId !== input.conversationId || !kindMatches || !associationsMatch || object.contentType !== expectedContentType || !isStorageObjectId(object.objectId)) {
     throw new Error("The artifact storage object is not available to this owner.");
   }
   const descriptor: ArtifactDescriptor = {

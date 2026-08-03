@@ -9,7 +9,7 @@ import {
   validateChatImageBytes,
 } from "../../../lib/chat-image";
 import { databaseOwnerId, isoTimestamp, jsonb, query } from "../database/database";
-import { validateStorageObjectKey, type StorageObject } from "../../../lib/storage-protocol";
+import { isStorageObjectId, validateStorageObjectKey, type StorageObject } from "../../../lib/storage-protocol";
 import { localFilesystemStorageProvider } from "../storage/local-filesystem-storage";
 import { getStorageObjectById, getStorageObjectByKey } from "../storage/storage-repository";
 import { deleteOwnedStorageObject, writePendingStorageObject } from "../storage/storage-service";
@@ -61,7 +61,7 @@ function recordFromRow(row: Record<string, unknown>, storageOwnerId: string): Ch
     userMessageId: String(row.user_message_id),
     jobId: typeof row.job_id === "string" ? row.job_id : null,
     storagePath: String(row.storage_path),
-    storageObjectId: String(row.storage_object_id),
+    storageObjectId: typeof row.storage_object_id === "string" ? row.storage_object_id : "",
     name: typeof row.name === "string" ? row.name : null,
     contentType: row.content_type as ChatImageContentType,
     size: Number(row.size),
@@ -85,7 +85,7 @@ export function attachmentFromUploadRecord(record: ChatImageUploadRecord): ChatI
     record.status !== "complete"
     || !record.analysis
     || record.analysis.status !== "complete"
-    || !record.storageObjectId
+    || !isStorageObjectId(record.storageObjectId)
   ) return null;
   return {
     id: record.imageId,
@@ -186,6 +186,7 @@ export async function claimChatImageUpload(input: {
   if (input.jobId) assertId(input.jobId, "jobId");
   const owner = databaseOwnerId(input.ownerId);
   try { validateStorageObjectKey(input.storagePath); } catch { throw new ChatImageError("image_id_conflict", "That image ID is bound to invalid storage.", 409); }
+  if (!isStorageObjectId(input.storageObjectId)) throw new ChatImageError("image_id_conflict", "That image ID is bound to invalid storage.", 409);
   const expectedIdentity: ChatImageUploadIdentity = {
     ownerId: input.ownerId,
     conversationId: input.conversationId,
@@ -378,7 +379,7 @@ export async function downloadChatImageObject(ownerId: string, conversationId: s
     throw new ChatImageError("unauthorized_image", "That image is not available in this conversation.", 403);
   }
   const object = await getStorageObjectById({ ownerId, objectId: record.storageObjectId, conversationId, state: "complete" });
-  if (!object || object.objectKey !== image.storagePath || object.contentType !== image.contentType || object.size !== image.size) throw new ChatImageError("storage_read_failed", "The image could not be read.", 503);
+  if (!object || object.kind !== "image" || object.objectKey !== image.storagePath || object.contentType !== image.contentType || object.size !== image.size || (object.messageId !== null && object.messageId !== record.userMessageId)) throw new ChatImageError("storage_read_failed", "The image could not be read.", 503);
   const bytes = await localFilesystemStorageProvider.readObjectBytes(object);
   validateChatImageBytes(bytes, image.contentType);
   return bytes;
@@ -388,7 +389,7 @@ export async function openChatImageObject(ownerId: string, conversationId: strin
   const record = await getChatImageUploadRecord(ownerId, conversationId, image.id);
   if (!record || record.storagePath !== image.storagePath) throw new ChatImageError("unauthorized_image", "That image is not available in this conversation.", 403);
   const object = await getStorageObjectById({ ownerId, objectId: record.storageObjectId, conversationId, state: "complete" });
-  if (!object || object.objectKey !== image.storagePath || object.contentType !== image.contentType || object.size !== image.size) throw new ChatImageError("storage_read_failed", "The image could not be read.", 503);
+  if (!object || object.kind !== "image" || object.objectKey !== image.storagePath || object.contentType !== image.contentType || object.size !== image.size || (object.messageId !== null && object.messageId !== record.userMessageId)) throw new ChatImageError("storage_read_failed", "The image could not be read.", 503);
   const opened = await localFilesystemStorageProvider.readObject(object);
   if (opened.size !== object.size) throw new ChatImageError("storage_read_failed", "The image could not be read.", 503);
   return opened;
@@ -397,7 +398,7 @@ export async function openChatImageObject(ownerId: string, conversationId: strin
 export async function downloadChatImageObjectByPath(ownerId: string, conversationId: string, path: string, contentType: ChatImageContentType): Promise<Uint8Array> {
   try { validateStorageObjectKey(path); } catch { throw new ChatImageError("storage_read_failed", "The image could not be read.", 503); }
   const object = await getStorageObjectByKey({ ownerId, conversationId, objectKey: path, state: "complete" });
-  if (!object || object.contentType !== contentType) throw new ChatImageError("storage_read_failed", "The image could not be read.", 503);
+  if (!object || object.kind !== "image" || object.contentType !== contentType) throw new ChatImageError("storage_read_failed", "The image could not be read.", 503);
   const bytes = await localFilesystemStorageProvider.readObjectBytes(object);
   if (bytes.byteLength !== object.size) throw new ChatImageError("storage_read_failed", "The image could not be read.", 503);
   validateChatImageBytes(bytes, contentType);

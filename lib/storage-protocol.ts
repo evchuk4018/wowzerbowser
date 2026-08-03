@@ -1,13 +1,22 @@
-export const STORAGE_OBJECT_STATES = ["uploading", "complete", "failed"] as const;
-export type StorageObjectState = (typeof STORAGE_OBJECT_STATES)[number];
+import {
+  isStorageObjectId,
+  STORAGE_OBJECT_ID_PATTERN,
+  STORAGE_OBJECT_KEY_PATTERN,
+  STORAGE_OBJECT_KINDS,
+  STORAGE_OBJECT_STATES,
+  validateStorageObjectKey,
+} from "./storage-protocol.mjs";
 
-export const STORAGE_OBJECT_KINDS = [
-  "document",
-  "image",
-  "artifact",
-  "revision-source",
-  "other",
-] as const;
+export {
+  isStorageObjectId,
+  STORAGE_OBJECT_ID_PATTERN,
+  STORAGE_OBJECT_KEY_PATTERN,
+  STORAGE_OBJECT_KINDS,
+  STORAGE_OBJECT_STATES,
+  validateStorageObjectKey,
+};
+
+export type StorageObjectState = (typeof STORAGE_OBJECT_STATES)[number];
 export type StorageObjectKind = (typeof STORAGE_OBJECT_KINDS)[number];
 
 export type StorageObject = {
@@ -55,18 +64,4 @@ export interface StorageProvider {
   readObjectBytes(object: StorageObject): Promise<Uint8Array>;
   deleteObjectFile(object: StorageObject): Promise<void>;
   cleanupTemporaryFiles(input: { olderThanMs: number; limit: number }): Promise<number>;
-}
-
-export const STORAGE_OBJECT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-export const STORAGE_OBJECT_KEY_PATTERN = /^objects\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-export function isStorageObjectId(value: unknown): value is string {
-  return typeof value === "string" && STORAGE_OBJECT_ID_PATTERN.test(value);
-}
-
-export function validateStorageObjectKey(value: unknown): string {
-  if (typeof value !== "string" || !STORAGE_OBJECT_KEY_PATTERN.test(value) || value.includes("\\") || value.includes("..")) {
-    throw new Error("The storage object key is invalid.");
-  }
-  return value;
 }

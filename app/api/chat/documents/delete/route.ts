@@ -4,6 +4,8 @@ import { DOCUMENT_CONTENT_TYPES } from "../../../../../lib/chat-document";
 import { deleteDocument } from "../../../../server/chat/chat-document-store";
 import { cleanupEmptyChatConversation } from "../../../../server/chat/chat-conversation-service";
 
+const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+
 function scheduleCleanup(task: () => Promise<unknown>): void {
   try {
     after(() => task().catch(() => undefined));
@@ -22,6 +24,8 @@ export function createDeleteHandler(deps = { authorizeOwnerSession, deleteDocume
       !body
       || typeof body.conversationId !== "string"
       || typeof body.documentId !== "string"
+      || !ID_PATTERN.test(body.conversationId)
+      || !ID_PATTERN.test(body.documentId)
       || !DOCUMENT_CONTENT_TYPES.includes(body.contentType as never)
     ) {
       return NextResponse.json({ error: "Invalid document metadata." }, { status: 400 });
