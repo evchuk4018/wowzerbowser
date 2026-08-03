@@ -73,6 +73,11 @@ npm run dev
 npm run build
 ```
 
+For the single-machine Lubuntu deployment requested by issue #62, use the
+Docker Compose setup and storage/Tailscale checks in [DEPLOYMENT.md](./DEPLOYMENT.md).
+The deployment wrapper is required for startup because it verifies that the
+HDD mount is present before any application container is started.
+
 ## Included Shape
 
 - edit site code under `app/`

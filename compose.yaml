@@ -1,0 +1,132 @@
+name: ${COMPOSE_PROJECT_NAME:-wowzerbowser}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-wowzerbowser}
+      POSTGRES_USER: ${POSTGRES_USER:-wowzerbowser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - application
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+    cpus: "1.00"
+    mem_limit: 2g
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-wowzerbowser}
+      POSTGRES_USER: ${POSTGRES_USER:-wowzerbowser}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set in .env}
+      APP_STORAGE_ROOT: /srv/storage/wowzerbowser
+      STORAGE_MOUNT_GUARD: ${STORAGE_MOUNT_GUARD:-unverified}
+      WORKER_CHAT_CONCURRENCY: ${WORKER_CHAT_CONCURRENCY:-1}
+      WORKER_OCR_CONCURRENCY: ${WORKER_OCR_CONCURRENCY:-2}
+      PDF_OCR_CONCURRENCY: ${PDF_OCR_CONCURRENCY:-2}
+    volumes:
+      - type: bind
+        source: /srv/storage/wowzerbowser
+        target: /srv/storage/wowzerbowser
+        read_only: false
+        bind:
+          create_host_path: false
+    networks:
+      - application
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 45s
+    cpus: "1.50"
+    mem_limit: 3g
+    pids_limit: 512
+    shm_size: 256m
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  background-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-wowzerbowser}
+      POSTGRES_USER: ${POSTGRES_USER:-wowzerbowser}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set in .env}
+      APP_STORAGE_ROOT: /srv/storage/wowzerbowser
+      STORAGE_MOUNT_GUARD: ${STORAGE_MOUNT_GUARD:-unverified}
+      WORKER_CHAT_CONCURRENCY: ${WORKER_CHAT_CONCURRENCY:-1}
+      WORKER_OCR_CONCURRENCY: ${WORKER_OCR_CONCURRENCY:-2}
+      PDF_OCR_CONCURRENCY: ${PDF_OCR_CONCURRENCY:-2}
+      WORKER_HEARTBEAT_INTERVAL_MS: ${WORKER_HEARTBEAT_INTERVAL_MS:-5000}
+      WORKER_HEARTBEAT_MAX_AGE_MS: ${WORKER_HEARTBEAT_MAX_AGE_MS:-30000}
+    command: ["node", "scripts/background-worker.mjs"]
+    volumes:
+      - type: bind
+        source: /srv/storage/wowzerbowser
+        target: /srv/storage/wowzerbowser
+        read_only: false
+        bind:
+          create_host_path: false
+    networks:
+      - application
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    cpus: "1.50"
+    mem_limit: 4g
+    pids_limit: 512
+    shm_size: 512m
+    healthcheck:
+      test: ["CMD", "node", "scripts/background-worker.mjs", "--health"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+volumes:
+  postgres-data:
+    name: wowzerbowser-postgres
+
+networks:
+  application:
+    name: wowzerbowser-application

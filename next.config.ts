@@ -10,6 +10,7 @@ const pdfRuntimeTraceFiles = [
 ];
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   serverExternalPackages: ["@napi-rs/canvas", "pdfjs-dist"],
   outputFileTracingIncludes: {
     "/api/chat": pdfRuntimeTraceFiles,
