@@ -22,14 +22,19 @@ function allowedRedirectPath(pathname: string): boolean {
 }
 
 function safeRedirect(url: string, baseUrl: string): string {
-  const fallback = `${baseUrl.replace(/\/$/u, "")}/chat`;
   try {
-    const candidate = new URL(url, baseUrl);
     const expectedOrigin = configuredSiteOrigin() ?? new URL(baseUrl).origin;
-    if (candidate.origin !== expectedOrigin || !allowedRedirectPath(candidate.pathname)) return fallback;
-    return candidate.toString();
+    const fallback = `${expectedOrigin}/chat`;
+    const candidate = new URL(url, baseUrl);
+    const relativePath = url.startsWith("/") && !url.startsWith("//");
+    if ((!relativePath && candidate.origin !== expectedOrigin) || !allowedRedirectPath(candidate.pathname)) return fallback;
+    return new URL(`${candidate.pathname}${candidate.search}${candidate.hash}`, expectedOrigin).toString();
   } catch {
-    return fallback;
+    try {
+      return `${configuredSiteOrigin() ?? new URL(baseUrl).origin}/chat`;
+    } catch {
+      return "/chat";
+    }
   }
 }
 
