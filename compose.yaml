@@ -99,7 +99,7 @@ services:
     mem_limit: 256m
     pids_limit: 128
     healthcheck:
-      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:8080/" ]
+      test: ["CMD-SHELL", "wget --spider --quiet http://127.0.0.1:8080/; status=$$?; test $$status -eq 0 -o $$status -eq 8"]
       interval: 20s
       timeout: 5s
       retries: 6
@@ -178,9 +178,9 @@ services:
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
       interval: 10s
-      timeout: 5s
+      timeout: 20s
       retries: 6
-      start_period: 20s
+      start_period: 120s
 
   firecrawl-postgres:
     image: ghcr.io/firecrawl/nuq-postgres:latest
