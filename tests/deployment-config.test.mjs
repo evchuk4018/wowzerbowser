@@ -4,9 +4,9 @@ import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("Compose defines the three issue #62 core services", async () => {
+test("Compose defines the application services and private OpenDataLoader backend", async () => {
   const compose = await read("compose.yaml");
-  for (const service of ["postgres", "web", "background-worker"]) {
+  for (const service of ["postgres", "opendataloader-hybrid", "web", "background-worker"]) {
     assert.match(compose, new RegExp(`^  ${service}:$`, "m"));
   }
   assert.doesNotMatch(compose, /^  (redis|minio|caddy|nginx):$/m);
@@ -58,4 +58,30 @@ test("background worker runs the PostgreSQL queue with bounded maintenance", asy
   assert.match(worker, /ocrConcurrency/);
   assert.match(worker, /background-worker-queue-poll/);
   assert.match(wrapper, /--health/);
+});
+
+test("OpenDataLoader uses a private bounded hybrid runtime", async () => {
+  const compose = await read("compose.yaml");
+  const appDockerfile = await read("Dockerfile");
+  const hybridDockerfile = await read("docker/opendataloader/Dockerfile");
+  const packageJson = await read("package.json");
+  const hybridBlock = compose.slice(compose.indexOf("  opendataloader-hybrid:"), compose.indexOf("  web:"));
+
+  assert.match(hybridBlock, /dockerfile: docker\/opendataloader\/Dockerfile/);
+  assert.doesNotMatch(hybridBlock, /^    ports:/m);
+  assert.match(hybridBlock, /health.*\n\s+test:.*\/health/s);
+  assert.match(hybridBlock, /cpus: "2\.00"/);
+  assert.match(hybridBlock, /mem_limit: 3g/);
+  assert.match(compose, /opendataloader-model-cache:/);
+  assert.match(compose, /OPENDATALOADER_HYBRID_URL: \$\{OPENDATALOADER_HYBRID_URL:-http:\/\/opendataloader-hybrid:5002\}/);
+  assert.match(appDockerfile, /openjdk-17-jre-headless/);
+  assert.match(appDockerfile, /node_modules\/@opendataloader/);
+  assert.equal(JSON.parse(packageJson).dependencies["@opendataloader/pdf"], "2.5.0");
+  assert.match(hybridDockerfile, /python:3\.12/);
+  assert.match(hybridDockerfile, /openjdk-17-jre-headless/);
+  assert.match(hybridDockerfile, /opendataloader-pdf\[hybrid\]==2\.5\.0/);
+  assert.match(hybridDockerfile, /--device.*cpu/);
+  assert.match(hybridDockerfile, /--ocr-engine.*easyocr/);
+  assert.match(hybridDockerfile, /--ocr-lang.*en/);
+  assert.match(hybridDockerfile, /TORCH_HOME=\/var\/cache\/opendataloader\/torch/);
 });

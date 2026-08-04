@@ -122,7 +122,7 @@ test("Discord messages are idempotent and recover a preparation lease", async ()
 
 test("local migrations, atomic chat jobs, document registration, and leased summaries work against real PostgreSQL", async () => {
   const migrationRows = await query("select version from schema_migrations order by version");
-  assert.deepEqual(migrationRows.map((row) => row.version), ["001_initial_schema", "002_seed_catalog", "003_atomic_functions", "004_owner_auth", "005_local_filesystem_storage", "006_durable_worker_queue", "007_durable_image_processing_queue", "008_background_scheduler", "009_local_integration_state"]);
+  assert.deepEqual(migrationRows.map((row) => row.version), ["001_initial_schema", "002_seed_catalog", "003_atomic_functions", "004_owner_auth", "005_local_filesystem_storage", "006_durable_worker_queue", "007_durable_image_processing_queue", "008_background_scheduler", "009_local_integration_state", "010_open_data_loader_pdf"]);
 
   const conversationId = `${testPrefix}-chat`;
   const jobId = `${testPrefix}-job`;

@@ -40,7 +40,10 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     PORT=3000
 
-RUN groupadd --system --gid 1001 nodejs \
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openjdk-17-jre-headless ca-certificates \
+  && rm -rf /var/lib/apt/lists/* \
+  && groupadd --system --gid 1001 nodejs \
   && useradd --system --uid 1001 --gid nodejs nextjs
 
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
@@ -60,6 +63,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/database ./database
 COPY --from=builder --chown=nextjs:nodejs /app/app/server/auth/password.mjs ./app/server/auth/password.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/app/server/auth/owner-auth-repository.mjs ./app/server/auth/owner-auth-repository.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/postgres ./node_modules/postgres
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@opendataloader ./node_modules/@opendataloader
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/pdfjs-dist ./node_modules/pdfjs-dist
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@napi-rs ./node_modules/@napi-rs
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/modal ./node_modules/modal

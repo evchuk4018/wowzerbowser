@@ -35,7 +35,8 @@ HDD mount is present before any application container is started.
 
 - edit site code under `app/`
 - Next.js API routes live under `app/api/`
-- Docker Compose runs `web`, private PostgreSQL, and `background-worker`
+- Docker Compose runs `web`, private PostgreSQL, `background-worker`, and the
+  private CPU-only `opendataloader-hybrid` PDF backend
 
 ## Authentication
 
@@ -229,7 +230,7 @@ restarts only after the new image is built. Do not use `docker compose down -v`.
 - [Next.js Documentation](https://nextjs.org/docs)
 
 ### Document attachments
-PDF and DOCX documents (up to 25 MiB) stream from the authenticated browser route into the local application filesystem. PostgreSQL records the UUID object key and document association; finalization reads only through the owner- and conversation-scoped storage service. PDF text uses local PDF.js extraction and bounded OCR first, with the free OpenRouter parser as a recovery path and Qwen3.7 Flash as a paid fallback when the free quota is exhausted. DOCX text is extracted locally with Mammoth and divided into bounded logical pages that do not claim to match Word's rendered pages. Embedded DOCX images use the free OpenRouter image analyzer with the same Qwen3.7 Flash quota fallback. Configure `OPENROUTER_API_KEY` for Qwen background text tasks, vision, OCR, PDF parsing, and user-memory dreaming; configure `DEEPSEEK_API_KEY` only when using the built-in foreground DeepSeek chat models. Apply the local PostgreSQL migrations. Small documents are included verbatim in context, while large documents are available through gated `search_document` and `read_document_pages` tools.
+PDF and DOCX documents (up to 25 MiB) stream from the authenticated browser route into the local application filesystem. PostgreSQL records the UUID object key and document association; finalization reads only through the owner- and conversation-scoped storage service. PDF extraction uses the local OpenDataLoader Java client and its private CPU-only hybrid backend with English EasyOCR; there is no legacy PDF parser fallback. Extracted images are bounded, stored as derived document objects, described automatically through OpenRouter, and included in per-page Markdown with authenticated image URLs. When text and image descriptions are insufficient, the model may invoke `inspect_document_page` to render one PDF page locally and ask OpenRouter a focused visual question. DOCX text remains local Mammoth extraction with bounded logical pages, and embedded DOCX images use the existing OpenRouter analyzer. Configure `OPENROUTER_API_KEY` for vision and Qwen background tasks; configure `DEEPSEEK_API_KEY` only when using the built-in foreground DeepSeek chat models. Apply the local PostgreSQL migrations. Small documents are included in context, while large documents are available through gated `search_document`, `read_document_pages`, and page-visual inspection tools.
 
 Durable user memory is stored as a private, audited `User Profile` folder tree. Hidden chat summaries are consolidated after every three completed generations by Qwen3.7 Flash with reasoning disabled; repeated turns from one conversation contribute only its newest summary. The main agent can browse and maintain the same profile through server-side memory tools, and chat-history recall uses the same Qwen model. Dreaming is enabled by default when the schema and provider keys are configured and uses Qwen reasoning; it can be disabled with `USER_MEMORY_DREAMING_ENABLED=false`. Provider or persistence failures are isolated from normal chat delivery.
 

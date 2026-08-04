@@ -3,9 +3,22 @@ export const MAX_INLINE_PDF_PAGES = 40;
 export const MAX_PDF_PAGES_PER_READ = 20;
 export const MAX_PDF_SEARCH_RESULTS = 10;
 export const MAX_PDF_BYTES = 25 * 1024 * 1024;
+export const MAX_DOCUMENT_IMAGES = 32;
+export const MAX_DOCUMENT_IMAGE_BYTES = 10 * 1024 * 1024;
+export const MAX_DOCUMENT_IMAGE_TOTAL_BYTES = 64 * 1024 * 1024;
 export const DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document" as const;
 export const DOCUMENT_CONTENT_TYPES = ["application/pdf", DOCX_CONTENT_TYPE] as const;
 export const CHAT_DOCUMENT_BUCKET = "chat-documents";
+
+export type ChatDocumentProviderMetadata = Record<string, unknown>;
+export type ChatDocumentImage = {
+  imageId: string;
+  pageNumber: number;
+  storageObjectId?: string | null;
+  storagePath?: string | null;
+  contentType?: string | null;
+  providerMetadata?: ChatDocumentProviderMetadata;
+};
 
 export type ChatDocumentImageAnalysis = { imageNumber: number; visibleText: string | null; mainVisuals: string | null };
 export type ChatDocumentAttachment = {
@@ -19,6 +32,8 @@ export type ChatDocumentAttachment = {
   imageCount: number;
   analyzedImageCount: number;
   imageAnalyses: ChatDocumentImageAnalysis[];
+  providerMetadata?: ChatDocumentProviderMetadata;
+  images?: ChatDocumentImage[];
   projectId?: string;
   revisionId?: string;
   parentRevisionId?: string | null;
@@ -27,7 +42,7 @@ export type ChatDocumentAttachment = {
   sourceCompleteness?: "complete" | "entrypoint-only";
 };
 
-export const PDF_PAGE_EXTRACTION_METHODS = ["native", "ocr", "blank"] as const;
+export const PDF_PAGE_EXTRACTION_METHODS = ["native", "ocr", "opendataloader", "blank"] as const;
 export type PdfPageExtractionMethod = (typeof PDF_PAGE_EXTRACTION_METHODS)[number];
 
 export type ChatDocumentPageFailure = {
@@ -39,6 +54,10 @@ export type ChatDocumentPageFailure = {
 export type ChatDocumentPage = {
   pageNumber: number;
   text: string;
+  /** Markdown is preferred for model context; text remains the search representation. */
+  markdown?: string | null;
+  providerMetadata?: ChatDocumentProviderMetadata;
+  images?: ChatDocumentImage[];
   extractionMethod: PdfPageExtractionMethod;
   failure?: ChatDocumentPageFailure;
 };
@@ -82,6 +101,10 @@ export function estimatePdfTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
+export function documentPageMarkdown(page: Pick<ChatDocumentPage, "text" | "markdown">): string {
+  return page.markdown?.trim() ? page.markdown : page.text;
+}
+
 export function shouldInlineDocument(document: Pick<ChatDocumentAttachment, "pageCount" | "tokenEstimate">): boolean {
   return document.pageCount <= MAX_INLINE_PDF_PAGES && document.tokenEstimate <= MAX_INLINE_PDF_TOKENS;
 }
@@ -104,7 +127,7 @@ export function createInlineDocumentPageLoader<T>(
 export function pdfContext(document: ChatDocumentAttachment, pages: readonly ChatDocumentPage[]): string {
   if (shouldInlineDocument(document)) {
     return [`[Attached PDF: ${document.name} (${document.id})]`, ...pages.map((page) =>
-      `[PDF page ${page.pageNumber}]\n${page.text}`),].join("\n\n");
+      `[PDF page ${page.pageNumber}]\n${documentPageMarkdown(page)}`),].join("\n\n");
   }
   return [
     `[Attached PDF: id=${document.id}; filename=${document.name}; pages=${document.pageCount}; estimated tokens=${document.tokenEstimate}]`,

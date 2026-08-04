@@ -74,3 +74,7 @@ test("connector reads are parallel-safe while writes default to serial", () => {
   assert.equal(toolExecutionMetadata(write.namespacedName, [write]).executionPolicy, "serial");
   assert.equal(toolExecutionMetadata("connector__drive__unknown", []).executionPolicy, "serial");
 });
+
+test("full-page PDF visual inspection is parallel-safe", () => {
+  assert.equal(toolExecutionMetadata("inspect_document_page").executionPolicy, "parallel-safe");
+});

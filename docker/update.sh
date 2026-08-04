@@ -14,7 +14,6 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   echo "Refusing update: tracked deployment changes are present; preserve them before updating." >&2
   exit 71
 fi
-
 "$script_dir/require-storage-mount.sh"
 export STORAGE_MOUNT_GUARD=verified
 
@@ -26,16 +25,16 @@ echo "deployment-update\tvalidate-compose"
 "$compose" config >/dev/null
 
 echo "deployment-update\tbuild"
-"$compose" build web background-worker
+"$compose" build web background-worker opendataloader-hybrid
 
-echo "deployment-update\tstart-postgres"
-"$compose" up -d postgres
+echo "deployment-update\tstart-dependencies"
+"$compose" up -d postgres opendataloader-hybrid
 
 echo "deployment-update\tapply-migrations"
 "$compose" run --rm --no-deps -T -e SKIP_DATABASE_MIGRATION_CHECK=1 web node scripts/migrate.mjs --initialize
 
 echo "deployment-update\trestart-app"
-"$compose" up -d --force-recreate web background-worker
+"$compose" up -d --force-recreate web background-worker opendataloader-hybrid
 
 if [ "${ENABLE_DISCORD_PROFILE:-0}" = "1" ]; then
   echo "deployment-update\trestart-discord"

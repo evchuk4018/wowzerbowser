@@ -33,6 +33,8 @@ services:
 volumes:
   smoke-postgres-data:
     name: ${SMOKE_POSTGRES_VOLUME_NAME:?SMOKE_POSTGRES_VOLUME_NAME must be set}
+  opendataloader-model-cache:
+    name: ${SMOKE_OPENDATALOADER_CACHE_VOLUME_NAME:?SMOKE_OPENDATALOADER_CACHE_VOLUME_NAME must be set}
 
 networks:
   application:

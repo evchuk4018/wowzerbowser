@@ -1,6 +1,7 @@
 import "server-only";
 
 import { ChatDocumentError, type ChatDocumentAttachment } from "../../../lib/chat-document";
+import { OpenDataLoaderPdfError } from "../../providers/opendataloader/opendataloader-pdf-adapter";
 import { localFilesystemStorageProvider } from "../storage/local-filesystem-storage";
 import { getStorageObjectById } from "../storage/storage-repository";
 import { DocumentIngestionTiming } from "./document-ingestion-timing";
@@ -24,6 +25,7 @@ function publicDocumentError(error: unknown): string {
 }
 
 function retryableDocumentError(error: unknown): boolean {
+  if (error instanceof OpenDataLoaderPdfError) return error.code === "conversion_failed";
   if (!(error instanceof ChatDocumentError)) return true;
   return !new Set(["document_too_large", "document_storage_invalid", "document_storage_changed", "parser_cancelled"]).has(error.code);
 }

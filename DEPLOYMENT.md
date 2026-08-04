@@ -9,16 +9,18 @@ private Tailscale HTTPS
           v
 host Tailscale Serve -> 127.0.0.1:3000 -> web
                                       |\
-                                      | postgres (private Compose network)
-                                      ` background-worker
-                                      ` discord (optional profile)
+                                       | postgres (private Compose network)
+                                       | background-worker
+                                       ` opendataloader-hybrid (private CPU OCR)
+                                       ` discord (optional profile)
 ```
 
-The Compose stack has exactly three core services: `web`, `postgres`, and
-`background-worker`. The optional `discord` profile adds the local Discord
-Gateway process without adding a host port or a storage mount. PostgreSQL uses
-the named `wowzerbowser-postgres` volume and has no host-published port. The web
-port is bound to loopback only.
+The Compose stack has four core services: `web`, `postgres`,
+`background-worker`, and the private `opendataloader-hybrid` CPU OCR backend.
+The optional `discord` profile adds the local Discord Gateway process without
+adding a host port or a storage mount. PostgreSQL uses the named
+`wowzerbowser-postgres` volume and has no host-published port. The web port and
+OpenDataLoader port are not published to the host.
 
 ## Storage safety
 
@@ -153,7 +155,7 @@ application state and must be preserved during updates.
 ```bash
 DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh ps
 docker inspect --format '{{json .State.Health}}' wowzerbowser-web-1
-DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh logs --tail=200 web postgres background-worker
+DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh logs --tail=200 web postgres background-worker opendataloader-hybrid
 DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh down
 DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh up -d --build
 docker volume inspect wowzerbowser-postgres
@@ -229,7 +231,7 @@ Verify that Serve is tailnet-only and that no Funnel configuration exists.
 Use the guarded update procedure from the `main` checkout. It refuses tracked
 local edits, preserves untracked files, pulls only `main` with fast-forward
 semantics, builds the new image, starts PostgreSQL, applies local migrations,
-and recreates `web` and `background-worker` only after the build and migration
+and recreates `web`, `background-worker`, and `opendataloader-hybrid` only after the build and migration
 steps succeed:
 
 ```bash
@@ -241,7 +243,7 @@ owner-managed media directory. It does not run `docker compose down -v`.
 If it stops at a guard, configuration, storage, or migration step, inspect the
 reported condition and correct it before retrying. If the app is already down,
 check `findmnt -T /srv/storage`, `./docker/compose.sh logs --tail=200 web
-postgres background-worker`, and the migration status command above; do not
+postgres background-worker opendataloader-hybrid`, and the migration status command above; do not
 create a fallback `/srv/storage` directory or bypass the startup guard.
 
 For an optional Discord update, set `ENABLE_DISCORD_PROFILE=1` only when the
@@ -271,13 +273,15 @@ DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh
 curl --fail-with-body --silent --show-error http://127.0.0.1:3000/api/health
 docker inspect wowzerbowser-web-1 --format '{{json .Mounts}}'
 docker inspect wowzerbowser-background-worker-1 --format '{{json .Mounts}}'
+docker inspect wowzerbowser-opendataloader-hybrid-1 --format '{{json .Mounts}}'
 ss -ltnp
 ```
 
 Expected host listeners are SSH, Tailscale-managed listeners, and the web port
-on `127.0.0.1` only. There must be no host listener for PostgreSQL. Container
-mount output must contain `/srv/storage/wowzerbowser` only, not `/srv/storage`
-or `/srv/storage/media`.
+on `127.0.0.1` only. There must be no host listener for PostgreSQL or
+OpenDataLoader. The application containers must not see `/srv/storage/media`;
+only `web` and `background-worker` receive the `/srv/storage/wowzerbowser`
+bind mount, while the hybrid service receives only its named model-cache volume.
 
 For an isolation check, create temporary harmless files under both host
 directories, verify the application container sees only the application file,

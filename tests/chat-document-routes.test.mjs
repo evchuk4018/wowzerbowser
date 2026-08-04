@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { ChatDocumentError } from "../lib/chat-document.ts";
 import { createUploadHandler } from "../app/api/chat/documents/upload/route.ts";
+import { createDocumentImageReadHandler } from "../app/api/chat/documents/[documentId]/images/[imageId]/route.ts";
 import { createFinalizeHandler, maxDuration, runtime } from "../app/api/chat/documents/finalize/route.ts";
 import nextConfig from "../next.config.ts";
 
@@ -57,8 +58,24 @@ test("finalize route uses the Node runtime and long duration required for PDF in
 });
 
 test("the worker owns the native PDF runtime while web routes keep the external packages available", () => {
-  assert.deepEqual(nextConfig.serverExternalPackages, ["@napi-rs/canvas", "pdfjs-dist"]);
+  assert.deepEqual(nextConfig.serverExternalPackages, ["@napi-rs/canvas", "@opendataloader/pdf", "pdfjs-dist"]);
   assert.equal(nextConfig.outputFileTracingIncludes, undefined);
+});
+
+test("document image route keeps derived images owner- and conversation-scoped", async () => {
+  const handler = createDocumentImageReadHandler({
+    authorizeOwnerSession: async () => ({ id: "owner" }),
+    openAuthorizedDocumentImage: async () => ({
+      object: { ...storageObject, kind: "document-image", contentType: "image/png", originalFilename: "chart.png" },
+      stream: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array([1, 2, 3])); controller.close(); } }),
+      size: 3,
+    }),
+  });
+  const response = await handler(new Request("http://test?conversationId=conversation"), { params: { documentId: "document", imageId: "image-1" } });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "image/png");
+  assert.equal(response.headers.get("content-disposition"), "inline");
+  assert.deepEqual([...new Uint8Array(await response.arrayBuffer())], [1, 2, 3]);
 });
 
 test("finalize route only enqueues owner-scoped processing and never parses in the web request", async () => {

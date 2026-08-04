@@ -1,16 +1,47 @@
 import "server-only";
 import type { ChatToolCall, ChatToolResult } from "../../../lib/chat-protocol";
-import { MAX_PDF_PAGES_PER_READ, MAX_PDF_SEARCH_RESULTS } from "../../../lib/chat-document";
+import { documentPageMarkdown, MAX_PDF_PAGES_PER_READ, MAX_PDF_SEARCH_RESULTS } from "../../../lib/chat-document";
+import { MAX_IMAGE_FOLLOWUP_QUESTION_LENGTH } from "../../../lib/chat-image";
 import { getAuthorizedDocument, getDocumentPages } from "../chat/chat-document-store";
-import { PDF_TOOL_DEFINITIONS, READ_PDF_PAGES_TOOL_NAME, SEARCH_PDF_TOOL_NAME } from "./pdf-tool-manifest";
+import { inspectDocumentPage } from "../chat/document-page-visual-service";
+import { INSPECT_DOCUMENT_PAGE_TOOL_NAME, PDF_TOOL_DEFINITIONS, READ_PDF_PAGES_TOOL_NAME, SEARCH_PDF_TOOL_NAME } from "./pdf-tool-manifest";
 
-export function availablePdfTools(hasAuthorizedPdf: boolean) { return hasAuthorizedPdf ? PDF_TOOL_DEFINITIONS : []; }
+const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+const safeError = (error: unknown) => (error instanceof Error ? error.message : "Document inspection failed.").slice(0, 1_000);
+
+export function availablePdfTools(hasAuthorizedDocument: boolean, hasAuthorizedPdf = hasAuthorizedDocument) {
+  if (!hasAuthorizedDocument) return [];
+  return hasAuthorizedPdf ? PDF_TOOL_DEFINITIONS : PDF_TOOL_DEFINITIONS.filter((tool) => tool.function.name !== INSPECT_DOCUMENT_PAGE_TOOL_NAME);
+}
+
 const fail = (call: ChatToolCall, message: string): ChatToolResult => ({ id: call.id, name: call.name, ok: false, stdout: "", stderr: message });
-export async function executePdfTool(call: ChatToolCall, context: { ownerId: string; conversationId: string; allowedPdfIds: ReadonlySet<string> }): Promise<ChatToolResult> {
+export async function executePdfTool(call: ChatToolCall, context: { ownerId: string; conversationId: string; allowedPdfIds: ReadonlySet<string>; signal?: AbortSignal }): Promise<ChatToolResult> {
   let args: Record<string, unknown>; try { args = JSON.parse(call.arguments); } catch { return fail(call, "Invalid document tool arguments."); }
   const pdfId = typeof args.documentId === "string" ? args.documentId : "";
+  if (!ID_PATTERN.test(pdfId)) return fail(call, "Document is not authorized for this conversation.");
   const authorized = context.allowedPdfIds.has(pdfId) ? await getAuthorizedDocument(context.ownerId, context.conversationId, pdfId) : null;
   if (!authorized) return fail(call, "Document is not authorized for this conversation.");
+  if (call.name === INSPECT_DOCUMENT_PAGE_TOOL_NAME) {
+    if (authorized.contentType !== "application/pdf") return fail(call, "Full-page visual inspection is available only for PDFs.");
+    const pageNumber = args.pageNumber;
+    const question = typeof args.question === "string" ? args.question.trim() : "";
+    if (!Number.isSafeInteger(pageNumber) || Number(pageNumber) < 1 || Number(pageNumber) > authorized.pageCount) return fail(call, "The requested page is outside this document.");
+    if (!question || question.length > MAX_IMAGE_FOLLOWUP_QUESTION_LENGTH) return fail(call, `question is required and must be ${MAX_IMAGE_FOLLOWUP_QUESTION_LENGTH} characters or shorter.`);
+    try {
+      const result = await inspectDocumentPage({
+        ownerId: context.ownerId,
+        conversationId: context.conversationId,
+        documentId: pdfId,
+        pageNumber: Number(pageNumber),
+        question,
+        toolCallId: call.id,
+        signal: context.signal,
+      });
+      return { id: call.id, name: call.name, ok: true, stdout: `[Untrusted PDF page ${result.pageNumber} visual inspection]\n${result.answer}`, stderr: "" };
+    } catch (error) {
+      return fail(call, safeError(error));
+    }
+  }
   if (call.name === SEARCH_PDF_TOOL_NAME) {
     const query = typeof args.query === "string" ? args.query.trim() : ""; if (!query) return fail(call, "query is required.");
     const pages = await getDocumentPages(context.ownerId, context.conversationId, pdfId);
@@ -25,7 +56,7 @@ export async function executePdfTool(call: ChatToolCall, context: { ownerId: str
     if (!document || Number(end) > document.pageCount) return fail(call, "The requested page range is outside this document.");
     const pages = await getDocumentPages(context.ownerId, context.conversationId, pdfId, Number(start), Number(end));
     const label = authorized.contentType === "application/pdf" ? "PDF page" : "DOCX logical page";
-    return { id: call.id, name: call.name, ok: true, stdout: pages.map((p) => `[${label} ${p.pageNumber}]\n${p.text}`).join("\n\n"), stderr: "" };
+    return { id: call.id, name: call.name, ok: true, stdout: pages.map((p) => `[${label} ${p.pageNumber}]\n${documentPageMarkdown(p)}`).join("\n\n"), stderr: "" };
   }
   return fail(call, `Unknown tool: ${call.name}`);
 }

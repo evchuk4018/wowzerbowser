@@ -155,7 +155,7 @@ export async function generateChatResponse(
   }
   const imageTools = availableImageTools(allowedImageIds.length > 0);
   const allPdfEditTools = availablePdfEditTools([...authoritativePdfs.values()].some((document) => document.contentType === "application/pdf"));
-  const allPdfReadTools = availablePdfTools(allowedPdfIds.size > 0);
+  const allPdfReadTools = availablePdfTools(allowedPdfIds.size > 0, [...authoritativePdfs.values()].some((document) => document.contentType === "application/pdf"));
   const phaseTools = chatRequest.thinking && !automationExecution ? [PHASE_BREAK_TOOL_DEFINITION] : [];
   const latestMessage = chatRequest.messages.at(-1);
   const latestUserMessage = [...chatRequest.messages].reverse().find((message) => message.role === "user");
@@ -321,7 +321,7 @@ export async function generateChatResponse(
           const automationDefinitions = !automationExecution && automationToolsUnlocked ? AUTOMATION_TOOL_DEFINITIONS : [];
           const calendarDefinitions = calendarToolsUnlocked ? CALENDAR_TOOL_DEFINITIONS : [];
           const dynamicPdfTools = selected("documents")
-            ? availablePdfTools(allowedPdfIds.size > 0).filter((tool) => !baseToolDefinitions.some((base) => base.function.name === tool.function.name))
+            ? activePdfReadTools.filter((tool) => !baseToolDefinitions.some((base) => base.function.name === tool.function.name))
             : [];
           const dynamicConnectorTools = selected("connectors") ? connectorModelTools : [];
           const toolDefinitions = [...baseToolDefinitions, ...automationDefinitions, ...calendarDefinitions, ...dynamicPdfTools, ...dynamicConnectorTools];
@@ -522,8 +522,8 @@ export async function generateChatResponse(
               for (const artifact of result.artifacts ?? []) if (artifact.contentType === "application/pdf") allowedPdfIds.add(artifact.id);
               return result;
             }
-            if (selected("documents") && availablePdfTools(allowedPdfIds.size > 0).some((tool) => tool.function.name === call.name)) {
-              return executePdfTool(call, { ownerId, conversationId, allowedPdfIds });
+            if (selected("documents") && allPdfReadTools.some((tool) => tool.function.name === call.name)) {
+              return executePdfTool(call, { ownerId, conversationId, allowedPdfIds, signal: roundSignal });
             }
             if (call.name === SEARCH_CURRENT_CHAT_TOOL_NAME && focusedPlan) return executeCurrentChatContextTool(call, focusedPlan.searchEntries);
             if (call.name === SEARCH_CONNECTOR_TOOLS_NAME && connectorDiscoveryAvailable) {

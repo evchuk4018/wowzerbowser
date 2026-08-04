@@ -24,6 +24,35 @@ services:
       retries: 6
       start_period: 20s
 
+  opendataloader-hybrid:
+    build:
+      context: .
+      dockerfile: docker/opendataloader/Dockerfile
+    environment:
+      HOME: /home/opendataloader
+      XDG_CACHE_HOME: /var/cache/opendataloader
+      HF_HOME: /var/cache/opendataloader/huggingface
+      TORCH_HOME: /var/cache/opendataloader/torch
+      CUDA_VISIBLE_DEVICES: ""
+    expose:
+      - "5002"
+    networks:
+      - application
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+    cpus: "2.00"
+    mem_limit: 3g
+    pids_limit: 256
+    volumes:
+      - opendataloader-model-cache:/var/cache/opendataloader
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; response = urllib.request.urlopen('http://127.0.0.1:5002/health', timeout=3); raise SystemExit(0 if response.status == 200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 90s
+
   web:
     build:
       context: .
@@ -49,6 +78,7 @@ services:
       WORKER_DOCUMENT_CONCURRENCY: ${WORKER_DOCUMENT_CONCURRENCY:-1}
       WORKER_OCR_CONCURRENCY: ${WORKER_OCR_CONCURRENCY:-2}
       PDF_OCR_CONCURRENCY: ${PDF_OCR_CONCURRENCY:-2}
+      OPENDATALOADER_HYBRID_URL: ${OPENDATALOADER_HYBRID_URL:-http://opendataloader-hybrid:5002}
     user: "${APP_UID:-1000}:${APP_GID:-1000}"
     volumes:
       - type: bind
@@ -63,6 +93,8 @@ services:
       - "127.0.0.1:${WEB_PORT:-3000}:3000"
     depends_on:
       postgres:
+        condition: service_healthy
+      opendataloader-hybrid:
         condition: service_healthy
     restart: unless-stopped
     init: true
@@ -101,6 +133,7 @@ services:
       WORKER_IMAGE_CONCURRENCY: ${WORKER_IMAGE_CONCURRENCY:-1}
       WORKER_OCR_CONCURRENCY: ${WORKER_OCR_CONCURRENCY:-2}
       PDF_OCR_CONCURRENCY: ${PDF_OCR_CONCURRENCY:-2}
+      OPENDATALOADER_HYBRID_URL: ${OPENDATALOADER_HYBRID_URL:-http://opendataloader-hybrid:5002}
       WORKER_POLL_INTERVAL_MS: ${WORKER_POLL_INTERVAL_MS:-1000}
       WORKER_HEARTBEAT_INTERVAL_MS: ${WORKER_HEARTBEAT_INTERVAL_MS:-5000}
       WORKER_HEARTBEAT_MAX_AGE_MS: ${WORKER_HEARTBEAT_MAX_AGE_MS:-30000}
@@ -123,6 +156,8 @@ services:
       - application
     depends_on:
       postgres:
+        condition: service_healthy
+      opendataloader-hybrid:
         condition: service_healthy
     restart: unless-stopped
     init: true
@@ -176,6 +211,8 @@ services:
 volumes:
   postgres-data:
     name: wowzerbowser-postgres
+  opendataloader-model-cache:
+    name: ${OPENDATALOADER_CACHE_VOLUME_NAME:-wowzerbowser-opendataloader-cache}
 
 networks:
   application:
