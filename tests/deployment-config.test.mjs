@@ -34,7 +34,7 @@ test("search and retrieval services stay private to the Compose network", async 
   assert.match(compose, /SEARXNG_URL: \$\{SEARXNG_URL:-http:\/\/searxng:8080\}/);
   assert.match(compose, /FIRECRAWL_URL: \$\{FIRECRAWL_URL:-http:\/\/firecrawl:3002\}/);
   assert.match(compose, /rabbitmq-diagnostics.*\n\s+interval: 10s\n\s+timeout: 20s\n\s+retries: 6\n\s+start_period: 120s/s);
-  assert.match(compose, /wget --spider --quiet http:\/\/127\.0\.0\.1:8080\/; status=\$\$\?; test \$\$status -eq 0 -o \$\$status -eq 8/);
+  assert.match(compose, /wget --server-response --spider --timeout=5 http:\/\/127\.0\.0\.1:8080\/ 2>&1 \| grep -qE 'HTTP\/\[0-9\.\]\+ \[0-9\]\+'/);
 });
 
 test("only the application storage directory is bind-mounted", async () => {

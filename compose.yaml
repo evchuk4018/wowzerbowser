@@ -99,7 +99,7 @@ services:
     mem_limit: 256m
     pids_limit: 128
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider --quiet http://127.0.0.1:8080/; status=$$?; test $$status -eq 0 -o $$status -eq 8"]
+      test: ["CMD-SHELL", "wget --server-response --spider --timeout=5 http://127.0.0.1:8080/ 2>&1 | grep -qE 'HTTP/[0-9.]+ [0-9]+'"]
       interval: 20s
       timeout: 5s
       retries: 6
