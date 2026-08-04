@@ -2,14 +2,15 @@ import "server-only";
 
 import type { ChatToolCall, ChatToolResult } from "../../../lib/chat-protocol";
 import { sourceForUrl } from "../../../lib/chat-citations";
-import { configuredKeys, WebProviderError, withProviderKeys } from "./web-api-key-pool";
+import { isSearchFocus, type SearchFocus } from "../../../lib/search-protocol";
+import { SearchUnavailableError, searchSelfHosted } from "../search/search-service";
+import { fetchResearchPage } from "../research/research-page-service";
 
 export const WEB_SEARCH_TOOL_NAME = "web_search";
 export const FETCH_PAGE_TOOL_NAME = "fetch_page";
 export const CHECK_TIME_TOOL_NAME = "check_time";
 export const CHECK_DATE_TOOL_NAME = "check_date";
 export const CHECK_LOCATION_TOOL_NAME = "check_location";
-const TIMEOUT_MS = 12_000;
 const MAX_RESULTS = 20;
 const MAX_SNIPPET = 1_200;
 const MAX_MARKDOWN = 24_000;
@@ -17,7 +18,7 @@ const MAX_TIME_ZONE = 100;
 const MAX_LOCATION = 300;
 
 export const WEB_TOOL_DEFINITIONS = [
-  { type: "function" as const, function: { name: WEB_SEARCH_TOOL_NAME, description: "Search the web for concise, current result snippets.", parameters: { type: "object", additionalProperties: false, required: ["query"], properties: { query: { type: "string", minLength: 1, maxLength: 400 }, count: { type: "integer", minimum: 1, maximum: MAX_RESULTS } } } } },
+  { type: "function" as const, function: { name: WEB_SEARCH_TOOL_NAME, description: "Search the web for concise, current result snippets.", parameters: { type: "object", additionalProperties: false, required: ["query"], properties: { query: { type: "string", minLength: 1, maxLength: 400 }, count: { type: "integer", minimum: 1, maximum: MAX_RESULTS }, focus: { type: "string", enum: ["general", "news", "community", "reference"] } } } } },
   { type: "function" as const, function: { name: FETCH_PAGE_TOOL_NAME, description: "Read a specific public web page as bounded Markdown.", parameters: { type: "object", additionalProperties: false, required: ["url"], properties: { url: { type: "string", minLength: 1, maxLength: 2_000, format: "uri" } } } } },
   { type: "function" as const, function: { name: CHECK_TIME_TOOL_NAME, description: "Check the current server time, optionally in an IANA time zone.", parameters: { type: "object", additionalProperties: false, properties: { timeZone: { type: "string", minLength: 1, maxLength: MAX_TIME_ZONE } } } } },
   { type: "function" as const, function: { name: CHECK_DATE_TOOL_NAME, description: "Check the current server calendar date, optionally in an IANA time zone.", parameters: { type: "object", additionalProperties: false, properties: { timeZone: { type: "string", minLength: 1, maxLength: MAX_TIME_ZONE } } } } },
@@ -32,8 +33,8 @@ function configuredLocation(): string | undefined {
 export function availableWebTools() {
   return WEB_TOOL_DEFINITIONS.filter((tool) => {
     switch (tool.function.name) {
-      case WEB_SEARCH_TOOL_NAME: return configuredKeys("brave").length > 0;
-      case FETCH_PAGE_TOOL_NAME: return configuredKeys("exa").length > 0;
+      case WEB_SEARCH_TOOL_NAME: return configuredSearchStack();
+      case FETCH_PAGE_TOOL_NAME: return configuredSearchStack();
       case CHECK_LOCATION_TOOL_NAME: return configuredLocation() !== undefined;
       default: return true;
     }
@@ -54,6 +55,11 @@ function searchQuery(input: Record<string, unknown>): string {
   // spelling even when the advertised schema calls the field `query`. Accept
   // that wire-level alias so a valid search does not turn into a retry loop.
   return text(input.query ?? input.q, 400);
+}
+function searchFocus(input: Record<string, unknown>, tool: string): SearchFocus {
+  if (input.focus === undefined) return "general";
+  if (!isSearchFocus(input.focus)) throw new Error(`${tool} focus must be general, news, community, or reference.`);
+  return input.focus;
 }
 function requireOnly(input: Record<string, unknown>, allowed: readonly string[], tool: string) {
   const unexpected = Object.keys(input).find((key) => !allowed.includes(key));
@@ -77,10 +83,8 @@ function dateParts(formatter: Intl.DateTimeFormat, now: Date) {
   if (!year || !month || !day) throw new Error("The server could not format the current date.");
   return { year, month, day, hour: get("hour"), minute: get("minute"), second: get("second") };
 }
-async function providerFetch(url: string, init: RequestInit, signal?: AbortSignal) {
-  const timeout = AbortSignal.timeout(TIMEOUT_MS);
-  const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
-  return fetch(url, { ...init, signal: requestSignal });
+function configuredSearchStack(): boolean {
+  return process.env.SEARCH_STACK_ENABLED === "true";
 }
 
 export async function executeWebTool(call: ChatToolCall, signal?: AbortSignal): Promise<ChatToolResult> {
@@ -108,27 +112,29 @@ export async function executeWebTool(call: ChatToolCall, signal?: AbortSignal): 
       return { id: call.id, name: call.name, ok: true, stdout: "", stderr: "", durationMs: Date.now() - startedAt, utility };
     }
     if (call.name === WEB_SEARCH_TOOL_NAME) {
-      requireOnly(input, ["query", "q", "count"], call.name);
+      requireOnly(input, ["query", "q", "count", "focus"], call.name);
       const query = searchQuery(input); const count = Math.max(1, Math.min(MAX_RESULTS, Number(input.count) || MAX_RESULTS));
       if (!query) throw new Error("web_search requires a query.");
-      const response = await withProviderKeys(configuredKeys("brave"), (key) => providerFetch(`https://api.search.brave.com/res/v1/web/search?${new URLSearchParams({ q: query, count: String(count), text_decorations: "false" })}`, { headers: { Accept: "application/json", "X-Subscription-Token": key } }, signal));
-      if (!response.ok) throw response;
-      const body = await response.json() as { web?: { results?: Array<{ title?: unknown; url?: unknown; description?: unknown }> } };
-      const results = (body.web?.results ?? []).slice(0, count).map((item) => sourceForUrl({ title: text(item.title, 300), url: text(item.url, 2_000), snippet: text(item.description, MAX_SNIPPET) })).filter((item) => item.url);
+      const results = (await searchSelfHosted({ query, count, focus: searchFocus(input, call.name), signal })).map(({ id, title, url, snippet, publisher, publishedAt }) => ({
+        id,
+        title,
+        url,
+        snippet,
+        publisher,
+        ...(publishedAt ? { publishedAt } : {}),
+      }));
       return { id: call.id, name: call.name, ok: true, stdout: "", stderr: "", durationMs: Date.now() - startedAt, web: { kind: "search", query, results } };
     }
     if (call.name === FETCH_PAGE_TOOL_NAME) {
       requireOnly(input, ["url"], call.name);
       const url = text(input.url, 2_000); if (!/^https?:\/\//i.test(url)) throw new Error("fetch_page requires an http(s) URL.");
-      const response = await withProviderKeys(configuredKeys("exa"), (key) => providerFetch("https://api.exa.ai/contents", { method: "POST", headers: { "content-type": "application/json", "x-api-key": key }, body: JSON.stringify({ urls: [url], text: { maxCharacters: MAX_MARKDOWN } }) }, signal));
-      if (!response.ok) throw response;
-      const body = await response.json() as { results?: Array<{ text?: unknown; title?: unknown; publishedDate?: unknown }> };
-      const markdown = text(body.results?.[0]?.text, MAX_MARKDOWN);
-      return { id: call.id, name: call.name, ok: true, stdout: "", stderr: "", durationMs: Date.now() - startedAt, web: { kind: "page", source: sourceForUrl({ title: text(body.results?.[0]?.title, 300), url, snippet: markdown.slice(0, MAX_SNIPPET), publishedAt: text(body.results?.[0]?.publishedDate, 100) }), markdown } };
+      const fetched = await fetchResearchPage(url, signal);
+      const markdown = fetched.page.markdown.slice(0, MAX_MARKDOWN);
+      return { id: call.id, name: call.name, ok: true, stdout: "", stderr: "", durationMs: Date.now() - startedAt, web: { kind: "page", source: sourceForUrl({ title: fetched.page.source.title, url: fetched.page.source.url, snippet: markdown.slice(0, MAX_SNIPPET), publishedAt: fetched.page.source.publishedAt }), markdown } };
     }
     throw new Error(`Unknown tool: ${call.name}`);
   } catch (error) {
-    const message = error instanceof WebProviderError ? error.message : error instanceof Error ? error.message : "Web tool failed.";
+    const message = error instanceof SearchUnavailableError ? error.message : error instanceof Error ? error.message : "Web tool failed.";
     return { id: call.id, name: call.name, ok: false, stdout: "", stderr: message, durationMs: Date.now() - startedAt };
   }
 }

@@ -17,7 +17,6 @@ import {
   RUN_PYTHON_INSTRUCTIONS,
   runPythonInstructionsFor,
 } from "../app/server/agent/python-tool-instructions.ts";
-import { configuredKeys, withProviderKeys } from "../app/server/agent/web-api-key-pool.ts";
 import {
   availableWebTools,
   CHECK_DATE_TOOL_NAME,
@@ -140,25 +139,21 @@ test("run_python manifest uses the shared input limits", async () => {
   assert.match(source, /PYTHON_TOOL_INPUT_LIMITS/);
 });
 
-test("web tools have bounded manifests, configuration gates, and opaque key rotation", async () => {
+test("web tools have bounded manifests and self-hosted stack configuration gates", async () => {
   assert.deepEqual(WEB_TOOL_DEFINITIONS.map((tool) => tool.function.name), ["web_search", "fetch_page", "check_time", "check_date", "check_location"]);
   assert.equal(WEB_TOOL_DEFINITIONS[0].function.parameters.properties.count.maximum, 20);
+  assert.deepEqual(WEB_TOOL_DEFINITIONS[0].function.parameters.properties.focus.enum, ["general", "news", "community", "reference"]);
   assert.equal(WEB_TOOL_DEFINITIONS[1].function.parameters.properties.url.maxLength, 2_000);
   assert.equal(WEB_TOOL_DEFINITIONS[2].function.parameters.properties.timeZone.maxLength, 100);
   assert.deepEqual(WEB_TOOL_DEFINITIONS[4].function.parameters.properties, {});
-  const original = { brave: process.env.BRAVE_API_KEYS, exa: process.env.EXA_API_KEYS, location: process.env.DEPLOYMENT_LOCATION };
-  delete process.env.BRAVE_API_KEYS; delete process.env.EXA_API_KEYS; delete process.env.DEPLOYMENT_LOCATION;
+  const original = { search: process.env.SEARCH_STACK_ENABLED, location: process.env.DEPLOYMENT_LOCATION };
+  delete process.env.SEARCH_STACK_ENABLED; delete process.env.DEPLOYMENT_LOCATION;
   assert.deepEqual(availableWebTools().map((tool) => tool.function.name), [CHECK_TIME_TOOL_NAME, CHECK_DATE_TOOL_NAME]);
+  process.env.SEARCH_STACK_ENABLED = "true";
+  assert.deepEqual(availableWebTools().map((tool) => tool.function.name), ["web_search", "fetch_page", CHECK_TIME_TOOL_NAME, CHECK_DATE_TOOL_NAME]);
   process.env.DEPLOYMENT_LOCATION = "Amsterdam, Netherlands";
-  assert.deepEqual(availableWebTools().map((tool) => tool.function.name), [CHECK_TIME_TOOL_NAME, CHECK_DATE_TOOL_NAME, CHECK_LOCATION_TOOL_NAME]);
-  process.env.BRAVE_API_KEYS = " first,\nsecond ";
-  assert.deepEqual(configuredKeys("brave"), ["first", "second"]);
-  const used = [];
-  const result = await withProviderKeys(configuredKeys("brave"), async (key) => { used.push(key); if (key === "first") throw new Response("no", { status: 429 }); return { content: "safe" }; });
-  assert.deepEqual(used, ["first", "second"]);
-  assert.deepEqual(result, { content: "safe" });
-  assert.doesNotMatch(JSON.stringify(result), /first|second|retry|failover/i);
-  for (const [name, value] of Object.entries({ BRAVE_API_KEYS: original.brave, EXA_API_KEYS: original.exa, DEPLOYMENT_LOCATION: original.location })) {
+  assert.deepEqual(availableWebTools().map((tool) => tool.function.name), ["web_search", "fetch_page", CHECK_TIME_TOOL_NAME, CHECK_DATE_TOOL_NAME, CHECK_LOCATION_TOOL_NAME]);
+  for (const [name, value] of Object.entries({ SEARCH_STACK_ENABLED: original.search, DEPLOYMENT_LOCATION: original.location })) {
     if (value === undefined) delete process.env[name]; else process.env[name] = value;
   }
 });
@@ -186,29 +181,39 @@ test("time, date, and location tools validate inputs and produce bounded structu
   if (original === undefined) delete process.env.DEPLOYMENT_LOCATION; else process.env.DEPLOYMENT_LOCATION = original;
 });
 
-test("web search passes 20 results to Brave and caps higher counts", async () => {
+test("web search queries every self-hosted provider and caps higher counts", async () => {
   const originalFetch = globalThis.fetch;
-  const originalKeys = process.env.BRAVE_API_KEYS;
-  process.env.BRAVE_API_KEYS = "test-key";
+  const originalStack = process.env.SEARCH_STACK_ENABLED;
+  process.env.SEARCH_STACK_ENABLED = "true";
   const requestedUrls = [];
   globalThis.fetch = async (url) => {
-    requestedUrls.push(String(url));
-    return Response.json({ web: { results: [] } });
+    const value = String(url);
+    requestedUrls.push(value);
+    if (value.includes("searxng")) return Response.json({ results: [{ title: "Web result", url: "https://example.com/web", content: "Web evidence" }] });
+    if (value.includes("wikipedia")) return Response.json({ query: { pages: { "1": { title: "Reference", fullurl: "https://en.wikipedia.org/wiki/Reference", extract: "Reference evidence" } } } });
+    if (value.includes("miniflux")) return Response.json({ entries: [{ title: "News result", url: "https://news.example.com/story", content: "News evidence", published_at: "2026-08-04T12:00:00Z" }] });
+    return new Response("<html><body>No Reddit results</body></html>", { headers: { "content-type": "text/html" } });
   };
   try {
-    const result = await executeWebTool({ id: "search-1", name: "web_search", arguments: '{"q":"current date","count":20}' });
+    const result = await executeWebTool({ id: "search-1", name: "web_search", arguments: '{"q":"current date","count":20,"focus":"news"}' });
     assert.equal(result.ok, true);
     assert.equal(result.web?.kind, "search");
     assert.equal(result.web?.query, "current date");
-    assert.equal(new URL(requestedUrls[0]).searchParams.get("q"), "current date");
-    assert.equal(new URL(requestedUrls[0]).searchParams.get("count"), "20");
+    assert.equal(requestedUrls.length, 4);
+    assert.ok(requestedUrls.some((url) => url.includes("searxng") && new URL(url).searchParams.get("q") === "current date"));
+    assert.ok(requestedUrls.some((url) => url.includes("redlib")));
+    assert.ok(requestedUrls.some((url) => url.includes("wikipedia")));
+    assert.ok(requestedUrls.some((url) => url.includes("miniflux")));
+    assert.equal(result.web?.results[0]?.url, "https://news.example.com/story");
+    assert.equal("provider" in (result.web?.results[0] ?? {}), false);
+    assert.equal("rank" in (result.web?.results[0] ?? {}), false);
 
     const capped = await executeWebTool({ id: "search-2", name: "web_search", arguments: '{"query":"current date","count":21}' });
     assert.equal(capped.ok, true);
-    assert.equal(new URL(requestedUrls[1]).searchParams.get("count"), "20");
+    assert.equal(requestedUrls.length, 8);
   } finally {
     globalThis.fetch = originalFetch;
-    if (originalKeys === undefined) delete process.env.BRAVE_API_KEYS; else process.env.BRAVE_API_KEYS = originalKeys;
+    if (originalStack === undefined) delete process.env.SEARCH_STACK_ENABLED; else process.env.SEARCH_STACK_ENABLED = originalStack;
   }
 });
 

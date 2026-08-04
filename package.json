@@ -27,7 +27,8 @@
     "build:discord-worker": "esbuild scripts/discord-worker.mjs --bundle --platform=node --format=esm --target=node22 --external:discord.js --outfile=.next/worker/discord-worker.mjs",
     "test:database": "tsx --conditions=react-server --test tests/database-integration.test.mjs",
     "test:deep-research": "tsx --conditions=react-server --test tests/deep-research.test.mjs",
-    "pretest": "npm run test:deep-research && npm run test:documents",
+    "test:search-stack": "tsx --conditions=react-server --test tests/search-stack.test.mjs",
+    "pretest": "npm run test:search-stack && npm run test:deep-research && npm run test:documents",
     "build": "next build",
     "prebuild": "npm run verify:pdf-runtime",
     "postbuild": "node scripts/verify-pdf-runtime.mjs",
@@ -38,7 +39,6 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
   },
   "dependencies": {
-    "@mozilla/readability": "^0.6.0",
     "@napi-rs/canvas": "^1.0.2",
     "@opendataloader/pdf": "2.5.0",
     "discord.js": "^14.27.0",

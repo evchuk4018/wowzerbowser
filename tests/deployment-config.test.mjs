@@ -21,6 +21,20 @@ test("Compose keeps the app port localhost-only and PostgreSQL unpublished", asy
   assert.doesNotMatch(postgresBlock, /^    ports:/m);
 });
 
+test("search and retrieval services stay private to the Compose network", async () => {
+  const compose = await read("compose.yaml");
+  for (const service of ["searxng", "redlib", "miniflux", "firecrawl"]) {
+    const start = compose.indexOf(`  ${service}:`);
+    assert.ok(start >= 0, `${service} service is missing`);
+    const relativeNext = compose.slice(start + 1).search(/\n  [a-z][a-z0-9-]*:\r?\n/m);
+    const next = relativeNext < 0 ? -1 : start + 1 + relativeNext;
+    const block = compose.slice(start, next < 0 ? compose.length : next);
+    assert.doesNotMatch(block, /^    ports:/m, `${service} must not publish a host port`);
+  }
+  assert.match(compose, /SEARXNG_URL: \$\{SEARXNG_URL:-http:\/\/searxng:8080\}/);
+  assert.match(compose, /FIRECRAWL_URL: \$\{FIRECRAWL_URL:-http:\/\/firecrawl:3002\}/);
+});
+
 test("only the application storage directory is bind-mounted", async () => {
   const compose = await read("compose.yaml");
   assert.equal((compose.match(/source: \/srv\/storage\/wowzerbowser/g) ?? []).length, 2);

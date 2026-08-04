@@ -10,13 +10,16 @@ private Tailscale HTTPS
 host Tailscale Serve -> 127.0.0.1:3000 -> web
                                       |\
                                        | postgres (private Compose network)
-                                       | background-worker
-                                       ` opendataloader-hybrid (private CPU OCR)
-                                       ` discord (optional profile)
+                                        | background-worker
+                                        | opendataloader-hybrid (private CPU OCR)
+                                        | self-hosted search and page services (private)
+                                        ` discord (optional profile)
 ```
 
-The Compose stack has four core services: `web`, `postgres`,
-`background-worker`, and the private `opendataloader-hybrid` CPU OCR backend.
+The Compose stack includes the application services plus private SearXNG,
+Redlib, Miniflux, Firecrawl, and their databases/queue/browser dependencies.
+Only `web` is reachable through the host's loopback port; the search services,
+databases, queues, and browser service are private to the Compose network.
 The optional `discord` profile adds the local Discord Gateway process without
 adding a host port or a storage mount. PostgreSQL uses the named
 `wowzerbowser-postgres` volume and has no host-published port. The web port and
@@ -79,7 +82,16 @@ Set `APP_UID` and `APP_GID` from `id -u` and `id -g`. Set a random
 `APP_OWNER_EMAIL`. Set a random `AUTH_SECRET` and keep
 `NEXT_PUBLIC_SITE_URL` on the private Tailscale HTTPS origin. Local binaries
 are stored below `/srv/storage/wowzerbowser/files`; do not configure that path
-to point at `/srv/storage/media`.
+to point at `/srv/storage/media`. Also replace the Miniflux and Firecrawl
+database/admin secrets, `SEARXNG_SECRET`, and `FIRECRAWL_BULL_AUTH_KEY`.
+
+After Miniflux is running, create a server-only API token for its owner and set
+`MINIFLUX_API_TOKEN`. The versioned feed manifest is synchronized during guarded
+updates and can also be synchronized manually with:
+
+```bash
+DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh run --rm --no-deps -T web node scripts/provision-miniflux-feeds.mjs
+```
 
 Generate or verify the stable server-only database owner key:
 
@@ -155,7 +167,7 @@ application state and must be preserved during updates.
 ```bash
 DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh ps
 docker inspect --format '{{json .State.Health}}' wowzerbowser-web-1
-DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh logs --tail=200 web postgres background-worker opendataloader-hybrid
+DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh logs --tail=200 web background-worker searxng redlib miniflux firecrawl
 DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh down
 DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh up -d --build
 docker volume inspect wowzerbowser-postgres
@@ -231,8 +243,8 @@ Verify that Serve is tailnet-only and that no Funnel configuration exists.
 Use the guarded update procedure from the `main` checkout. It refuses tracked
 local edits, preserves untracked files, pulls only `main` with fast-forward
 semantics, builds the new image, starts PostgreSQL, applies local migrations,
-and recreates `web`, `background-worker`, and `opendataloader-hybrid` only after the build and migration
-steps succeed:
+and recreates the application, OCR, and private search services only after the
+build and migration steps succeed:
 
 ```bash
 DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/update.sh
@@ -243,7 +255,7 @@ owner-managed media directory. It does not run `docker compose down -v`.
 If it stops at a guard, configuration, storage, or migration step, inspect the
 reported condition and correct it before retrying. If the app is already down,
 check `findmnt -T /srv/storage`, `./docker/compose.sh logs --tail=200 web
-postgres background-worker opendataloader-hybrid`, and the migration status command above; do not
+background-worker searxng redlib miniflux firecrawl`, and the migration status command above; do not
 create a fallback `/srv/storage` directory or bypass the startup guard.
 
 For an optional Discord update, set `ENABLE_DISCORD_PROFILE=1` only when the
@@ -278,8 +290,9 @@ ss -ltnp
 ```
 
 Expected host listeners are SSH, Tailscale-managed listeners, and the web port
-on `127.0.0.1` only. There must be no host listener for PostgreSQL or
-OpenDataLoader. The application containers must not see `/srv/storage/media`;
+on `127.0.0.1` only. There must be no host listener for PostgreSQL,
+OpenDataLoader, SearXNG, Redlib, Miniflux, Firecrawl, or their queue/database
+dependencies. The application containers must not see `/srv/storage/media`;
 only `web` and `background-worker` receive the `/srv/storage/wowzerbowser`
 bind mount, while the hybrid service receives only its named model-cache volume.
 

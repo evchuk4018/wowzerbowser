@@ -23,9 +23,3 @@ export function researchLimits(): ResearchLimits {
   };
 }
 
-export const estimatedProviderCost = (provider: "brave" | "exa" | "browser"): number => {
-  if (provider === "brave") return money("BRAVE_ESTIMATED_COST_PER_REQUEST_USD", 0.005);
-  if (provider === "exa") return money("EXA_ESTIMATED_COST_PER_REQUEST_USD", 0.01);
-  return money("BROWSER_ESTIMATED_COST_PER_REQUEST_USD", 0.02);
-};
-

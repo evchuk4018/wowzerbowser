@@ -3,7 +3,7 @@ import type { SearchCandidate } from "./research-types";
 
 const LOW_QUALITY = /(?:pinterest\.|quora\.|answers\.com$|content-farm|clickhole)/i;
 const COMMUNITY = /(?:reddit\.com|news\.ycombinator\.com|stackoverflow\.com|stackexchange\.com)/i;
-const PRIMARY = /(?:\.gov$|\.edu$|github\.com$|wikipedia\.org$|openalex\.org$|crossref\.org$|semanticscholar\.org$)/i;
+const PRIMARY = /(?:\.gov$|\.edu$|github\.com$|wikipedia\.org$)/i;
 
 function host(url: string): string {
   try { return new URL(url).hostname.replace(/^www\./, "").toLowerCase(); } catch { return ""; }
@@ -69,4 +69,3 @@ export function rankResearchCandidates(input: readonly SearchCandidate[]): Searc
   }
   return selected.sort((left, right) => (right.score ?? 0) - (left.score ?? 0));
 }
-

@@ -1,5 +1,6 @@
 import type { ResearchBudget, ResearchClaim } from "../../../lib/chat-protocol";
 import type { ChatSource } from "../../../lib/chat-citations";
+export type { SearchCandidate } from "../search/search-types";
 
 export type ResearchIntent = "official" | "recent" | "analysis" | "community" | "contradicting" | "academic" | "developer";
 
@@ -7,15 +8,6 @@ export type ResearchQuery = {
   query: string;
   intent: ResearchIntent;
   freshness?: "day" | "week" | "month" | "year";
-};
-
-export type SearchCandidate = ChatSource & {
-  provider: string;
-  queryIndex: number;
-  rank: number;
-  intent: ResearchIntent;
-  extraSnippets: string[];
-  score?: number;
 };
 
 export type ResearchLink = { url: string; text: string };

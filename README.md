@@ -35,8 +35,9 @@ HDD mount is present before any application container is started.
 
 - edit site code under `app/`
 - Next.js API routes live under `app/api/`
-- Docker Compose runs `web`, private PostgreSQL, `background-worker`, and the
-  private CPU-only `opendataloader-hybrid` PDF backend
+- Docker Compose runs `web`, private PostgreSQL, `background-worker`, the
+  private CPU-only `opendataloader-hybrid` PDF backend, and the self-hosted
+  SearXNG, Redlib, Miniflux, and Firecrawl search stack
 
 ## Authentication
 
@@ -165,28 +166,38 @@ credentials or other sensitive files in its conversation workspace.
 
 ## Web tools
 
-Configure `BRAVE_API_KEYS` and `EXA_API_KEYS` with comma- or newline-separated
-server-only keys to enable web search and page reading respectively. Singular
-`BRAVE_API_KEY` and `EXA_API_KEY` remain supported for compatibility. The
-assistant uses search for current result snippets and page reading for a
-specific URL; results are bounded and retained in the tool replay transcript.
-When a provider rejects, limits, or temporarily fails a request, key failover
-is handled internally and is never exposed to the assistant or browser.
+The web tools use the private self-hosted search stack configured in
+`.env.example`. A single `web_search` call queries SearXNG, Redlib,
+MediaWiki/Wikipedia, and Miniflux, then deduplicates and ranks the combined
+results. Pass `focus=general`, `news`, `community`, or `reference` to change
+ranking priorities without excluding any provider.
+
+`fetch_page` sends only the selected URL to the private Firecrawl service and
+returns bounded Markdown. Search is discovery; Firecrawl is page retrieval.
+The services have no commercial search or retrieval API-key requirement, and
+their Compose ports are not published to the host.
+
+Miniflux feeds are versioned in `config/miniflux-feeds.json`. After creating a
+Miniflux API token, synchronize the manifest with:
+
+```bash
+DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh run --rm --no-deps -T web node scripts/provision-miniflux-feeds.mjs
+```
 
 ### Deep Research
 
 When the background todo planner creates a non-empty plan for the current
 response, the server also advertises `deep_research_search`, `find_in_page`,
 `list_page_links`, and `follow_page_link`. Prior conversation todos do not
-unlock these tools. Brave remains the primary search provider; direct
-Readability and Jina are attempted before Exa, and a Browserless-compatible
-`/content` endpoint is the optional final page-rendering fallback.
+unlock these tools. Every research query uses the same four-provider
+self-hosted search aggregator, and every selected page is retrieved through
+Firecrawl.
 
 Deep Research uses the limits shown in `.env.example`, stores public extracted
 pages in the server-only `research_page_cache` table, and records its cheap
-background model calls as `deep_research` usage. OpenAlex, Crossref, MediaWiki,
-Semantic Scholar, GitHub, Jina, and optional GDELT adapters supplement Brave
-for matching query intents. SearXNG is not included in this release.
+background model calls as `deep_research` usage. Academic, developer, recent,
+official, and community intents change the aggregator's ranking focus; they do
+not activate separate provider APIs.
 
 `check_time` and `check_date` are always available and use the server's
 `Intl.DateTimeFormat` implementation, optionally with an IANA time zone.

@@ -1,6 +1,6 @@
 import "server-only";
 import { canonicalSourceUrl, sourceForUrl } from "../../../lib/chat-citations";
-import { extractBrowser, extractDirect, extractExa, extractJina, ResearchNotModifiedError, type ExtractedPage } from "../../providers/research/research-page-adapters";
+import { extractFirecrawl, type ExtractedPage } from "../../providers/research/research-page-adapters";
 import { readResearchPageCache, saveResearchPageCache } from "./research-cache-repository";
 import type { FetchedResearchPage } from "./research-types";
 
@@ -27,45 +27,25 @@ function materialize(extracted: ExtractedPage): FetchedResearchPage {
   };
 }
 
-export async function fetchResearchPage(url: string, request: string, options: { allowExa: boolean; allowBrowser: boolean }): Promise<{ page: FetchedResearchPage; paidProvider?: "exa" | "browser" }> {
+export async function fetchResearchPage(url: string, signal?: AbortSignal): Promise<{ page: FetchedResearchPage }> {
   const canonical = canonicalSourceUrl(url);
-  const cached = await readResearchPageCache(canonical).catch(() => null);
+  const stored = await readResearchPageCache(canonical).catch(() => null);
+  const cached = stored?.extractor.startsWith("firecrawl") ? stored : null;
   if (cached && Date.parse(cached.expiresAt) > Date.now()) {
     return { page: materialize({ finalUrl: cached.finalUrl, title: cached.title, markdown: cached.markdown, links: cached.links, contentType: cached.contentType, extractor: `cache:${cached.extractor}`, contentHash: cached.contentHash, publishedAt: cached.publishedAt }) };
   }
-  const attempts: Array<{ provider?: "exa" | "browser"; run: () => Promise<ExtractedPage> }> = [
-    { run: () => extractDirect(url, request, { etag: cached?.etag, lastModified: cached?.lastModified }) },
-    { run: () => extractJina(url) },
-    ...(options.allowExa ? [{ provider: "exa" as const, run: () => extractExa(url) }] : []),
-    ...(options.allowBrowser ? [{ provider: "browser" as const, run: () => extractBrowser(url) }] : []),
-  ];
-  let lastError: unknown;
-  for (const attempt of attempts) {
-    try {
-      const extracted = await attempt.run();
-      await saveResearchPageCache({
-        canonicalUrl: canonical,
-        finalUrl: extracted.finalUrl,
-        contentHash: extracted.contentHash,
-        contentType: extracted.contentType,
-        title: extracted.title,
-        markdown: extracted.markdown,
-        links: extracted.links,
-        publishedAt: extracted.publishedAt,
-        etag: extracted.etag,
-        lastModified: extracted.lastModified,
-        extractor: extracted.extractor,
-        expiresAt: expiry(extracted.contentType, extracted.publishedAt),
-      }).catch(() => undefined);
-      return { page: materialize(extracted), ...(attempt.provider ? { paidProvider: attempt.provider } : {}) };
-    } catch (error) {
-      if (error instanceof ResearchNotModifiedError && cached) {
-        const refreshed = { ...cached, expiresAt: expiry(cached.contentType, cached.publishedAt) };
-        await saveResearchPageCache(refreshed).catch(() => undefined);
-        return { page: materialize({ finalUrl: refreshed.finalUrl, title: refreshed.title, markdown: refreshed.markdown, links: refreshed.links, contentType: refreshed.contentType, extractor: `cache-revalidated:${refreshed.extractor}`, contentHash: refreshed.contentHash, publishedAt: refreshed.publishedAt }) };
-      }
-      lastError = error;
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error("Page extraction failed.");
+  const extracted: ExtractedPage = await extractFirecrawl(url, signal);
+  await saveResearchPageCache({
+    canonicalUrl: canonical,
+    finalUrl: extracted.finalUrl,
+    contentHash: extracted.contentHash,
+    contentType: extracted.contentType,
+    title: extracted.title,
+    markdown: extracted.markdown,
+    links: extracted.links,
+    publishedAt: extracted.publishedAt,
+    extractor: extracted.extractor,
+    expiresAt: expiry(extracted.contentType, extracted.publishedAt),
+  }).catch(() => undefined);
+  return { page: materialize(extracted) };
 }

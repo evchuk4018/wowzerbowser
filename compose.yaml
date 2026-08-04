@@ -53,6 +53,218 @@ services:
       retries: 8
       start_period: 90s
 
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-replace-with-a-long-random-secret}
+      SEARXNG_BIND_ADDRESS: 0.0.0.0
+      SEARXNG_PORT: 8080
+    volumes:
+      - type: bind
+        source: ./docker/searxng/settings.yml
+        target: /etc/searxng/settings.yml
+        read_only: true
+      - searxng-cache:/var/cache/searxng
+    expose:
+      - "8080"
+    networks:
+      - application
+    restart: unless-stopped
+    init: true
+    cpus: "0.50"
+    mem_limit: 512m
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; response = urllib.request.urlopen('http://127.0.0.1:8080/search?q=healthcheck&format=json', timeout=4); raise SystemExit(0 if response.status == 200 else 1)"]
+      interval: 20s
+      timeout: 8s
+      retries: 6
+      start_period: 30s
+
+  redlib:
+    image: quay.io/redlib/redlib:latest
+    environment:
+      PORT: 8080
+      ENABLE_RSS: "on"
+      FULL_URL: ${REDLIB_PUBLIC_BASE_URL:-https://www.reddit.com}
+      ROBOTS_DISABLE_INDEXING: "on"
+      REDLIB_DEFAULT_SHOW_NSFW: "off"
+    expose:
+      - "8080"
+    networks:
+      - application
+    restart: unless-stopped
+    init: true
+    cpus: "0.25"
+    mem_limit: 256m
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:8080/" ]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  miniflux-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: miniflux
+      POSTGRES_USER: miniflux
+      POSTGRES_PASSWORD: ${MINIFLUX_DB_PASSWORD:-replace-with-a-long-random-password}
+    volumes:
+      - miniflux-postgres-data:/var/lib/postgresql/data
+    networks:
+      - application
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    cpus: "0.50"
+    mem_limit: 768m
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U miniflux -d miniflux"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  miniflux:
+    image: miniflux/miniflux:latest
+    environment:
+      DATABASE_URL: postgres://miniflux:${MINIFLUX_DB_PASSWORD:-replace-with-a-long-random-password}@miniflux-postgres:5432/miniflux?sslmode=disable
+      RUN_MIGRATIONS: 1
+      CREATE_ADMIN: 1
+      ADMIN_USERNAME: ${MINIFLUX_ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${MINIFLUX_ADMIN_PASSWORD:-replace-with-a-long-random-password}
+      BASE_URL: ${MINIFLUX_BASE_URL:-http://miniflux:8080}
+    expose:
+      - "8080"
+    networks:
+      - application
+    depends_on:
+      miniflux-postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    init: true
+    cpus: "0.50"
+    mem_limit: 512m
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:8080/" ]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  firecrawl-redis:
+    image: redis:7-alpine
+    networks:
+      - application
+    restart: unless-stopped
+    init: true
+    cpus: "0.25"
+    mem_limit: 256m
+    pids_limit: 128
+
+  firecrawl-rabbitmq:
+    image: rabbitmq:3-management
+    networks:
+      - application
+    restart: unless-stopped
+    init: true
+    cpus: "0.25"
+    mem_limit: 512m
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  firecrawl-postgres:
+    image: ghcr.io/firecrawl/nuq-postgres:latest
+    environment:
+      POSTGRES_USER: firecrawl
+      POSTGRES_PASSWORD: ${FIRECRAWL_DB_PASSWORD:-replace-with-a-long-random-password}
+      POSTGRES_DB: firecrawl
+    volumes:
+      - firecrawl-postgres-data:/var/lib/postgresql/data
+    networks:
+      - application
+    restart: unless-stopped
+    init: true
+    cpus: "0.50"
+    mem_limit: 768m
+    pids_limit: 256
+
+  firecrawl-playwright:
+    image: ghcr.io/firecrawl/playwright-service:latest
+    environment:
+      PORT: 3000
+      MAX_CONCURRENT_PAGES: ${FIRECRAWL_MAX_CONCURRENT_PAGES:-1}
+    expose:
+      - "3000"
+    networks:
+      - application
+    restart: unless-stopped
+    init: true
+    cpus: "0.75"
+    mem_limit: 1g
+    pids_limit: 256
+    shm_size: 256m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  firecrawl:
+    image: ghcr.io/firecrawl/firecrawl:latest
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3002
+      INTERNAL_PORT: 3002
+      EXTRACT_WORKER_PORT: 3004
+      WORKER_PORT: 3005
+      ENV: local
+      USE_DB_AUTHENTICATION: "false"
+      REDIS_URL: redis://firecrawl-redis:6379
+      REDIS_RATE_LIMIT_URL: redis://firecrawl-redis:6379
+      PLAYWRIGHT_MICROSERVICE_URL: http://firecrawl-playwright:3000/scrape
+      POSTGRES_HOST: firecrawl-postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: firecrawl
+      POSTGRES_PASSWORD: ${FIRECRAWL_DB_PASSWORD:-replace-with-a-long-random-password}
+      POSTGRES_DB: firecrawl
+      NUQ_RABBITMQ_URL: amqp://firecrawl-rabbitmq:5672
+      BULL_AUTH_KEY: ${FIRECRAWL_BULL_AUTH_KEY:-replace-with-a-long-random-secret}
+      SEARXNG_ENDPOINT: http://searxng:8080
+      NUM_WORKERS_PER_QUEUE: ${FIRECRAWL_NUM_WORKERS_PER_QUEUE:-1}
+      CRAWL_CONCURRENT_REQUESTS: ${FIRECRAWL_CRAWL_CONCURRENT_REQUESTS:-1}
+      MAX_CONCURRENT_JOBS: ${FIRECRAWL_MAX_CONCURRENT_JOBS:-1}
+      BROWSER_POOL_SIZE: ${FIRECRAWL_BROWSER_POOL_SIZE:-1}
+    expose:
+      - "3002"
+    networks:
+      - application
+    depends_on:
+      firecrawl-redis:
+        condition: service_started
+      firecrawl-rabbitmq:
+        condition: service_healthy
+      firecrawl-postgres:
+        condition: service_started
+      firecrawl-playwright:
+        condition: service_started
+    volumes:
+      - firecrawl-fdb-cluster-file:/var/fdb
+    command: ["node", "dist/src/harness.js", "--start-docker"]
+    restart: unless-stopped
+    init: true
+    cpus: "1.00"
+    mem_limit: 1g
+    pids_limit: 512
+
   web:
     build:
       context: .
@@ -79,6 +291,15 @@ services:
       WORKER_OCR_CONCURRENCY: ${WORKER_OCR_CONCURRENCY:-2}
       PDF_OCR_CONCURRENCY: ${PDF_OCR_CONCURRENCY:-2}
       OPENDATALOADER_HYBRID_URL: ${OPENDATALOADER_HYBRID_URL:-http://opendataloader-hybrid:5002}
+      SEARCH_STACK_ENABLED: ${SEARCH_STACK_ENABLED:-true}
+      SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
+      REDLIB_URL: ${REDLIB_URL:-http://redlib:8080}
+      REDLIB_PUBLIC_BASE_URL: ${REDLIB_PUBLIC_BASE_URL:-https://www.reddit.com}
+      MEDIAWIKI_API_URL: ${MEDIAWIKI_API_URL:-https://en.wikipedia.org/w/api.php}
+      MINIFLUX_URL: ${MINIFLUX_URL:-http://miniflux:8080}
+      MINIFLUX_API_TOKEN: ${MINIFLUX_API_TOKEN:-}
+      FIRECRAWL_URL: ${FIRECRAWL_URL:-http://firecrawl:3002}
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
     user: "${APP_UID:-1000}:${APP_GID:-1000}"
     volumes:
       - type: bind
@@ -96,6 +317,14 @@ services:
         condition: service_healthy
       opendataloader-hybrid:
         condition: service_healthy
+      searxng:
+        condition: service_started
+      redlib:
+        condition: service_started
+      miniflux:
+        condition: service_started
+      firecrawl:
+        condition: service_started
     restart: unless-stopped
     init: true
     stop_grace_period: 45s
@@ -134,6 +363,15 @@ services:
       WORKER_OCR_CONCURRENCY: ${WORKER_OCR_CONCURRENCY:-2}
       PDF_OCR_CONCURRENCY: ${PDF_OCR_CONCURRENCY:-2}
       OPENDATALOADER_HYBRID_URL: ${OPENDATALOADER_HYBRID_URL:-http://opendataloader-hybrid:5002}
+      SEARCH_STACK_ENABLED: ${SEARCH_STACK_ENABLED:-true}
+      SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
+      REDLIB_URL: ${REDLIB_URL:-http://redlib:8080}
+      REDLIB_PUBLIC_BASE_URL: ${REDLIB_PUBLIC_BASE_URL:-https://www.reddit.com}
+      MEDIAWIKI_API_URL: ${MEDIAWIKI_API_URL:-https://en.wikipedia.org/w/api.php}
+      MINIFLUX_URL: ${MINIFLUX_URL:-http://miniflux:8080}
+      MINIFLUX_API_TOKEN: ${MINIFLUX_API_TOKEN:-}
+      FIRECRAWL_URL: ${FIRECRAWL_URL:-http://firecrawl:3002}
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
       WORKER_POLL_INTERVAL_MS: ${WORKER_POLL_INTERVAL_MS:-1000}
       WORKER_HEARTBEAT_INTERVAL_MS: ${WORKER_HEARTBEAT_INTERVAL_MS:-5000}
       WORKER_HEARTBEAT_MAX_AGE_MS: ${WORKER_HEARTBEAT_MAX_AGE_MS:-30000}
@@ -159,6 +397,14 @@ services:
         condition: service_healthy
       opendataloader-hybrid:
         condition: service_healthy
+      searxng:
+        condition: service_started
+      redlib:
+        condition: service_started
+      miniflux:
+        condition: service_started
+      firecrawl:
+        condition: service_started
     restart: unless-stopped
     init: true
     stop_grace_period: 30s
@@ -213,6 +459,14 @@ volumes:
     name: wowzerbowser-postgres
   opendataloader-model-cache:
     name: ${OPENDATALOADER_CACHE_VOLUME_NAME:-wowzerbowser-opendataloader-cache}
+  searxng-cache:
+    name: wowzerbowser-searxng-cache
+  miniflux-postgres-data:
+    name: wowzerbowser-miniflux-postgres
+  firecrawl-postgres-data:
+    name: wowzerbowser-firecrawl-postgres
+  firecrawl-fdb-cluster-file:
+    name: wowzerbowser-firecrawl-fdb-cluster
 
 networks:
   application:

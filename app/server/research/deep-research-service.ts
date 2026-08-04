@@ -1,14 +1,10 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import type { ResearchBudget } from "../../../lib/chat-protocol";
-import { canonicalSourceUrl } from "../../../lib/chat-citations";
-import {
-  rerankWithJina, searchBrave, searchCrossref, searchExa, searchGdelt, searchGitHub, searchJina,
-  searchMediaWiki, searchOpenAlex, searchSemanticScholar,
-} from "../../providers/research/research-search-adapters";
-import { configuredKeys } from "../agent/web-api-key-pool";
+import { canonicalSourceUrl, sourceForUrl, type ChatSource } from "../../../lib/chat-citations";
+import { searchSelfHosted } from "../search/search-service";
 import { recordUsage } from "../usage/usage-store";
-import { estimatedProviderCost, researchLimits } from "./research-config";
+import { researchLimits } from "./research-config";
 import { decomposeResearchRequest, extractResearchClaims, verifyResearchClaims } from "./research-model";
 import { fetchResearchPage } from "./research-page-service";
 import { rankResearchCandidates } from "./research-ranking";
@@ -17,6 +13,10 @@ import type { FetchedResearchPage, ResearchQuery, ResearchRun, SearchCandidate }
 type ModelAnswer = Awaited<ReturnType<typeof import("../../providers/openrouter/openrouter-qwen-text-adapter").completeOpenRouterQwenText>>;
 const host = (url: string): string => { try { return new URL(url).hostname.replace(/^www\./, "").toLowerCase(); } catch { return ""; } };
 const modelReservation = 0.01;
+
+function publicSource(source: ChatSource): ChatSource {
+  return sourceForUrl({ title: source.title, url: source.url, snippet: source.snippet, publishedAt: source.publishedAt });
+}
 
 function fallbackQueries(request: string, maximum: number): ResearchQuery[] {
   return [
@@ -28,41 +28,26 @@ function fallbackQueries(request: string, maximum: number): ResearchQuery[] {
   ].slice(0, maximum) as ResearchQuery[];
 }
 
-async function specialistSearch(query: ResearchQuery, index: number): Promise<SearchCandidate[]> {
-  const academic = query.intent === "academic" || /\b(?:academic|paper|papers|study|studies|journal|doi|citation)\b/i.test(query.query);
-  const developer = query.intent === "developer" || /\b(?:github|repository|software|library|framework|release|issue|code)\b/i.test(query.query);
-  if (academic) {
-    const results = await Promise.allSettled([searchOpenAlex(query, index), searchCrossref(query, index), searchSemanticScholar(query, index)]);
-    return results.flatMap((item) => item.status === "fulfilled" ? item.value : []);
-  }
-  if (developer) return searchGitHub(query, index).catch(() => []);
-  if (query.intent === "recent") return searchGdelt(query, index).catch(() => []);
-  if (query.intent === "official") return searchMediaWiki(query, index).catch(() => []);
-  return [];
+function focusForIntent(intent: ResearchQuery["intent"]): "general" | "news" | "community" | "reference" {
+  if (intent === "recent") return "news";
+  if (intent === "community") return "community";
+  if (intent === "official" || intent === "academic") return "reference";
+  return "general";
 }
 
 async function executeQuery(query: ResearchQuery, index: number, run: ResearchRun): Promise<SearchCandidate[]> {
-  const braveConfigured = configuredKeys("brave").length > 0;
-  const braveCost = estimatedProviderCost("brave");
-  const mayUseBrave = braveConfigured && run.budget.estimatedCostUsd + braveCost <= run.limits.maxEstimatedCostUsd;
-  if (mayUseBrave) run.budget.estimatedCostUsd += braveCost;
-  const [primary, specialist] = await Promise.allSettled([
-    mayUseBrave ? searchBrave(query, index) : Promise.resolve([]),
-    specialistSearch(query, index),
-  ]);
-  let results = primary.status === "fulfilled" ? primary.value : [];
-  if (results.length < 5 && braveConfigured && run.budget.estimatedCostUsd + braveCost <= run.limits.maxEstimatedCostUsd) {
-    run.budget.estimatedCostUsd += braveCost;
-    results.push(...await searchBrave(query, index, 1).catch(() => []));
+  try {
+    return await searchSelfHosted({
+      query: query.query,
+      focus: focusForIntent(query.intent),
+      freshness: query.freshness,
+      queryIndex: index,
+      intent: query.intent,
+    });
+  } catch {
+    run.warnings.push(`Self-hosted search providers returned no results for query ${index + 1}.`);
+    return [];
   }
-  if (results.length < 5) results = [...results, ...await searchJina(query, index).catch(() => [])];
-  const exaCost = estimatedProviderCost("exa");
-  if (results.length < 5 && configuredKeys("exa").length > 0 && run.budget.estimatedCostUsd + exaCost <= run.limits.maxEstimatedCostUsd) {
-    run.budget.estimatedCostUsd += exaCost;
-    results.push(...await searchExa(query, index).catch(() => []));
-  }
-  if (specialist.status === "fulfilled") results.push(...specialist.value);
-  return results;
 }
 
 function evidenceText(pages: Iterable<FetchedResearchPage>, maximumTokens: number): string {
@@ -92,26 +77,10 @@ async function fetchRankedPages(run: ResearchRun, candidates: SearchCandidate[])
     return true;
   }).slice(0, remainingPages);
 
-  const free = await Promise.allSettled(selected.map((candidate) => fetchResearchPage(candidate.url, run.request, { allowExa: false, allowBrowser: false })));
-  const failures: SearchCandidate[] = [];
-  free.forEach((result, index) => {
+  const results = await Promise.allSettled(selected.map((candidate) => fetchResearchPage(candidate.url)));
+  results.forEach((result) => {
     if (result.status === "fulfilled") run.pages.set(result.value.page.id, result.value.page);
-    else failures.push(selected[index]);
   });
-  for (const provider of ["exa", "browser"] as const) {
-    if (!failures.length) break;
-    const cost = estimatedProviderCost(provider);
-    const affordable = Math.min(failures.length, Math.floor((run.limits.maxEstimatedCostUsd - run.budget.estimatedCostUsd) / Math.max(cost, Number.EPSILON)));
-    if (affordable <= 0) break;
-    const batch = failures.splice(0, affordable);
-    const results = await Promise.allSettled(batch.map((candidate) => fetchResearchPage(candidate.url, run.request, { allowExa: provider === "exa", allowBrowser: provider === "browser" })));
-    results.forEach((result, index) => {
-      if (result.status === "fulfilled") {
-        run.pages.set(result.value.page.id, result.value.page);
-        if (result.value.paidProvider) run.budget.estimatedCostUsd += estimatedProviderCost(result.value.paidProvider);
-      } else failures.push(batch[index]);
-    });
-  }
   run.budget.fetchedPages = run.pages.size;
   for (const page of run.pages.values()) for (const link of page.links) run.allowedUrls.add(canonicalSourceUrl(link.url));
 }
@@ -140,8 +109,7 @@ export async function performDeepResearch(input: {
   if (queries.length < Math.min(4, initialMaximum)) queries = fallbackQueries(input.request, initialMaximum);
   queries = queries.slice(0, limits.maxSearches);
   budget.searches = queries.length;
-  let candidates = (await Promise.all(queries.map((query, index) => executeQuery(query, index, run)))).flat();
-  candidates = await rerankWithJina(input.request, candidates).catch(() => candidates);
+  const candidates = (await Promise.all(queries.map((query, index) => executeQuery(query, index, run)))).flat();
   let ranked = rankResearchCandidates(candidates);
   await fetchRankedPages(run, ranked);
   if (run.pages.size < 2) run.warnings.push("Research stopped with fewer than two readable sources.");
@@ -175,7 +143,8 @@ export async function performDeepResearch(input: {
   }
   run.sources = [...new Map([...candidates, ...run.pages.values()].map((item) => {
     const source = "source" in item ? item.source : item;
-    return [source.id, source] as const;
+    const normalized = publicSource(source);
+    return [normalized.id, normalized] as const;
   })).values()];
   return run;
 }

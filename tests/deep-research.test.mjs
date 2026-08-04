@@ -4,7 +4,7 @@ import { rankResearchCandidates } from "../app/server/research/research-ranking.
 import { availableDeepResearchTools, DEEP_RESEARCH_TOOL_DEFINITIONS } from "../app/server/agent/deep-research-tool-manifest.ts";
 import { executeDeepResearchTool } from "../app/server/agent/deep-research-tool.ts";
 import { assertPublicResearchUrl } from "../app/providers/research/research-page-adapters.ts";
-import { searchBrave } from "../app/providers/research/research-search-adapters.ts";
+import { searchSelfHosted } from "../app/server/search/search-service.ts";
 
 const source = (overrides = {}) => ({
   id: `src_${String(overrides.rank ?? 1).padStart(16, "0")}`,
@@ -12,7 +12,7 @@ const source = (overrides = {}) => ({
   url: "https://example.com/result",
   snippet: "Evidence",
   publisher: "example.com",
-  provider: "brave",
+  provider: "searxng",
   queryIndex: 0,
   rank: 1,
   intent: "analysis",
@@ -56,10 +56,8 @@ test("direct extraction rejects private and credential-bearing URLs before fetch
   await assert.rejects(assertPublicResearchUrl("https://user:pass@example.com"), /public HTTP/i);
 });
 
-test("independent Brave searches can execute concurrently", async () => {
+test("independent self-hosted searches query all providers concurrently", async () => {
   const previousFetch = globalThis.fetch;
-  const previousKeys = process.env.BRAVE_API_KEYS;
-  process.env.BRAVE_API_KEYS = "key";
   let active = 0;
   let maximum = 0;
   globalThis.fetch = async () => {
@@ -67,36 +65,31 @@ test("independent Brave searches can execute concurrently", async () => {
     maximum = Math.max(maximum, active);
     await new Promise((resolve) => setTimeout(resolve, 20));
     active -= 1;
-    return Response.json({ web: { results: [] } });
+    return Response.json({ results: [{ title: "Result", url: "https://example.com/result", content: "Evidence" }] });
   };
   try {
     await Promise.all([
-      searchBrave({ query: "one", intent: "official" }, 0),
-      searchBrave({ query: "two", intent: "analysis" }, 1),
+      searchSelfHosted({ query: "one", focus: "reference", queryIndex: 0, intent: "official" }),
+      searchSelfHosted({ query: "two", focus: "general", queryIndex: 1, intent: "analysis" }),
     ]);
-    assert.equal(maximum, 2);
+    assert.equal(maximum, 8);
   } finally {
     globalThis.fetch = previousFetch;
-    if (previousKeys === undefined) delete process.env.BRAVE_API_KEYS; else process.env.BRAVE_API_KEYS = previousKeys;
   }
 });
 
-test("Brave pagination is bounded to the provider's supported page range", async () => {
+test("self-hosted search focus preserves the unified provider contract", async () => {
   const previousFetch = globalThis.fetch;
-  const previousKeys = process.env.BRAVE_API_KEYS;
-  process.env.BRAVE_API_KEYS = "key";
-  let requested;
+  const requested = [];
   globalThis.fetch = async (url) => {
-    requested = new URL(String(url));
-    return Response.json({ web: { results: [] } });
+    requested.push(new URL(String(url)));
+    return Response.json({ results: [{ title: "Result", url: "https://example.com/result", content: "Evidence" }] });
   };
   try {
-    await searchBrave({ query: "page", intent: "recent" }, 0, 99);
-    assert.equal(requested.searchParams.get("offset"), "9");
-    assert.equal(requested.searchParams.get("result_filter"), "web,news");
-    assert.equal(requested.searchParams.get("extra_snippets"), "true");
+    const results = await searchSelfHosted({ query: "page", focus: "community" });
+    assert.equal(results.length, 1);
+    assert.equal(new Set(requested.map((url) => url.hostname)).size, 4);
   } finally {
     globalThis.fetch = previousFetch;
-    if (previousKeys === undefined) delete process.env.BRAVE_API_KEYS; else process.env.BRAVE_API_KEYS = previousKeys;
   }
 });

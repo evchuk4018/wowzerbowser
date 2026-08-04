@@ -1,7 +1,6 @@
 import "server-only";
 import type { ChatToolCall, ChatToolResult } from "../../../lib/chat-protocol";
 import { canonicalSourceUrl } from "../../../lib/chat-citations";
-import { estimatedProviderCost } from "../research/research-config";
 import { performDeepResearch, researchStopReason } from "../research/deep-research-service";
 import { fetchResearchPage } from "../research/research-page-service";
 import type { ResearchRun } from "../research/research-types";
@@ -71,12 +70,9 @@ export async function executeDeepResearchTool(call: ChatToolCall, context: DeepR
       if ([...run.pages.values()].filter((item) => new URL(item.source.url).hostname === domain).length >= run.limits.maxPagesPerDomain) return { activeRun: run, result: fail(call, "The research domain fetch limit has been reached.") };
       let fetched;
       try {
-        fetched = await fetchResearchPage(link.url, run.request, { allowExa: false, allowBrowser: false });
+        fetched = await fetchResearchPage(link.url);
       } catch {
-        const cost = estimatedProviderCost("exa");
-        if (run.budget.estimatedCostUsd + cost > run.limits.maxEstimatedCostUsd) return { activeRun: run, result: fail(call, "The research cost limit has been reached.") };
-        fetched = await fetchResearchPage(link.url, run.request, { allowExa: true, allowBrowser: false });
-        if (fetched.paidProvider) run.budget.estimatedCostUsd += estimatedProviderCost(fetched.paidProvider);
+        return { activeRun: run, result: fail(call, "The selected page could not be retrieved by the self-hosted page service.") };
       }
       run.pages.set(fetched.page.id, fetched.page);
       run.budget.fetchedPages = run.pages.size;
@@ -89,4 +85,3 @@ export async function executeDeepResearchTool(call: ChatToolCall, context: DeepR
     return { activeRun: context.activeRun, result: fail(call, error instanceof Error ? error.message : "Deep research failed.") };
   }
 }
-
