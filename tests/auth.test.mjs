@@ -47,6 +47,8 @@ test("Auth.js is the only browser authentication path and storage is local", asy
   assert.doesNotMatch(storage + "\n" + storageRuntime, /supabase|storage\.from|signed.?url/i);
   assert.match(owner, /sameOriginRequest/);
   assert.match(owner, /authorizeOwnerSession/);
+  assert.match(owner, /AUTH_DEBUG/);
+  assert.match(owner, /hasSessionCookie/);
   assert.match(bootstrap, /bootstrapOwner/);
   assert.match(reset, /resetOwnerPassword/);
   assert.doesNotMatch(`${bootstrap}\n${reset}`, /console\.(log|error)\([^)]*(?:passwordHash|APP_OWNER_PASSWORD|passwordFromPrivateInput)/i);

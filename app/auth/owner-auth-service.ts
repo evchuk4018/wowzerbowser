@@ -20,7 +20,37 @@ function configuredOrigin(): string | null {
   }
 }
 
-function sameOriginRequest(request: Request): boolean {
+function headerOrigin(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    return new URL(value).origin;
+  } catch {
+    return "invalid";
+  }
+}
+
+function authDebug(request: Request, message: string, details: Record<string, unknown> = {}): void {
+  if (process.env.AUTH_DEBUG !== "1") return;
+  let pathname = "unknown";
+  let requestUrlOrigin = "unknown";
+  try {
+    const url = new URL(request.url);
+    pathname = url.pathname;
+    requestUrlOrigin = url.origin;
+  } catch {}
+  console.warn("[auth]", message, {
+    method: request.method,
+    pathname,
+    requestUrlOrigin,
+    requestOrigin: headerOrigin(request.headers.get("origin")),
+    refererOrigin: headerOrigin(request.headers.get("referer")),
+    configuredOrigin: configuredOrigin(),
+    hasSessionCookie: Boolean(request.headers.get("cookie")),
+    ...details,
+  });
+}
+
+export function sameOriginRequest(request: Request): boolean {
   if (["GET", "HEAD", "OPTIONS"].includes(request.method.toUpperCase())) return true;
   const requestOrigin = request.headers.get("origin") ?? request.headers.get("referer");
   if (!requestOrigin) return false;
@@ -44,10 +74,18 @@ export async function getCurrentOwner(): Promise<AuthUser | null> {
 }
 
 export async function authorizeOwnerSession(request: Request): Promise<AuthUser | null> {
-  if (!sameOriginRequest(request)) return null;
+  if (!sameOriginRequest(request)) {
+    authDebug(request, "rejected request origin");
+    return null;
+  }
   try {
-    return await getCurrentOwner();
-  } catch {
+    const owner = await getCurrentOwner();
+    if (!owner) authDebug(request, "owner session unavailable");
+    return owner;
+  } catch (error) {
+    authDebug(request, "owner session lookup failed", {
+      errorType: error instanceof Error ? error.name : "unknown",
+    });
     return null;
   }
 }

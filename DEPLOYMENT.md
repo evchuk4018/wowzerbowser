@@ -93,6 +93,11 @@ credentials to client code.
 Set `NEXT_PUBLIC_SITE_URL` to the private HTTPS hostname reported by Tailscale
 Serve after it is configured.
 
+If authenticated reads work but state-changing requests such as conversation
+deletion or OAuth connection start return `Unauthorized`, compare this value
+with the browser origin exactly. The same-origin guard and provider callback
+URLs both use it; changing it does not require rotating the Auth.js session.
+
 Validate the rendered Compose file:
 
 ```bash
