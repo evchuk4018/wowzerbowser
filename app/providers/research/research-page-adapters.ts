@@ -4,7 +4,6 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { createHash } from "node:crypto";
 import { JSDOM } from "jsdom";
-import { Readability } from "@mozilla/readability";
 import type { ResearchLink } from "../../server/research/research-types";
 import { record, searchRequest, text } from "../search/search-http";
 
@@ -76,15 +75,15 @@ async function directHtmlExtraction(url: string, signal?: AbortSignal): Promise<
     if (contentType && !contentType.includes("html") && !contentType.includes("text/plain")) throw new Error("Unsupported page content type.");
     const html = (await response.text()).slice(0, MAX_MARKDOWN * 8);
     const dom = new JSDOM(html, { url: current.toString() });
-    const parsed = new Readability(dom.window.document.cloneNode(true) as Document).parse();
-    const markdown = (parsed?.textContent ?? dom.window.document.body?.textContent ?? "").replace(/\n{3,}/g, "\n\n").replace(/\s+\n/g, "\n").trim().slice(0, MAX_MARKDOWN);
+    const content = dom.window.document.querySelector("article, main") ?? dom.window.document.body;
+    const markdown = (content?.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, MAX_MARKDOWN);
     if (markdown.length < 200) throw new Error("Direct extraction returned too little content.");
     const links = [...dom.window.document.querySelectorAll("a[href]")].flatMap((element) => {
       try { return [{ url: new URL(element.getAttribute("href")!, current).toString(), text: (element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 300) }]; } catch { return []; }
     }).filter((link) => /^https?:\/\//i.test(link.url)).slice(0, 300);
     return {
       finalUrl: current.toString(),
-      title: (parsed?.title ?? dom.window.document.title ?? current.toString()).trim().slice(0, 300),
+      title: (dom.window.document.title ?? current.toString()).trim().slice(0, 300),
       markdown,
       links,
       contentType: contentType || "text/html",
