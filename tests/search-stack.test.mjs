@@ -55,6 +55,25 @@ test("Firecrawl page retrieval requests Markdown only and preserves discovered l
   }
 });
 
+test("page retrieval falls back to bounded direct HTML extraction when Firecrawl is unavailable", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousUrl = process.env.FIRECRAWL_URL;
+  process.env.FIRECRAWL_URL = "http://firecrawl:3002";
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("firecrawl")) throw new Error("connection refused");
+    return new Response('<html><head><title>Fallback article</title></head><body><article>' + "Evidence ".repeat(60) + '</article><a href="https://example.com/related">Related</a></body></html>', { headers: { "content-type": "text/html" } });
+  };
+  try {
+    const page = await extractFirecrawl("https://example.com/article");
+    assert.equal(page.extractor, "direct-readability-fallback");
+    assert.equal(page.title, "Fallback article");
+    assert.match(page.markdown, /Evidence/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousUrl === undefined) delete process.env.FIRECRAWL_URL; else process.env.FIRECRAWL_URL = previousUrl;
+  }
+});
+
 test("news searches use the SearXNG news category and latest feed entries for broad queries", async () => {
   const previousFetch = globalThis.fetch;
   const calls = [];
