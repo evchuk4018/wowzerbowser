@@ -78,3 +78,32 @@ test("news searches use the SearXNG news category and latest feed entries for br
     delete process.env.MINIFLUX_URL;
   }
 });
+
+test("Miniflux search prefers an API token and supports deployment Basic auth fallback", async () => {
+  const previousFetch = globalThis.fetch;
+  const previous = {
+    token: process.env.MINIFLUX_API_TOKEN,
+    username: process.env.MINIFLUX_ADMIN_USERNAME,
+    password: process.env.MINIFLUX_ADMIN_PASSWORD,
+  };
+  delete process.env.MINIFLUX_API_TOKEN;
+  process.env.MINIFLUX_ADMIN_USERNAME = "admin";
+  process.env.MINIFLUX_ADMIN_PASSWORD = "secret";
+  let headers;
+  globalThis.fetch = async (_url, init) => {
+    headers = init.headers;
+    return Response.json({ entries: [] });
+  };
+  try {
+    await searchMiniflux({ query: "latest news", focus: "news", count: 5, queryIndex: 0, intent: "recent" });
+    assert.equal(headers.Authorization, `Basic ${Buffer.from("admin:secret").toString("base64")}`);
+    process.env.MINIFLUX_API_TOKEN = "token-preferred";
+    await searchMiniflux({ query: "latest news", focus: "news", count: 5, queryIndex: 0, intent: "recent" });
+    assert.equal(headers["X-Auth-Token"], "token-preferred");
+  } finally {
+    globalThis.fetch = previousFetch;
+    for (const [key, value] of Object.entries({ MINIFLUX_API_TOKEN: previous.token, MINIFLUX_ADMIN_USERNAME: previous.username, MINIFLUX_ADMIN_PASSWORD: previous.password })) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+});

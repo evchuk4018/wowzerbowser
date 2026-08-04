@@ -25,8 +25,13 @@ export async function searchMiniflux(query: SearchProviderQuery, signal?: AbortS
     direction: "desc",
   }).toString();
   const token = process.env.MINIFLUX_API_TOKEN?.trim();
+  const username = process.env.MINIFLUX_API_USERNAME?.trim() || process.env.MINIFLUX_ADMIN_USERNAME?.trim();
+  const password = process.env.MINIFLUX_API_PASSWORD ?? process.env.MINIFLUX_ADMIN_PASSWORD;
+  const basic = username && password !== undefined
+    ? `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`
+    : undefined;
   const response = await searchRequest(endpoint.toString(), {
-    headers: { Accept: "application/json", ...(token ? { "X-Auth-Token": token } : {}) },
+    headers: { Accept: "application/json", ...(token ? { "X-Auth-Token": token } : basic ? { Authorization: basic } : {}) },
   }, signal);
   requireOk(response, "Miniflux");
   const body = record(await response.json());

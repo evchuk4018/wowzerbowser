@@ -17,6 +17,7 @@ test("Compose pins Firecrawl to a reproducible image", async () => {
   assert.match(compose, /image: ghcr\.io\/firecrawl\/firecrawl@sha256:[a-f0-9]{64}/);
   assert.doesNotMatch(compose, /image: ghcr\.io\/firecrawl\/firecrawl:latest/);
   assert.match(compose, /command: \["postgres", "-c", "cron\.database_name=firecrawl"\]/);
+  assert.match(compose, /firecrawl:\n(?:(?!\n  \S).)*?mem_limit: 2g/s);
 });
 
 test("Compose keeps the app port localhost-only and PostgreSQL unpublished", async () => {
