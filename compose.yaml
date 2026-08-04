@@ -192,6 +192,7 @@ services:
       - firecrawl-postgres-data:/var/lib/postgresql/data
     networks:
       - application
+    command: ["postgres", "-c", "cron.database_name=firecrawl"]
     restart: unless-stopped
     init: true
     cpus: "0.50"
