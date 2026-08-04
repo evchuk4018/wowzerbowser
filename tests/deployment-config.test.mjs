@@ -12,6 +12,12 @@ test("Compose defines the application services and private OpenDataLoader backen
   assert.doesNotMatch(compose, /^  (redis|minio|caddy|nginx):$/m);
 });
 
+test("Compose pins Firecrawl to a reproducible image", async () => {
+  const compose = await read("compose.yaml");
+  assert.match(compose, /image: ghcr\.io\/firecrawl\/firecrawl@sha256:[a-f0-9]{64}/);
+  assert.doesNotMatch(compose, /image: ghcr\.io\/firecrawl\/firecrawl:latest/);
+});
+
 test("Compose keeps the app port localhost-only and PostgreSQL unpublished", async () => {
   const compose = await read("compose.yaml");
   assert.match(compose, /127\.0\.0\.1:\$\{WEB_PORT:-3000\}:3000/);

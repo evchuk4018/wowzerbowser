@@ -16,7 +16,11 @@ const PROVIDER_WEIGHTS: Record<SearchFocus, Record<SearchProviderName, number>> 
 };
 
 export class SearchUnavailableError extends Error {
-  constructor() { super("The self-hosted search stack is temporarily unavailable."); }
+  constructor(failedProviders: SearchProviderName[] = []) {
+    super(failedProviders.length
+      ? `The self-hosted search stack is temporarily unavailable (${failedProviders.join(", ")}).`
+      : "The self-hosted search stack is temporarily unavailable.");
+  }
 }
 
 function rankCandidates(candidates: SearchCandidate[], focus: SearchFocus, count: number): SearchCandidate[] {
@@ -58,13 +62,18 @@ export async function searchSelfHosted(input: {
     intent: input.intent ?? "general",
     ...(input.freshness ? { freshness: input.freshness } : {}),
   };
-  const results = await Promise.allSettled([
-    searchSearXNG(query, input.signal),
-    searchRedlib(query, input.signal),
-    searchMediaWiki(query, input.signal),
-    searchMiniflux(query, input.signal),
-  ]);
-  const candidates = results.flatMap((result) => result.status === "fulfilled" ? result.value : []);
-  if (!candidates.length) throw new SearchUnavailableError();
+  const providers: Array<[SearchProviderName, Promise<SearchCandidate[]>]> = [
+    ["searxng", searchSearXNG(query, input.signal)],
+    ["redlib", searchRedlib(query, input.signal)],
+    ["mediawiki", searchMediaWiki(query, input.signal)],
+    ["miniflux", searchMiniflux(query, input.signal)],
+  ];
+  const results = await Promise.all(providers.map(async ([name, request]) => [name, await Promise.allSettled([request])] as const));
+  const failedProviders = results.flatMap(([name, [result]]) => result.status === "rejected" ? [name] : []);
+  const candidates = results.flatMap(([, [result]]) => result.status === "fulfilled" ? result.value : []);
+  if (failedProviders.length && candidates.length) {
+    console.warn(`[search] provider failures: ${failedProviders.join(", ")}`);
+  }
+  if (!candidates.length) throw new SearchUnavailableError(failedProviders);
   return rankCandidates(candidates, query.focus, query.count);
 }

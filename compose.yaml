@@ -219,7 +219,7 @@ services:
       - ALL
 
   firecrawl:
-    image: ghcr.io/firecrawl/firecrawl:latest
+    image: ghcr.io/firecrawl/firecrawl@sha256:01d06cb04c429e19c0746ffbbd2ec5f1c67321e877cf3b02faec29108ac6a342
     environment:
       HOST: 0.0.0.0
       PORT: 3002

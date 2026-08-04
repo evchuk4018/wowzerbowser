@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { extractFirecrawl } from "../app/providers/research/research-page-adapters.ts";
 import { searchRedlib } from "../app/providers/search/redlib-search-adapter.ts";
+import { searchMiniflux } from "../app/providers/search/miniflux-search-adapter.ts";
+import { searchSearXNG } from "../app/providers/search/searxng-search-adapter.ts";
 
 test("Redlib search normalizes discussion links to public Reddit URLs", async () => {
   const previousFetch = globalThis.fetch;
@@ -50,5 +52,29 @@ test("Firecrawl page retrieval requests Markdown only and preserves discovered l
   } finally {
     globalThis.fetch = previousFetch;
     if (previousUrl === undefined) delete process.env.FIRECRAWL_URL; else process.env.FIRECRAWL_URL = previousUrl;
+  }
+});
+
+test("news searches use the SearXNG news category and latest feed entries for broad queries", async () => {
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  process.env.SEARXNG_URL = "http://searxng:8080";
+  process.env.MINIFLUX_URL = "http://miniflux:8080";
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    if (String(url).includes("searxng")) return Response.json({ results: [{ title: "Headline", url: "https://example.com/news", content: "Current news" }] });
+    return Response.json({ entries: [{ title: "Feed headline", url: "https://example.com/feed", content: "Latest feed item", published_at: "2026-08-04T12:00:00Z" }] });
+  };
+  try {
+    const query = { query: "top news today", focus: "news", count: 10, queryIndex: 0, intent: "recent" };
+    await searchSearXNG(query);
+    await searchMiniflux(query);
+    assert.match(calls[0], /categories=news/);
+    assert.match(calls[1], /\/v1\/entries\?/);
+    assert.doesNotMatch(calls[1], /search=/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    delete process.env.SEARXNG_URL;
+    delete process.env.MINIFLUX_URL;
   }
 });

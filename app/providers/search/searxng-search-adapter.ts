@@ -17,7 +17,7 @@ export async function searchSearXNG(query: SearchProviderQuery, signal?: AbortSi
   endpoint.search = new URLSearchParams({
     q: query.query,
     format: "json",
-    categories: "general",
+    categories: query.focus === "news" ? "news" : "general",
     pageno: "1",
     ...(query.freshness ? { time_range: FRESHNESS[query.freshness] } : {}),
   }).toString();

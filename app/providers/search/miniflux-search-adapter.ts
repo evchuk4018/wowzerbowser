@@ -4,6 +4,13 @@ import type { SearchCandidate, SearchProviderQuery } from "../../server/search/s
 import { array, record, requireOk, searchRequest } from "./search-http";
 import { candidate } from "./search-candidate";
 
+function broadNewsQuery(query: SearchProviderQuery): boolean {
+  if (query.focus !== "news") return false;
+  const normalized = query.query.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return /^(?:the )?(?:top|latest|breaking|current|today'?s?)?(?: news| headlines| stories)?(?: today| now)?$/.test(normalized)
+    || /^(?:search up|look up|find) (?:the )?news$/.test(normalized);
+}
+
 function plainText(value: unknown): string {
   return typeof value === "string" ? value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : "";
 }
@@ -11,7 +18,12 @@ function plainText(value: unknown): string {
 export async function searchMiniflux(query: SearchProviderQuery, signal?: AbortSignal): Promise<SearchCandidate[]> {
   const base = process.env.MINIFLUX_URL?.trim() || "http://miniflux:8080";
   const endpoint = new URL("/v1/entries", `${base.replace(/\/$/, "")}/`);
-  endpoint.search = new URLSearchParams({ search: query.query, limit: String(query.count), order: "published_at", direction: "desc" }).toString();
+  endpoint.search = new URLSearchParams({
+    ...(broadNewsQuery(query) ? {} : { search: query.query }),
+    limit: String(query.count),
+    order: "published_at",
+    direction: "desc",
+  }).toString();
   const token = process.env.MINIFLUX_API_TOKEN?.trim();
   const response = await searchRequest(endpoint.toString(), {
     headers: { Accept: "application/json", ...(token ? { "X-Auth-Token": token } : {}) },
