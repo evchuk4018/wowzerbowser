@@ -9,6 +9,7 @@ import type {
   AssistantActivity,
   ImageActivity,
   PythonActivity,
+  OutputActivity,
   ReasoningActivity,
   WebActivity,
   PhaseBreakActivity,
@@ -21,6 +22,7 @@ import type { ChatCitation, ChatSource } from "../../lib/chat-citations";
 export type {
   AssistantActivity,
   PythonActivity,
+  OutputActivity,
   ReasoningActivity,
   WebActivity,
   DocumentActivity,
@@ -187,6 +189,109 @@ function ReasoningCard({ activity, phaseActivities }: { activity: ReasoningActiv
   );
 }
 
+function OutputBubble({
+  activity,
+  annotations,
+  sources,
+  artifacts,
+  onOpenArtifact,
+  streaming,
+}: {
+  activity: OutputActivity;
+  annotations?: ChatCitation[];
+  sources?: ChatSource[];
+  artifacts: ChatArtifact[];
+  onOpenArtifact: (artifact: ChatArtifact) => void;
+  streaming: boolean;
+}) {
+  return (
+    <div className="message-bubble assistant-activity-output">
+      <AssistantResponse
+        content={activity.content}
+        annotations={annotations}
+        sources={sources}
+        artifacts={artifacts}
+        onOpenArtifact={onOpenArtifact}
+        streaming={streaming}
+      />
+    </div>
+  );
+}
+
+type PhaseSegment =
+  | { kind: "reasoning"; activities: AssistantActivity[] }
+  | { kind: "output"; activity: OutputActivity };
+
+function phaseSegments(activities: AssistantActivity[]): PhaseSegment[] {
+  const segments: PhaseSegment[] = [];
+  let reasoningActivities: AssistantActivity[] = [];
+  const flushReasoning = () => {
+    if (reasoningActivities.length) segments.push({ kind: "reasoning", activities: reasoningActivities });
+    reasoningActivities = [];
+  };
+
+  for (const activity of activities) {
+    if (activity.kind === "output") {
+      flushReasoning();
+      segments.push({ kind: "output", activity });
+    } else if (activity.kind !== "phase_break") {
+      reasoningActivities.push(activity);
+    }
+  }
+  flushReasoning();
+  return segments;
+}
+
+function reasoningForActivities(phase: number, activities: AssistantActivity[]): ReasoningActivity {
+  const reasoningItems = activities.filter((item): item is ReasoningActivity => item.kind === "reasoning");
+  const latestReasoning = reasoningItems.at(-1);
+  const latestSummary = reasoningItems.reduce<ReasoningActivity | undefined>((current, item) => {
+    if (!item.summary) return current;
+    return !current || (item.summaryRevision ?? -1) >= (current.summaryRevision ?? -1)
+      ? item
+      : current;
+  }, undefined);
+  const completedDuration = reasoningItems.reduce((total, item) => total + (item.durationMs ?? 0), 0);
+  if (!latestReasoning) {
+    return {
+      id: `reasoning-phase-${phase}`,
+      kind: "reasoning",
+      round: 1,
+      phase,
+      content: "",
+      status: "complete",
+    };
+  }
+  return {
+    ...latestReasoning,
+    ...(latestSummary
+      ? { summary: latestSummary.summary, summaryRevision: latestSummary.summaryRevision }
+      : {}),
+    content: reasoningItems.map((item) => item.content).join(""),
+    startedAt: reasoningItems[0]?.startedAt,
+    ...(latestReasoning.status === "running"
+      ? { durationMs: undefined }
+      : completedDuration > 0 ? { durationMs: completedDuration } : { durationMs: undefined }),
+  };
+}
+
+function annotationsForOutput(
+  annotations: ChatCitation[] | undefined,
+  start: number,
+  length: number,
+): ChatCitation[] | undefined {
+  if (!annotations?.length) return annotations;
+  const end = start + length;
+  return annotations.flatMap((annotation) => {
+    if (annotation.end <= start || annotation.end > end) return [];
+    return [{
+      ...annotation,
+      start: Math.max(0, annotation.start - start),
+      end: annotation.end - start,
+    }];
+  });
+}
+
 function ArtifactDownload({
   artifact,
   hasSession,
@@ -263,41 +368,39 @@ function AssistantActivityTimelineInner({
     grouped.set(activity.phase, phase);
     return grouped;
   }, new Map());
+  const outputActivities = activities.filter((activity): activity is OutputActivity => activity.kind === "output");
+  const outputOffsets = new Map<string, number>();
+  let outputOffset = 0;
+  for (const activity of outputActivities) {
+    outputOffsets.set(activity.id, outputOffset);
+    outputOffset += activity.content.length;
+  }
+  const lastOutputId = outputActivities.at(-1)?.id;
 
   return (
     <>
       <div className="assistant-activity-timeline">
         {[...phases.entries()].map(([phase, group]) => {
-          const reasoningItems = group.activities.filter((item): item is ReasoningActivity => item.kind === "reasoning");
-          const latestReasoning = reasoningItems.at(-1);
-          const latestSummary = reasoningItems.reduce<ReasoningActivity | undefined>((current, item) => {
-            if (!item.summary) return current;
-            return !current || (item.summaryRevision ?? -1) >= (current.summaryRevision ?? -1)
-              ? item
-              : current;
-          }, undefined);
-          const completedDuration = reasoningItems.reduce((total, item) => total + (item.durationMs ?? 0), 0);
-          const reasoning = latestReasoning ? {
-            ...latestReasoning,
-            ...(latestSummary
-              ? { summary: latestSummary.summary, summaryRevision: latestSummary.summaryRevision }
-              : {}),
-            content: reasoningItems.map((item) => item.content).join(""),
-            startedAt: reasoningItems[0]?.startedAt,
-            ...(latestReasoning.status === "running"
-              ? { durationMs: undefined }
-              : completedDuration > 0 ? { durationMs: completedDuration } : { durationMs: undefined }),
-          } : {
-            id: `reasoning-phase-${phase}`,
-            kind: "reasoning" as const,
-            round: 1,
-            phase,
-            content: "",
-            status: "complete" as const,
-          };
+          const segments = phaseSegments(group.activities);
           return (
             <div className="reasoning-phase" data-phase={phase} key={`phase-${phase}`}>
-              <ReasoningCard activity={reasoning} phaseActivities={group.activities} />
+              {segments.map((segment) => segment.kind === "output" ? (
+                <OutputBubble
+                  key={segment.activity.id}
+                  activity={segment.activity}
+                  annotations={annotationsForOutput(annotations, outputOffsets.get(segment.activity.id) ?? 0, segment.activity.content.length)}
+                  sources={sources}
+                  artifacts={artifacts}
+                  onOpenArtifact={onOpenArtifact}
+                  streaming={streaming && segment.activity.id === lastOutputId}
+                />
+              ) : (
+                <ReasoningCard
+                  key={`reasoning-${segment.activities[0]?.id ?? phase}`}
+                  activity={reasoningForActivities(phase, segment.activities)}
+                  phaseActivities={segment.activities}
+                />
+              ))}
               {group.phaseBreak?.update && (
                 <div className="message-bubble phase-progress-update" role="status" aria-label="Progress update">
                   <span className="phase-progress-update-label">Progress update</span>
@@ -308,7 +411,7 @@ function AssistantActivityTimelineInner({
           );
         })}
       </div>
-      {content && (
+      {content && !outputActivities.length && (
         <div className="message-bubble">
           <AssistantResponse
             content={content}

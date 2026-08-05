@@ -2,6 +2,7 @@ export type {
   ChatAssistantActivity as AssistantActivity,
   ChatPythonActivity as PythonActivity,
   ChatReasoningActivity as ReasoningActivity,
+  ChatOutputActivity as OutputActivity,
   ChatWebActivity as WebActivity,
   ChatImageActivity as ImageActivity,
   ChatDocumentActivity as DocumentActivity,

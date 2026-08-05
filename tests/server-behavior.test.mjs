@@ -628,6 +628,7 @@ test("persisted trace projection keeps reasoning, tools, artifacts, and final ou
   assert.equal(message.activities?.[0]?.kind, "reasoning");
   assert.equal(message.activities?.[1]?.kind, "python");
   assert.equal(message.activities?.[1]?.result?.stdout, "42\n");
+  assert.equal(message.activities?.[2]?.kind, "output");
   assert.equal(message.artifacts?.[0]?.id, "artifact-1");
   assert.equal(message.lastSequence, events.length);
 });
@@ -727,6 +728,26 @@ test("transcript mapper preserves hidden phase-break tool replay", () => {
   assert.deepEqual(mapped?.rounds?.[0]?.toolCalls?.[0]?.result, result);
   assert.equal(mapped?.rounds?.[1]?.reasoning, "Validating.");
   assert.equal(mapped?.rounds?.[1]?.content, "Validation passed.");
+});
+
+test("transcript mapper keeps output activities in their provider rounds", () => {
+  const call = { id: "phase-1", name: "phase_break", arguments: "{}" };
+  const result = { id: "phase-1", name: "phase_break", ok: true, stdout: "", stderr: "" };
+  const mapped = toChatMessageInput({
+    role: "assistant",
+    content: "First update. Final answer.",
+    activities: [
+      { id: "reasoning-1", kind: "reasoning", round: 1, phase: 1, content: "Planning.", status: "complete" },
+      { id: "output-1", kind: "output", round: 1, phase: 1, content: "First update. ", status: "complete" },
+      { id: "phase-1", kind: "phase_break", round: 1, phase: 1, nextPhase: 2, call, result, status: "completed" },
+      { id: "reasoning-2", kind: "reasoning", round: 2, phase: 2, content: "Finishing.", status: "complete" },
+      { id: "output-2", kind: "output", round: 2, phase: 2, content: "Final answer.", status: "complete" },
+    ],
+  });
+  assert.equal(mapped?.rounds?.length, 2);
+  assert.equal(mapped?.rounds?.[0]?.content, "First update. ");
+  assert.equal(mapped?.rounds?.[1]?.content, "Final answer.");
+  assert.equal(mapped?.rounds?.[0]?.toolCalls?.[0]?.name, "phase_break");
 });
 
 test("transcript mapper preserves multiple calls and synthesizes interrupted results", () => {

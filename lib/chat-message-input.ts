@@ -33,6 +33,10 @@ export function toChatMessageInput(message: Pick<ChatHistoryMessage, "role" | "c
       round.reasoning = `${round.reasoning ?? ""}${activity.content}`;
       continue;
     }
+    if (activity.kind === "output") {
+      round.content = `${round.content}${activity.content}`;
+      continue;
+    }
     if (activity.kind === "phase_break") {
       round.toolCalls = [...(round.toolCalls ?? []), { ...activity.call, result: activity.result }];
       continue;
@@ -50,7 +54,8 @@ export function toChatMessageInput(message: Pick<ChatHistoryMessage, "role" | "c
   }
   if (!rounds.length) return { role: "assistant", content };
   const finalRound = rounds[rounds.length - 1];
-  if (finalRound.toolCalls?.length) rounds.push({ content });
-  else finalRound.content = content;
+  const hasOutputActivities = message.activities.some((activity) => activity.kind === "output");
+  if (finalRound.toolCalls?.length && !hasOutputActivities) rounds.push({ content });
+  else if (!finalRound.content && !hasOutputActivities) finalRound.content = content;
   return { role: "assistant", content, rounds };
 }

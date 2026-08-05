@@ -208,6 +208,18 @@ function normalizeActivity(value: unknown, loadedAt: number, freezeRunning: bool
     return activity;
   }
 
+  if (candidate.kind === "output") {
+    if (typeof candidate.content !== "string" || status !== "complete") return null;
+    return {
+      id,
+      kind: "output",
+      round,
+      phase,
+      content: candidate.content,
+      status: "complete",
+    };
+  }
+
   if (candidate.kind === "phase_break") {
     const call = normalizeToolCall(candidate.call);
     const result = normalizeToolResult(candidate.result);

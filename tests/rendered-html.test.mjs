@@ -850,6 +850,9 @@ test("renders web activities inside thought-process disclosures", async () => {
   ]);
   assert.match(activity, /WebDisclosure/);
   assert.match(activity, /phaseActivities\.map/);
+  assert.match(activity, /kind: "output"/);
+  assert.match(activity, /phaseSegments/);
+  assert.match(activity, /!outputActivities\.length/);
   assert.match(activity, /activity\.summary \?\? "Thinking…"/);
   assert.match(activity, /const latestSummary = reasoningItems\.reduce/);
   assert.match(activity, /summary: latestSummary\.summary/);

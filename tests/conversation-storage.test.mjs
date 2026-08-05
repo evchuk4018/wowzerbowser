@@ -16,6 +16,30 @@ test("malformed stored messages are rejected without throwing", () => {
   assert.deepEqual(normalized, { role: "user", id: "m2", content: "hello" });
 });
 
+test("stored output activities survive message normalization", () => {
+  const normalized = normalizeStoredMessage({
+    role: "assistant",
+    id: "assistant-output",
+    content: "Visible answer",
+    activities: [{
+      id: "output-1",
+      kind: "output",
+      round: 2,
+      phase: 3,
+      content: "Visible answer",
+      status: "complete",
+    }],
+  });
+  assert.deepEqual(normalized?.activities, [{
+    id: "output-1",
+    kind: "output",
+    round: 2,
+    phase: 3,
+    content: "Visible answer",
+    status: "complete",
+  }]);
+});
+
 test("stored PDF and DOCX metadata survives message normalization", () => {
   const pdf = normalizeStoredMessage({
     role: "user", id: "document-user", content: "Review these files",

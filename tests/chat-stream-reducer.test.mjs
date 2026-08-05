@@ -29,9 +29,11 @@ test("stream reducer accumulates reasoning, tool, and content events", () => {
 
   assert.equal(state.message.reasoning, "plan");
   assert.equal(state.message.content, "answer");
-  assert.equal(state.message.activities?.length, 2);
+  assert.equal(state.message.activities?.length, 3);
   assert.equal(state.message.activities?.[0].status, "complete");
   assert.equal(state.message.activities?.[1].status, "completed");
+  assert.equal(state.message.activities?.[2].kind, "output");
+  assert.equal(state.message.activities?.[2].content, "answer");
   assert.equal(state.waiting, false);
   assert.equal(state.message.lastSequence, 5);
 });
@@ -116,6 +118,36 @@ test("provider rounds stay in one phase until an explicit phase break", () => {
   assert.equal(reasoning?.[0]?.summary, "Planning the first approach");
   assert.equal(state.message.activities?.find(({ kind }) => kind === "phase_break")?.update, "I found a better route.");
   assert.equal(state.message.tracePhase, 2);
+});
+
+test("phase breaks keep streamed output between separate thinking blocks", () => {
+  let state = createChatStreamState(baseMessage);
+  state = reduceChatStreamEvents(state, [
+    event(1, { type: "round", round: 1 }),
+    event(2, { type: "reasoning", delta: "Plan. " }),
+    event(3, { type: "content", delta: "First update. " }),
+    event(4, { type: "content", delta: "Still first update." }),
+    event(5, {
+      type: "phase_break",
+      phase: 2,
+      update: "Moving on.",
+      call: { id: "phase-1", name: "phase_break", arguments: "{}" },
+      result: { id: "phase-1", name: "phase_break", ok: true, stdout: "", stderr: "" },
+    }),
+    event(6, { type: "round", round: 2 }),
+    event(7, { type: "reasoning", delta: "Continue. " }),
+    event(8, { type: "content", delta: "Final answer." }),
+  ]);
+
+  assert.deepEqual(state.message.activities?.map(({ kind, phase, content }) => ({ kind, phase, content })), [
+    { kind: "reasoning", phase: 1, content: "Plan. " },
+    { kind: "output", phase: 1, content: "First update. Still first update." },
+    { kind: "phase_break", phase: 1, content: undefined },
+    { kind: "reasoning", phase: 2, content: "Continue. " },
+    { kind: "output", phase: 2, content: "Final answer." },
+  ]);
+  assert.equal(state.message.activities?.[0].status, "complete");
+  assert.equal(state.message.activities?.[3].status, "complete");
 });
 
 test("phase summaries persist across tool-separated reasoning until replaced", () => {

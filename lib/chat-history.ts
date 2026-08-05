@@ -27,6 +27,15 @@ export type ChatReasoningActivity = {
   durationMs?: number;
 };
 
+export type ChatOutputActivity = {
+  id: string;
+  kind: "output";
+  round: number;
+  phase: number;
+  content: string;
+  status: "complete";
+};
+
 export type ChatToolActivity = {
   id: string;
   kind: "python" | "web" | "image" | "document";
@@ -55,7 +64,7 @@ export type ChatPythonActivity = Omit<ChatToolActivity, "kind"> & { kind: "pytho
 export type ChatWebActivity = Omit<ChatToolActivity, "kind"> & { kind: "web" };
 export type ChatImageActivity = Omit<ChatToolActivity, "kind"> & { kind: "image" };
 export type ChatDocumentActivity = Omit<ChatToolActivity, "kind"> & { kind: "document" };
-export type ChatAssistantActivity = ChatReasoningActivity | ChatPythonActivity | ChatWebActivity | ChatImageActivity | ChatDocumentActivity | ChatPhaseBreakActivity;
+export type ChatAssistantActivity = ChatReasoningActivity | ChatOutputActivity | ChatPythonActivity | ChatWebActivity | ChatImageActivity | ChatDocumentActivity | ChatPhaseBreakActivity;
 
 export type ChatHistoryMessage = {
   id: string;
@@ -158,7 +167,7 @@ const finishRunningActivities = (
   failRunningTools: boolean,
   finishedAt: number,
 ): ChatAssistantActivity[] | undefined => activities?.map((activity) => {
-  if (activity.status !== "running") return activity;
+  if (activity.kind === "output" || activity.status !== "running") return activity;
   const durationMs = activity.durationMs ?? (activity.startedAt === undefined
     ? undefined
     : Math.max(0, finishedAt - activity.startedAt));
@@ -253,7 +262,7 @@ export function applyChatStreamEvent(
   } else if (event.type === "tool_result") {
     next.connectorApproval = undefined;
     next.activities = next.activities?.map((activity) =>
-      activity.kind !== "reasoning" && activity.kind !== "phase_break" && activity.call.id === event.result.id
+      activity.kind !== "reasoning" && activity.kind !== "output" && activity.kind !== "phase_break" && activity.call.id === event.result.id
         ? {
             ...activity,
             result: event.result,
@@ -284,8 +293,24 @@ export function applyChatStreamEvent(
       ? next.artifacts
       : [...(next.artifacts ?? []), event.artifact];
   } else if (event.type === "content") {
+    const activities = [...(next.activities ?? [])];
+    const latest = activities.at(-1);
+    const round = next.traceRound ?? latest?.round ?? 1;
+    const phase = next.tracePhase ?? latest?.phase ?? 1;
+    if (event.delta && latest?.kind === "output" && latest.round === round && latest.phase === phase) {
+      activities[activities.length - 1] = { ...latest, content: `${latest.content}${event.delta}` };
+    } else if (event.delta) {
+      activities.push({
+        id: `output-${sequence}`,
+        kind: "output",
+        round,
+        phase,
+        content: event.delta,
+        status: "complete",
+      });
+    }
     next.content = `${next.content}${event.delta}`;
-    next.activities = finishRunningActivities(next.activities, true, now);
+    next.activities = finishRunningActivities(activities, true, now);
   } else if (event.type === "error") {
     next.error = event.message;
     next.status = "error";
