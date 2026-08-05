@@ -23,6 +23,7 @@
 * Use subagents whenever possible.
 * Never try to verify the UI or functionality with a browser or screenshot.
 * Always push to `main` when done.
+* Once tests pass, always apply pending database migrations to the local `homelab` server and verify with the migration check before considering the task complete.
 
 ## Local Server
 
