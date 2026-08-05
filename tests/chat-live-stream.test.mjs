@@ -2,8 +2,74 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readChatLiveStream } from "../app/chat/read-chat-live-stream.ts";
 import { streamChatResponse } from "../app/chat/chat-service.ts";
+import {
+  CHAT_JOB_EVENTS_CHANNEL,
+  createChatJobEventSubscription,
+  parseChatJobEventNotification,
+} from "../app/server/chat/chat-live-notifier.ts";
 
 const encoder = new TextEncoder();
+
+test("parses only valid chat event notifications", () => {
+  assert.deepEqual(
+    parseChatJobEventNotification(JSON.stringify({ ownerId: "owner-1", conversationId: "conversation-1", jobId: "job-1" })),
+    { ownerId: "owner-1", conversationId: "conversation-1", jobId: "job-1" },
+  );
+  assert.equal(parseChatJobEventNotification("not-json"), null);
+  assert.equal(parseChatJobEventNotification(JSON.stringify({ ownerId: "owner-1", jobId: "job-1" })), null);
+});
+
+test("job notification subscriptions ignore other jobs and clean up", async () => {
+  const listeners = new Set();
+  let unlistenCalls = 0;
+  const listen = (channel, onnotify) => {
+    assert.equal(channel, CHAT_JOB_EVENTS_CHANNEL);
+    listeners.add(onnotify);
+    return Promise.resolve({
+      unlisten: async () => {
+        unlistenCalls += 1;
+        listeners.delete(onnotify);
+      },
+    });
+  };
+  const subscription = createChatJobEventSubscription(listen, {
+    ownerId: "owner-1",
+    conversationId: "conversation-1",
+    jobId: "job-1",
+  }, new AbortController().signal);
+  await subscription.ready;
+
+  for (const notify of listeners) notify(JSON.stringify({ ownerId: "owner-1", conversationId: "conversation-1", jobId: "job-2" }));
+  let notified = false;
+  const waitForNotification = subscription.waitForNotification();
+  void waitForNotification.then(() => { notified = true; });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(notified, false);
+
+  for (const notify of listeners) notify(JSON.stringify({ ownerId: "owner-1", conversationId: "conversation-1", jobId: "job-1" }));
+  await waitForNotification;
+  await subscription.close();
+  await subscription.close();
+  assert.equal(unlistenCalls, 1);
+  assert.equal(listeners.size, 0);
+});
+
+test("aborting a job notification subscription resolves the waiter and unlistens", async () => {
+  let unlistenCalls = 0;
+  const listen = () => Promise.resolve({ unlisten: async () => { unlistenCalls += 1; } });
+  const controller = new AbortController();
+  const subscription = createChatJobEventSubscription(listen, {
+    ownerId: "owner-1",
+    conversationId: "conversation-1",
+    jobId: "job-1",
+  }, controller.signal);
+  await subscription.ready;
+  const waitForNotification = subscription.waitForNotification();
+  controller.abort();
+  await waitForNotification;
+  await subscription.close();
+  assert.equal(unlistenCalls, 1);
+});
 
 test("reads fragmented SSE frames in order", async () => {
   const frames = [

@@ -5,7 +5,7 @@ import test from "node:test";
 const source = async (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("chat submission is durable, idempotent, and uses per-job event ordinals", async () => {
-  const [sql, ordinalSql, atomicSql, historySql, lineageSql, store, historyStore, runner, route] = await Promise.all([source("supabase/migrations/20260724000000_chat_jobs.sql"), source("supabase/migrations/20260725000000_chat_event_ordinals.sql"), source("supabase/migrations/20260730190000_chat_leases_atomic_persistence.sql"), source("supabase/migrations/20260724020000_chat_history.sql"), source("supabase/migrations/20260728180000_chat_version_lineage.sql"), source("app/server/chat/chat-job-store.ts"), source("app/server/chat/chat-history-store.ts"), source("app/server/chat/chat-job-runner.ts"), source("app/api/chat/route.ts")]);
+  const [sql, ordinalSql, atomicSql, liveSql, historySql, lineageSql, store, historyStore, runner, route] = await Promise.all([source("supabase/migrations/20260724000000_chat_jobs.sql"), source("supabase/migrations/20260725000000_chat_event_ordinals.sql"), source("supabase/migrations/20260730190000_chat_leases_atomic_persistence.sql"), source("database/migrations/011_chat_live_notifications.sql"), source("supabase/migrations/20260724020000_chat_history.sql"), source("supabase/migrations/20260728180000_chat_version_lineage.sql"), source("app/server/chat/chat-job-store.ts"), source("app/server/chat/chat-history-store.ts"), source("app/server/chat/chat-job-runner.ts"), source("app/api/chat/route.ts")]);
   assert.match(sql, /unique \(owner_id, conversation_id, idempotency_key\)/);
   assert.match(sql, /chat_job_events/);
   assert.match(ordinalSql, /event_index bigint/);
@@ -26,7 +26,9 @@ test("chat submission is durable, idempotent, and uses per-job event ordinals", 
   assert.match(store, /authoritativeAttachmentsForSubmission/);
   assert.match(store, /createChatJobEventWriter/);
   assert.match(store, /CHAT_EVENT_BATCH_SIZE = 32/);
-  assert.match(store, /CHAT_EVENT_FLUSH_INTERVAL_MS = 100/);
+  assert.match(store, /CHAT_EVENT_FLUSH_INTERVAL_MS = 16/);
+  assert.match(liveSql, /pg_notify/);
+  assert.match(liveSql, /after insert on public\.chat_job_events/);
   assert.doesNotMatch(store, /applyChatJobEvent/);
   assert.match(historyStore, /applyChatStreamEvent/);
   assert.match(historyStore, /finalizeChatHistoryMessage/);

@@ -36,7 +36,7 @@ test("renders all Markdown as completed content after streaming", () => {
 });
 
 test("batches text events while flushing structural stream events immediately", () => {
-  assert.equal(STREAM_RENDER_INTERVAL_MS, 50);
+  assert.equal(STREAM_RENDER_INTERVAL_MS, 16);
   assert.equal(isStructuralStreamEvent({ type: "content" }), false);
   assert.equal(isStructuralStreamEvent({ type: "reasoning" }), false);
   assert.equal(isStructuralStreamEvent({ type: "tool_call" }), true);

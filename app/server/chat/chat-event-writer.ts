@@ -11,7 +11,7 @@ export type AsyncBatchWriterOptions = {
 };
 
 const DEFAULT_BATCH_SIZE = 32;
-const DEFAULT_FLUSH_INTERVAL_MS = 100;
+const DEFAULT_FLUSH_INTERVAL_MS = 16;
 
 /**
  * Serialize asynchronous batch writes while keeping producers off the write

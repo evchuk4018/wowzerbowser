@@ -14,7 +14,7 @@ export type ChatEventCoalescer = {
   drain(): Promise<void>;
 };
 
-const DEFAULT_FLUSH_INTERVAL_MS = 32;
+const DEFAULT_FLUSH_INTERVAL_MS = 16;
 const DEFAULT_MAX_TEXT_LENGTH = 4_096;
 
 type CoalescibleEvent = Extract<ChatStreamEvent, { type: "content" | "reasoning" }>;

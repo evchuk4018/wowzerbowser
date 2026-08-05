@@ -1,8 +1,10 @@
 import type { ChatJobResumeResponse, ChatJobSubmissionResponse, ChatJobTerminalResponse } from "../../../lib/chat-protocol";
 import { encodeChatLiveEnvelope } from "./encode-chat-live-envelope";
 import { getChatJob } from "./chat-job-store";
+import { subscribeToChatJobEvents } from "./chat-live-notifier";
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
+const LIVE_HEARTBEAT_MS = 15_000;
 
 function waitFor(milliseconds: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -59,26 +61,42 @@ export function streamChatJob(
     start(streamController) {
       void (async () => {
         let after = 0;
-        let delay = 250;
         try {
           if (!send(streamController, { type: "submission", submission })) return;
-          while (!controller.signal.aborted) {
-            const snapshot = await getChatJob(ownerId, conversationId, submission.jobId, after);
-            if (!snapshot) throw new Error("Chat job not found.");
-            for (const event of snapshot.events) {
-              if (event.sequence <= after) continue;
-              if (!send(streamController, { type: "event", event })) return;
-              after = event.sequence;
+          // Subscribe before querying so an event committed between the
+          // snapshot and the wait cannot leave the stream asleep.
+          const subscription = subscribeToChatJobEvents({ ownerId, conversationId, jobId: submission.jobId }, controller.signal);
+          try {
+            await subscription.ready;
+            while (!controller.signal.aborted) {
+              const snapshot = await getChatJob(ownerId, conversationId, submission.jobId, after);
+              if (!snapshot) throw new Error("Chat job not found.");
+              for (const event of snapshot.events) {
+                if (event.sequence <= after) continue;
+                if (!send(streamController, { type: "event", event })) return;
+                after = event.sequence;
+              }
+              if (snapshot.hasMore) continue;
+              if (TERMINAL_STATUSES.has(snapshot.status)) {
+                send(streamController, { type: "terminal", terminal: terminalFor(snapshot) });
+                return;
+              }
+
+              const timeoutController = new AbortController();
+              const abortTimeout = () => timeoutController.abort(controller.signal.reason);
+              controller.signal.addEventListener("abort", abortTimeout, { once: true });
+              try {
+                await Promise.race([
+                  subscription.waitForNotification(timeoutController.signal),
+                  waitFor(LIVE_HEARTBEAT_MS, timeoutController.signal),
+                ]);
+              } finally {
+                controller.signal.removeEventListener("abort", abortTimeout);
+                timeoutController.abort();
+              }
             }
-            if (snapshot.hasMore) {
-              delay = 0;
-            } else if (TERMINAL_STATUSES.has(snapshot.status)) {
-              send(streamController, { type: "terminal", terminal: terminalFor(snapshot) });
-              return;
-            } else {
-              delay = Math.min(2_000, Math.max(250, Math.round(delay * 1.5)));
-            }
-            if (delay > 0) await waitFor(delay, controller.signal);
+          } finally {
+            await subscription.close();
           }
         } catch (error) {
           if (!controller.signal.aborted) {

@@ -9,7 +9,7 @@ import { CHAT_JOB_LEASE_MS, CHAT_JOB_MAX_ATTEMPTS } from "./chat-job-lease";
 import { withChatPersistenceRetry } from "./chat-persistence-retry";
 
 const CHAT_EVENT_BATCH_SIZE = 32;
-const CHAT_EVENT_FLUSH_INTERVAL_MS = 100;
+const CHAT_EVENT_FLUSH_INTERVAL_MS = 16;
 const CHAT_EVENT_PAGE_SIZE = 1000;
 
 type RpcRow = { result: unknown };
