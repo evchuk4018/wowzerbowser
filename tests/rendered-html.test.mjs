@@ -616,9 +616,9 @@ test("validates and preserves ordered assistant tool rounds", () => {
 });
 
 test("keeps Python execution isolated, persistent, bounded, and server-only", async () => {
-  const [executor, tool, manifest, streamService, artifactStore, artifactRoute, client, activity, envExample, packageJson] =
+  const [executor, tool, manifest, streamService, artifactStore, artifactRoute, client, activity, envExample, packageJson, workerDockerfile, workerSource, compose] =
     await Promise.all([
-      readFile(new URL("../app/server/modal/modal-python-executor.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/server/python/local-python-executor.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/server/agent/python-tool.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/server/agent/python-tool-manifest.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/chat/chat-server-service.ts", import.meta.url), "utf8"),
@@ -628,20 +628,28 @@ test("keeps Python execution isolated, persistent, bounded, and server-only", as
       readFile(new URL("../app/chat/assistant-activity.tsx", import.meta.url), "utf8"),
       readFile(new URL("../.env.example", import.meta.url), "utf8"),
       readFile(new URL("../package.json", import.meta.url), "utf8"),
+      readFile(new URL("../docker/python-worker/Dockerfile", import.meta.url), "utf8"),
+      readFile(new URL("../docker/python-worker/server.py", import.meta.url), "utf8"),
+      readFile(new URL("../compose.yaml", import.meta.url), "utf8"),
     ]);
 
-  assert.match(executor, /ModalClient/);
-  assert.match(executor, /volumes\.fromName/);
-  assert.match(executor, /sandboxes\.create/);
-  assert.match(executor, /outboundDomainAllowlist: \["\*"\]/);
-  assert.match(executor, /outboundCidrAllowlist: \[\]/);
-  assert.match(executor, /memoryMiB: PYTHON_TOOL_LIMITS\.memoryMb/);
+  assert.match(executor, /PYTHON_WORKER_URL/);
+  assert.match(executor, /x-python-worker-secret/);
+  assert.match(executor, /sessions\/open/);
+  assert.match(executor, /sessions\/close/);
+  assert.match(executor, /responseTimeoutMs: 240_000/);
+  assert.match(workerSource, /start_new_session=True/);
+  assert.match(workerSource, /kill_process_group/);
+  assert.match(workerSource, /O_NOFOLLOW/);
+  assert.match(workerSource, /resource_limits/);
+  assert.match(workerDockerfile, /FROM python:3\.13-slim/);
+  assert.match(compose, /python-worker:/);
+  assert.match(compose, /cpus: "0\.75"/);
+  assert.match(compose, /mem_limit: 1536m/);
+  assert.match(compose, /pids_limit: 128/);
+  assert.match(compose, /no-new-privileges:true/);
   assert.match(executor, /callTimeoutMs: 60_000/);
   assert.doesNotMatch(executor, /maxCalls/);
-  assert.match(executor, /responseTimeoutMs: 240_000/);
-  assert.match(executor, /drainBounded/);
-  assert.match(executor, /stream\.getReader\(\)/);
-  assert.doesNotMatch(executor, /stdout\.readText\(\)|stderr\.readText\(\)/);
   assert.match(executor, /relativeWorkspacePath/);
   assert.doesNotMatch(executor, /readConversationArtifact/);
   assert.doesNotMatch(executor, /process\.env\.DEEPSEEK_API_KEY|SUPABASE_SECRET_KEY/);
@@ -650,7 +658,7 @@ test("keeps Python execution isolated, persistent, bounded, and server-only", as
   assert.match(streamService, /replayRounds/);
   assert.match(streamService, /systemInstructions/);
   assert.match(streamService, /call\.result = result/);
-  assert.match(streamService, /new ModalPythonExecutor\(ownerId, conversationId, responseDeadlineAt\)/);
+  assert.match(streamService, /new LocalPythonExecutor\(ownerId, conversationId, responseDeadlineAt\)/);
   assert.doesNotMatch(artifactStore, /new Map/);
   assert.match(artifactStore, /createHmac/);
   assert.match(artifactStore, /ARTIFACT_SIGNING_SECRET/);
@@ -668,10 +676,10 @@ test("keeps Python execution isolated, persistent, bounded, and server-only", as
   assert.match(activity, /className="python-output"/);
   assert.match(activity, /phases = activities\.reduce/);
   assert.doesNotMatch(activity, /JSON\.stringify\(activity\.call, null, 2\)/);
-  assert.match(envExample, /^MODAL_TOKEN_ID=$/m);
-  assert.match(envExample, /^MODAL_TOKEN_SECRET=$/m);
+  assert.match(envExample, /^PYTHON_WORKER_SECRET=$/m);
+  assert.match(envExample, /^PYTHON_WORKER_URL=http:\/\/python-worker:5003$/m);
   assert.match(envExample, /^ARTIFACT_SIGNING_SECRET=$/m);
-  assert.equal(JSON.parse(packageJson).dependencies.modal, "^0.9.0");
+  assert.equal(JSON.parse(packageJson).dependencies?.modal, undefined);
 });
 
 test("classifies mobile history swipes by viewport threshold and direction", () => {

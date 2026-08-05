@@ -35,7 +35,11 @@ volumes:
     name: ${SMOKE_POSTGRES_VOLUME_NAME:?SMOKE_POSTGRES_VOLUME_NAME must be set}
   opendataloader-model-cache:
     name: ${SMOKE_OPENDATALOADER_CACHE_VOLUME_NAME:?SMOKE_OPENDATALOADER_CACHE_VOLUME_NAME must be set}
+  python-workspaces:
+    name: ${PYTHON_WORKSPACE_VOLUME_NAME:?PYTHON_WORKSPACE_VOLUME_NAME must be set}
 
 networks:
   application:
     name: ${SMOKE_NETWORK_NAME:?SMOKE_NETWORK_NAME must be set}
+  python-execution:
+    name: ${PYTHON_EXECUTION_NETWORK_NAME:?PYTHON_EXECUTION_NETWORK_NAME must be set}

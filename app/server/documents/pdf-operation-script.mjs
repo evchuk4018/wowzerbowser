@@ -1,5 +1,5 @@
 /**
- * Trusted Python program executed inside the conversation's Modal sandbox.
+ * Trusted Python program executed inside the conversation's local worker.
  *
  * Keep this as newline-joined source: Python receives it through `python -c`,
  * so escaped "\\n" text is not equivalent to a real source line boundary.

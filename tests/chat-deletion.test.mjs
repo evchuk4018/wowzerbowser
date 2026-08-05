@@ -6,13 +6,13 @@ import { conversationReducer, initialConversationState } from "../app/chat/conve
 const source = async (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("deletion exposes an authenticated idempotent API and coordinated cleanup", async () => {
-  const [route, service, history, jobs, preferences, modal] = await Promise.all([
+  const [route, service, history, jobs, preferences, worker] = await Promise.all([
     source("app/api/chat/conversations/[conversationId]/route.ts"),
     source("app/server/chat/chat-conversation-service.ts"),
     source("app/server/chat/chat-history-store.ts"),
     source("app/server/chat/chat-job-store.ts"),
     source("app/server/chat/chat-model-preference-store.ts"),
-    source("app/server/modal/modal-conversation-cleanup.ts"),
+    source("app/server/python/local-python-conversation-cleanup.ts"),
   ]);
 
   assert.match(route, /export async function DELETE/);
@@ -33,9 +33,9 @@ test("deletion exposes an authenticated idempotent API and coordinated cleanup",
   assert.match(preferences, /delete from chat_model_preferences where owner_id/);
   assert.match(jobs, /delete from chat_jobs where owner_id=\$1/);
   assert.match(jobs, /cancel_chat_job_and_finalize_message/);
-  assert.match(modal, /sandbox\.terminate\(\)/);
-  assert.match(modal, /client\.volumes\.delete/);
-  assert.match(modal, /allowMissing: true/);
+  assert.match(worker, /\/v1\/workspace\/delete/);
+  assert.match(worker, /PYTHON_WORKER_SECRET/);
+  assert.match(worker, /isLocalPythonConfigured/);
 });
 
 test("chat bootstrap loads the index without cleanup writes", async () => {

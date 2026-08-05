@@ -296,11 +296,11 @@ test("remote Python operations honor the same absolute deadline", async () => {
 });
 
 test("artifact reads are atomic, no-follow, and bounded before streaming", async () => {
-  const source = await readFile(new URL("../app/server/modal/modal-python-executor.ts", import.meta.url), "utf8");
+  const source = await readFile(new URL("../docker/python-worker/server.py", import.meta.url), "utf8");
   assert.match(source, /O_NOFOLLOW/);
   assert.match(source, /os\.fstat\(fd\)/);
-  assert.match(source, /PYTHON_TOOL_LIMITS\.maxArtifactBytes \+ 1/);
-  assert.match(source, /readBoundedArtifactBytes/);
+  assert.match(source, /limit \+ 1/);
+  assert.match(source, /def read_bounded/);
   assert.doesNotMatch(source, /filesystem\.readBytes/);
 });
 
@@ -482,7 +482,7 @@ test("chat orchestration reserves one usage slot per round", async () => {
   assert.match(source, /const roundUsageIndex = roundUsages\.push\(null\) - 1/);
   assert.match(source, /roundUsages\[roundUsageIndex\] = latestNonNullUsage/);
   assert.doesNotMatch(source, /roundUsages\.push\(roundUsage\)/);
-  assert.match(source, /new ModalPythonExecutor\(ownerId, conversationId, responseDeadlineAt\)/);
+  assert.match(source, /new LocalPythonExecutor\(ownerId, conversationId, responseDeadlineAt\)/);
 });
 
 test("chat orchestration completes after more than six sequential tool calls", async () => {

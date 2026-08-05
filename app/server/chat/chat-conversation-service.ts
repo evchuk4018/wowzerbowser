@@ -11,7 +11,7 @@ import {
   deleteChatConversationRecord,
   listChatConversations,
 } from "./chat-history-store";
-import { deleteConversationWorkspace } from "../modal/modal-conversation-cleanup";
+import { deleteConversationWorkspace } from "../python/local-python-conversation-cleanup";
 import { deleteChatImagesForConversation } from "./chat-image-store";
 import { deleteChatDocumentsForConversation } from "./chat-document-store";
 import { deleteStorageObjectsForConversation } from "../storage/storage-service";

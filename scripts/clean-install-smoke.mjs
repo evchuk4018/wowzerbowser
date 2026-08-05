@@ -338,7 +338,7 @@ async function verifyContainerIsolation(projectName, environmentFile) {
 }
 
 async function resourceSnapshot(environmentFile, projectName) {
-  const containers = await compose(environmentFile, projectName, ["ps", "-q", "postgres", "web", "background-worker", "opendataloader-hybrid"], { allowFailure: true });
+  const containers = await compose(environmentFile, projectName, ["ps", "-q", "postgres", "web", "background-worker", "opendataloader-hybrid", "python-worker"], { allowFailure: true });
   const ids = containers.stdout.split(/\r?\n/u).map((value) => value.trim()).filter(Boolean);
   if (!ids.length) return;
   const stats = await command(["stats", "--no-stream", "--format", "{{.Name}}\\t{{.CPUPerc}}\\t{{.MemUsage}}", ...ids], { allowFailure: true });
@@ -356,6 +356,8 @@ async function smoke() {
   const volumeName = smokeName("wowzerbowser-smoke-pg");
   const modelCacheName = smokeName("wowzerbowser-smoke-odl");
   const networkName = smokeName("wowzerbowser-smoke-net");
+  const pythonWorkspaceVolumeName = smokeName("wowzerbowser-smoke-python");
+  const pythonExecutionNetworkName = smokeName("wowzerbowser-smoke-python-net");
   const ownerId = randomUUID();
   const ownerEmail = "owner@example.test";
   const ownerPassword = `SmokeOwner-${randomUUID().replaceAll("-", "")}`;
@@ -367,6 +369,8 @@ async function smoke() {
     `SMOKE_POSTGRES_VOLUME_NAME=${volumeName}`,
     `SMOKE_OPENDATALOADER_CACHE_VOLUME_NAME=${modelCacheName}`,
     `SMOKE_NETWORK_NAME=${networkName}`,
+    `PYTHON_WORKSPACE_VOLUME_NAME=${pythonWorkspaceVolumeName}`,
+    `PYTHON_EXECUTION_NETWORK_NAME=${pythonExecutionNetworkName}`,
     `DEPLOYMENT_ENV_FILE=${normalizeComposePath(environmentFile)}`,
     `APP_OWNER_EMAIL=${ownerEmail}`,
     `APP_OWNER_ID=${ownerId}`,
@@ -376,6 +380,7 @@ async function smoke() {
     `POSTGRES_USER=${database.user}`,
     `POSTGRES_PASSWORD=${database.password}`,
     `DATABASE_URL=postgresql://${database.user}:${database.password}@postgres:5432/${database.name}`,
+    `PYTHON_WORKER_SECRET=SmokePython-${randomUUID().replaceAll("-", "")}`,
     "APP_UID=1000",
     "APP_GID=1000",
     "WEB_PORT=" + port,
@@ -404,16 +409,17 @@ async function smoke() {
       console.log("clean-install-smoke\tclean-build\treused-existing-image");
     } else {
       console.log("clean-install-smoke\tclean-build");
-      const build = await compose(environmentFile, projectName, ["build", "--no-cache", "web", "background-worker", "opendataloader-hybrid"], { allowFailure: true });
+      const build = await compose(environmentFile, projectName, ["build", "--no-cache", "web", "background-worker", "opendataloader-hybrid", "python-worker"], { allowFailure: true });
       assert.equal(build.code, 0, "The clean Docker/npm install failed.");
     }
     console.log("smoke-stage-start-postgres");
-    await compose(environmentFile, projectName, ["up", "-d", "postgres", "opendataloader-hybrid"]);
+    await compose(environmentFile, projectName, ["up", "-d", "postgres", "opendataloader-hybrid", "python-worker"]);
     stackStarted = true;
     console.log("smoke-stage-wait-postgres");
     await poll("PostgreSQL health", async () => (await compose(environmentFile, projectName, ["exec", "-T", "postgres", "pg_isready", "-U", database.user, "-d", database.name], { allowFailure: true })).code === 0, 60_000);
     console.log("smoke-stage-wait-opendataloader");
     await poll("OpenDataLoader hybrid health", async () => (await compose(environmentFile, projectName, ["exec", "-T", "opendataloader-hybrid", "python", "-c", "import urllib.request; response = urllib.request.urlopen('http://127.0.0.1:5002/health', timeout=3); raise SystemExit(0 if response.status == 200 else 1)"], { allowFailure: true })).code === 0, 300_000, 1_000);
+    await poll("local Python worker health", async () => (await compose(environmentFile, projectName, ["exec", "-T", "python-worker", "python", "-c", "import urllib.request; response = urllib.request.urlopen('http://127.0.0.1:5003/health', timeout=3); raise SystemExit(0 if response.status == 200 else 1)"], { allowFailure: true })).code === 0, 60_000, 500);
     console.log("smoke-stage-migrations");
     await compose(environmentFile, projectName, ["run", "--rm", "--no-deps", "-T", "-e", "SKIP_DATABASE_MIGRATION_CHECK=1", "web", "node", "scripts/migrate.mjs", "--initialize"]);
     console.log("smoke-stage-bootstrap");
@@ -471,6 +477,9 @@ async function smoke() {
     if (stackStarted) await compose(environmentFile, projectName, ["down", "--remove-orphans"], { allowFailure: true });
     if (volumeName.startsWith("wowzerbowser-smoke-")) await command(["volume", "rm", volumeName], { allowFailure: true });
     if (modelCacheName.startsWith("wowzerbowser-smoke-")) await command(["volume", "rm", modelCacheName], { allowFailure: true });
+    if (pythonWorkspaceVolumeName.startsWith("wowzerbowser-smoke-")) await command(["volume", "rm", pythonWorkspaceVolumeName], { allowFailure: true });
+    if (pythonExecutionNetworkName.startsWith("wowzerbowser-smoke-")) await command(["network", "rm", pythonExecutionNetworkName], { allowFailure: true });
+    if (networkName.startsWith("wowzerbowser-smoke-")) await command(["network", "rm", networkName], { allowFailure: true });
     await rm(temporaryDirectory, { recursive: true, force: true });
   }
 }

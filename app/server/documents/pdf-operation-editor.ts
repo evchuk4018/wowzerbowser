@@ -1,7 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import type { ModalPythonExecutor } from "../modal/modal-python-executor";
+import type { LocalPythonExecutor } from "../python/local-python-executor";
 import type { ChatDocumentEditResult } from "../../../lib/chat-protocol";
 import { documentRevisionOutputPath, documentRevisionRoot, documentRevisionSourcePath, validateDocumentProjectManifest } from "../../../lib/document-project";
 import { createHash } from "node:crypto";
@@ -62,7 +62,7 @@ export function validateOperations(operations: PdfOperation[], inspection: Await
   }
 }
 
-export async function editPdfOperations(input: { ownerId: string; conversationId: string; documentId: string; operations: PdfOperation[]; outputFilename?: string; executor: ModalPythonExecutor; jobId?: string | null }): Promise<{ result: Extract<ChatDocumentEditResult, { kind: "revision" }>; artifact: import("../../../lib/chat-protocol").ChatArtifact }> {
+export async function editPdfOperations(input: { ownerId: string; conversationId: string; documentId: string; operations: PdfOperation[]; outputFilename?: string; executor: LocalPythonExecutor; jobId?: string | null }): Promise<{ result: Extract<ChatDocumentEditResult, { kind: "revision" }>; artifact: import("../../../lib/chat-protocol").ChatArtifact }> {
   const target = await getAuthorizedDocument(input.ownerId, input.conversationId, input.documentId);
   if (!target || target.contentType !== "application/pdf") throw new Error("Document is not an authorized PDF.");
   const bytes = await downloadAuthorizedDocumentBytes(input.ownerId, input.conversationId, input.documentId);

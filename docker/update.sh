@@ -25,10 +25,10 @@ echo "deployment-update\tvalidate-compose"
 "$compose" config >/dev/null
 
 echo "deployment-update\tbuild"
-"$compose" build web background-worker opendataloader-hybrid
+"$compose" build web background-worker python-worker opendataloader-hybrid
 
 echo "deployment-update\tstart-dependencies"
-"$compose" up -d postgres opendataloader-hybrid
+"$compose" up -d postgres python-worker opendataloader-hybrid
 
 echo "deployment-update\tstart-search-stack"
 "$compose" up -d searxng redlib miniflux-postgres miniflux firecrawl-redis firecrawl-rabbitmq firecrawl-postgres firecrawl-playwright firecrawl
@@ -37,7 +37,7 @@ echo "deployment-update\tapply-migrations"
 "$compose" run --rm --no-deps -T -e SKIP_DATABASE_MIGRATION_CHECK=1 web node scripts/migrate.mjs --initialize
 
 echo "deployment-update\trestart-app"
-"$compose" up -d --force-recreate web background-worker opendataloader-hybrid
+"$compose" up -d --force-recreate web background-worker python-worker opendataloader-hybrid
 
 echo "deployment-update\tprovision-miniflux-feeds"
 if ! "$compose" run --rm --no-deps -T web node scripts/provision-miniflux-feeds.mjs; then

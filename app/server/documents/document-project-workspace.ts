@@ -1,11 +1,11 @@
 import "server-only";
 import { createHash } from "node:crypto";
-import type { ModalPythonExecutor } from "../modal/modal-python-executor";
+import type { LocalPythonExecutor } from "../python/local-python-executor";
 import { DOCUMENT_PROJECT_LIMITS, documentRevisionManifestPath, documentRevisionOutputPath, documentRevisionRoot, documentRevisionSourcePath, sourceContentType, validateDocumentProjectManifest, type DocumentProjectManifestV1, type DocumentProjectSourceFile } from "../../../lib/document-project";
 import type { PythonToolInput } from "../../../lib/chat-protocol";
 
 const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
-export async function captureRevisionWorkspace(input: { executor: ModalPythonExecutor; projectId: string; revisionId: string; pythonInput: PythonToolInput; outputPath: string; outputFilename: string; outputContentType: DocumentProjectManifestV1["outputContentType"]; outputSha256: string; jobId: string | null; parentRevisionId?: string | null }): Promise<DocumentProjectManifestV1> {
+export async function captureRevisionWorkspace(input: { executor: LocalPythonExecutor; projectId: string; revisionId: string; pythonInput: PythonToolInput; outputPath: string; outputFilename: string; outputContentType: DocumentProjectManifestV1["outputContentType"]; outputSha256: string; jobId: string | null; parentRevisionId?: string | null }): Promise<DocumentProjectManifestV1> {
   const { executor, projectId, revisionId } = input;
   await executor.createWorkspaceDirectory(documentRevisionRoot(projectId, revisionId));
   const sourceFiles: DocumentProjectSourceFile[] = [];

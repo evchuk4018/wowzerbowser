@@ -3,7 +3,7 @@ import type { PythonToolInput } from "./chat-protocol";
 /**
  * Limits shared by the advertised run_python schema and its runtime validator.
  * Keep this module provider- and runtime-neutral so the protocol policy cannot
- * drift between the model-facing schema and the Modal executor.
+ * drift between the model-facing schema and the local worker executor.
  */
 export const PYTHON_TOOL_INPUT_LIMITS = {
   maxPackages: 20,

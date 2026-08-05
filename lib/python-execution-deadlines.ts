@@ -14,7 +14,7 @@ export function boundedPythonTimeoutMs(
   const remainingMs = deadlineAt - now;
   if (remainingMs <= 0) return 0;
   const boundedMs = Math.min(requestedMs, callTimeoutMs, remainingMs);
-  // Modal requires subprocess timeouts to be whole seconds. Round down so
+  // The worker enforces subprocess timeouts in whole seconds. Round down so
   // the timeout never extends beyond the requested absolute deadline.
   return Math.floor(boundedMs / 1_000) * 1_000;
 }

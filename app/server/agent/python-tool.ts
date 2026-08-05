@@ -2,7 +2,7 @@ import "server-only";
 
 import type { ChatArtifact, ChatToolCall, ChatToolResult } from "../../../lib/chat-protocol";
 import { readArtifactDescriptor, registerArtifact } from "../artifacts/artifact-store";
-import { isModalConfigured, ModalPythonExecutor } from "../modal/modal-python-executor";
+import { isLocalPythonConfigured, LocalPythonExecutor } from "../python/local-python-executor";
 import { validatePythonToolInput } from "../../../lib/python-tool-policy";
 import { registerGeneratedDocumentProvenance } from "../documents/generated-document-provenance";
 import {
@@ -25,7 +25,7 @@ const DEFAULT_DEPENDENCIES: PythonToolDependencies = {
 };
 
 export function availableChatTools() {
-  return isModalConfigured() ? [PYTHON_TOOL_DEFINITION] : [];
+  return isLocalPythonConfigured() ? [PYTHON_TOOL_DEFINITION] : [];
 }
 
 function parseArguments(value: string): unknown {
@@ -38,7 +38,7 @@ function parseArguments(value: string): unknown {
 
 export async function executePythonTool(
   call: ChatToolCall,
-  executor: ModalPythonExecutor,
+  executor: LocalPythonExecutor,
   ownerId: string,
   conversationId: string,
   onDocumentArtifact?: (artifact: ChatArtifact, bytes: Uint8Array, storageObjectId: string) => Promise<void>,

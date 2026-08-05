@@ -1,7 +1,7 @@
 import "server-only";
 
 import { randomUUID, createHash } from "node:crypto";
-import type { ModalPythonExecutor } from "../modal/modal-python-executor";
+import type { LocalPythonExecutor } from "../python/local-python-executor";
 import type { ChatDocumentEditResult } from "../../../lib/chat-protocol";
 import { documentRevisionOutputPath, documentRevisionRoot, documentRevisionSourcePath, sourceContentType, validateDocumentProjectManifest, type DocumentProjectManifestV1 } from "../../../lib/document-project";
 import { createDocumentProjectStore } from "./document-project-store";
@@ -34,7 +34,7 @@ export function applyUnifiedDiff(text: string, diff: string): string {
   output.push(...lines.slice(cursor)); return output.join("\n");
 }
 
-export async function editSourceBackedDocument(input: { ownerId: string; conversationId: string; documentId: string; projectId: string; baseRevisionId: string; patches: Patch[]; outputFilename?: string; executor: ModalPythonExecutor; jobId?: string | null }): Promise<{ result: Extract<ChatDocumentEditResult, { kind: "revision" }>; artifact: import("../../../lib/chat-protocol").ChatArtifact }> {
+export async function editSourceBackedDocument(input: { ownerId: string; conversationId: string; documentId: string; projectId: string; baseRevisionId: string; patches: Patch[]; outputFilename?: string; executor: LocalPythonExecutor; jobId?: string | null }): Promise<{ result: Extract<ChatDocumentEditResult, { kind: "revision" }>; artifact: import("../../../lib/chat-protocol").ChatArtifact }> {
   if (input.patches.length > 20) throw new Error("At most 20 source patches are allowed.");
   const store = createDocumentProjectStore();
   const base = await store.getRevision({ ownerId: input.ownerId, conversationId: input.conversationId, projectId: input.projectId, revisionId: input.baseRevisionId }).catch(() => null);

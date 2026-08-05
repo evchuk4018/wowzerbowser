@@ -34,7 +34,7 @@ test("the trusted runtime catalog preserves exact package and import names", () 
   );
 });
 
-test("the Modal image install command contains every trusted distribution", () => {
+test("the local worker package install command contains every trusted distribution", () => {
   assert.match(
     PYTHON_RUNTIME_PACKAGE_INSTALL_COMMAND,
     /^RUN python -m pip install --no-cache-dir --disable-pip-version-check /,
@@ -56,14 +56,12 @@ test("package/import guidance is conditional with the Python tool", () => {
   }
 });
 
-test("Modal builds the package layer and migrates venvs without clearing them", async () => {
-  const source = await readFile(
-    new URL("../app/server/modal/modal-python-executor.ts", import.meta.url),
-    "utf8",
-  );
-  assert.match(source, /fromRegistry\("python:3\.13-slim"\)[\s\S]*dockerfileCommands\(\[PYTHON_RUNTIME_PACKAGE_INSTALL_COMMAND\]\)/);
-  assert.match(source, /python3 -m venv --system-site-packages \$\{WORKSPACE\}\/\.venv/);
-  assert.match(source, /python3 -m venv --system-site-packages --upgrade \$\{WORKSPACE\}\/\.venv/);
-  assert.doesNotMatch(source, /python3 -m venv --clear/);
-  assert.doesNotMatch(source, /rm\s+-rf\s+\/workspace\/\.venv/);
+test("the local worker image bakes trusted packages and preserves venvs", async () => {
+  const dockerfile = await readFile(new URL("../docker/python-worker/Dockerfile", import.meta.url), "utf8");
+  const source = await readFile(new URL("../docker/python-worker/server.py", import.meta.url), "utf8");
+  assert.match(dockerfile, /FROM python:3\.13-slim/);
+  for (const [packageName] of expectedPackages) assert.match(dockerfile, new RegExp(`\\b${packageName.replace("-", "\\-")}\\b`));
+  assert.match(source, /venv.*--system-site-packages/);
+  assert.doesNotMatch(source, /venv.*--clear/);
+  assert.doesNotMatch(source, /shutil\.rmtree\(.*\.venv/);
 });

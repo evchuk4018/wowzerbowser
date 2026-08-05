@@ -6,7 +6,7 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("Compose defines the application services and private OpenDataLoader backend", async () => {
   const compose = await read("compose.yaml");
-  for (const service of ["postgres", "opendataloader-hybrid", "web", "background-worker"]) {
+  for (const service of ["postgres", "opendataloader-hybrid", "python-worker", "web", "background-worker"]) {
     assert.match(compose, new RegExp(`^  ${service}:$`, "m"));
   }
   assert.doesNotMatch(compose, /^  (redis|minio|caddy|nginx):$/m);
@@ -108,4 +108,25 @@ test("OpenDataLoader uses a private bounded hybrid runtime", async () => {
   assert.match(hybridDockerfile, /--ocr-engine.*easyocr/);
   assert.match(hybridDockerfile, /--ocr-lang.*en/);
   assert.match(hybridDockerfile, /TORCH_HOME=\/var\/cache\/opendataloader\/torch/);
+});
+
+test("Python execution uses a private bounded worker", async () => {
+  const compose = await read("compose.yaml");
+  const dockerfile = await read("docker/python-worker/Dockerfile");
+  const worker = await read("docker/python-worker/server.py");
+  const block = compose.slice(compose.indexOf("  python-worker:"), compose.indexOf("  searxng:"));
+  assert.match(block, /dockerfile: docker\/python-worker\/Dockerfile/);
+  assert.doesNotMatch(block, /^    ports:/m);
+  assert.match(block, /cpus: "0\.75"/);
+  assert.match(block, /mem_limit: 1536m/);
+  assert.match(block, /pids_limit: 128/);
+  assert.match(block, /cap_drop:/);
+  assert.match(block, /no-new-privileges:true/);
+  assert.match(block, /read_only: true/);
+  assert.match(block, /python-workspaces:\/workspaces/);
+  assert.match(compose, /python-execution:/);
+  assert.match(dockerfile, /USER pythonworker/);
+  assert.match(worker, /maxConcurrentExecutions/);
+  assert.match(worker, /start_new_session=True/);
+  assert.match(worker, /RLIMIT_CPU/);
 });

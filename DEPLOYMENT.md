@@ -9,9 +9,10 @@ private Tailscale HTTPS
           v
 host Tailscale Serve -> 127.0.0.1:3000 -> web
                                       |\
-                                       | postgres (private Compose network)
+                                        | postgres (private Compose network)
                                         | background-worker
                                         | opendataloader-hybrid (private CPU OCR)
+                                        | python-worker (private bounded execution)
                                         | self-hosted search and page services (private)
                                         ` discord (optional profile)
 ```
@@ -20,6 +21,9 @@ The Compose stack includes the application services plus private SearXNG,
 Redlib, Miniflux, Firecrawl, and their databases/queue/browser dependencies.
 Only `web` is reachable through the host's loopback port; the search services,
 databases, queues, and browser service are private to the Compose network.
+The `python-worker` service is private to a separate execution network shared
+only with `web` and `background-worker`; it has no host port and receives only
+its named workspace volume.
 The optional `discord` profile adds the local Discord Gateway process without
 adding a host port or a storage mount. PostgreSQL uses the named
 `wowzerbowser-postgres` volume and has no host-published port. The web port and
@@ -134,6 +138,10 @@ DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh
 The web and worker entrypoints refuse to start when a local PostgreSQL
 migration is pending.
 
+Set `PYTHON_WORKER_SECRET` in `/srv/storage/wowzerbowser/deployment.env` to a
+new random value of at least 32 characters. The web, durable worker, and local
+Python worker must share this value.
+
 Bootstrap the one owner once the migration is applied. The command is
 idempotent for the configured owner and never logs the password:
 
@@ -167,12 +175,13 @@ application state and must be preserved during updates.
 ```bash
 DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh ps
 docker inspect --format '{{json .State.Health}}' wowzerbowser-web-1
-DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh logs --tail=200 web background-worker searxng redlib miniflux firecrawl
+DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh logs --tail=200 web background-worker python-worker searxng redlib miniflux firecrawl
 DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh down
 DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh up -d --build
 docker volume inspect wowzerbowser-postgres
 docker inspect wowzerbowser-web-1 --format '{{json .Mounts}}'
 docker inspect wowzerbowser-background-worker-1 --format '{{json .Mounts}}'
+docker inspect wowzerbowser-python-worker-1 --format '{{json .Mounts}}'
 ```
 
 Check readiness directly from the host when diagnosing a restart or failed
@@ -286,6 +295,7 @@ curl --fail-with-body --silent --show-error http://127.0.0.1:3000/api/health
 docker inspect wowzerbowser-web-1 --format '{{json .Mounts}}'
 docker inspect wowzerbowser-background-worker-1 --format '{{json .Mounts}}'
 docker inspect wowzerbowser-opendataloader-hybrid-1 --format '{{json .Mounts}}'
+docker inspect wowzerbowser-python-worker-1 --format '{{json .Mounts}}'
 ss -ltnp
 ```
 
@@ -294,7 +304,8 @@ on `127.0.0.1` only. There must be no host listener for PostgreSQL,
 OpenDataLoader, SearXNG, Redlib, Miniflux, Firecrawl, or their queue/database
 dependencies. The application containers must not see `/srv/storage/media`;
 only `web` and `background-worker` receive the `/srv/storage/wowzerbowser`
-bind mount, while the hybrid service receives only its named model-cache volume.
+bind mount, while the hybrid service receives only its named model-cache volume
+and `python-worker` receives only its named workspace volume.
 
 For an isolation check, create temporary harmless files under both host
 directories, verify the application container sees only the application file,

@@ -3,7 +3,8 @@ import { PYTHON_RUNTIME_PACKAGE_INSTRUCTIONS } from "./python-runtime-packages";
 /**
  * Provider-neutral guidance for the model when the run_python tool is
  * available. This is deliberately kept outside the UI prompt: execution
- * capability is a server decision and must not be implied when Modal is off.
+ * capability is a server decision and must not be implied when the local
+ * worker is unavailable.
  */
 export const RUN_PYTHON_INSTRUCTIONS = [
   "<run_python_policy>",

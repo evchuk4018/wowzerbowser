@@ -53,6 +53,43 @@ services:
       retries: 8
       start_period: 90s
 
+  python-worker:
+    build:
+      context: .
+      dockerfile: docker/python-worker/Dockerfile
+    environment:
+      PYTHON_WORKER_PORT: 5003
+      PYTHON_WORKER_SECRET: ${PYTHON_WORKER_SECRET:?PYTHON_WORKER_SECRET must be set in the deployment environment}
+      PYTHON_WORKSPACE_ROOT: /workspaces
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    expose:
+      - "5003"
+    volumes:
+      - python-workspaces:/workspaces
+    networks:
+      - python-execution
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+      - /run:size=16m
+    cpus: "0.75"
+    mem_limit: 1536m
+    memswap_limit: 1536m
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; response = urllib.request.urlopen('http://127.0.0.1:5003/health', timeout=3); raise SystemExit(0 if response.status == 200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
   searxng:
     image: docker.io/searxng/searxng:latest
     environment:
@@ -291,6 +328,8 @@ services:
       WORKER_DOCUMENT_CONCURRENCY: ${WORKER_DOCUMENT_CONCURRENCY:-1}
       WORKER_OCR_CONCURRENCY: ${WORKER_OCR_CONCURRENCY:-2}
       PDF_OCR_CONCURRENCY: ${PDF_OCR_CONCURRENCY:-2}
+      PYTHON_WORKER_URL: ${PYTHON_WORKER_URL:-http://python-worker:5003}
+      PYTHON_WORKER_SECRET: ${PYTHON_WORKER_SECRET:?PYTHON_WORKER_SECRET must be set in the deployment environment}
       OPENDATALOADER_HYBRID_URL: ${OPENDATALOADER_HYBRID_URL:-http://opendataloader-hybrid:5002}
       SEARCH_STACK_ENABLED: ${SEARCH_STACK_ENABLED:-true}
       SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
@@ -311,10 +350,13 @@ services:
           create_host_path: false
     networks:
       - application
+      - python-execution
     ports:
       - "127.0.0.1:${WEB_PORT:-3000}:3000"
     depends_on:
       postgres:
+        condition: service_healthy
+      python-worker:
         condition: service_healthy
       opendataloader-hybrid:
         condition: service_healthy
@@ -363,6 +405,8 @@ services:
       WORKER_IMAGE_CONCURRENCY: ${WORKER_IMAGE_CONCURRENCY:-1}
       WORKER_OCR_CONCURRENCY: ${WORKER_OCR_CONCURRENCY:-2}
       PDF_OCR_CONCURRENCY: ${PDF_OCR_CONCURRENCY:-2}
+      PYTHON_WORKER_URL: ${PYTHON_WORKER_URL:-http://python-worker:5003}
+      PYTHON_WORKER_SECRET: ${PYTHON_WORKER_SECRET:?PYTHON_WORKER_SECRET must be set in the deployment environment}
       OPENDATALOADER_HYBRID_URL: ${OPENDATALOADER_HYBRID_URL:-http://opendataloader-hybrid:5002}
       SEARCH_STACK_ENABLED: ${SEARCH_STACK_ENABLED:-true}
       SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
@@ -393,8 +437,11 @@ services:
           create_host_path: false
     networks:
       - application
+      - python-execution
     depends_on:
       postgres:
+        condition: service_healthy
+      python-worker:
         condition: service_healthy
       opendataloader-hybrid:
         condition: service_healthy
@@ -458,6 +505,8 @@ services:
 volumes:
   postgres-data:
     name: wowzerbowser-postgres
+  python-workspaces:
+    name: ${PYTHON_WORKSPACE_VOLUME_NAME:-wowzerbowser-python-workspaces}
   opendataloader-model-cache:
     name: ${OPENDATALOADER_CACHE_VOLUME_NAME:-wowzerbowser-opendataloader-cache}
   searxng-cache:
@@ -472,3 +521,5 @@ volumes:
 networks:
   application:
     name: wowzerbowser-application
+  python-execution:
+    name: ${PYTHON_EXECUTION_NETWORK_NAME:-wowzerbowser-python-execution}

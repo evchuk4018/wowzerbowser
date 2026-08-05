@@ -13,7 +13,7 @@ import {
   executeInspectImageTool,
   INSPECT_IMAGE_TOOL_NAME,
 } from "../server/agent/image-tool";
-import { isModalConfigured, ModalPythonExecutor } from "../server/modal/modal-python-executor";
+import { isLocalPythonConfigured, LocalPythonExecutor } from "../server/python/local-python-executor";
 import { getAuthoritativeChatImageIdsForRequest } from "../server/chat/chat-history-store";
 import { latestNonNullUsage, sumRoundUsage } from "./chat-usage";
 import { availablePdfTools, executePdfTool } from "../server/agent/pdf-tool";
@@ -127,7 +127,7 @@ export async function generateChatResponse(
   ] = await Promise.all([
     automationExecution ? Promise.resolve("") : getConsolidatedPrompt(ownerId).catch(() => "").then(formatConsolidatedPrompt),
     automationExecution ? Promise.resolve({ revision: 0, items: [] }) : getTodoList(ownerId, conversationId).catch(() => ({ revision: 0, items: [] })),
-    isModalConfigured()
+    isLocalPythonConfigured()
       ? listEnabledExecutableTools(ownerId).catch((error) => {
         console.warn({ event: "custom-tools-unavailable", ownerId, failure: error instanceof Error ? error.name : "UnknownError" });
         return [];
@@ -307,7 +307,7 @@ export async function generateChatResponse(
       const replayRounds: ChatAssistantRound[] = [];
       let usageEstimator: ChatUsageEstimator | null = null;
       const roundUsages: Array<ReturnType<typeof latestNonNullUsage>> = [];
-      let executor: ModalPythonExecutor | null = null;
+      let executor: LocalPythonExecutor | null = null;
       const recalledContexts = new Map<string, string>();
       let currentPhase = 1;
       let automationToolsUnlocked = automationKeywordUnlock;
@@ -427,8 +427,8 @@ export async function generateChatResponse(
           }
           const executeToolCall = async (call: ChatToolCall, callIndex: number): Promise<ChatToolResult> => {
             if (call.name === "run_python" && activePythonTools.length) {
-              if (!isModalConfigured()) throw new Error("Python execution is not configured.");
-              if (!executor) executor = new ModalPythonExecutor(ownerId, conversationId, responseDeadlineAt);
+              if (!isLocalPythonConfigured()) throw new Error("Python execution is not configured.");
+              if (!executor) executor = new LocalPythonExecutor(ownerId, conversationId, responseDeadlineAt);
               return executePythonTool(call, executor, ownerId, conversationId, async (artifact, bytes, storageObjectId) => {
                 const pdfId = artifact.id;
                 if (artifact.contentType === DOCX_CONTENT_TYPE) await ingestDocx({ ownerId, conversationId, documentId: pdfId, filename: artifact.name, bytes, storageObjectId, alreadyUploaded: true, jobId: responseId, signal: roundSignal, projectId: artifact.projectId, revisionId: artifact.revisionId, parentRevisionId: artifact.parentRevisionId, origin: artifact.origin, editable: artifact.editable, sourceCompleteness: artifact.sourceCompleteness });
@@ -516,8 +516,8 @@ export async function generateChatResponse(
               });
             }
             if (pdfEditTools.some((tool) => tool.function.name === call.name)) {
-              if (!isModalConfigured() && call.name !== "inspect_pdf_editability" && call.name !== "compare_document_revisions") throw new Error("PDF editing is not configured.");
-              if (!executor && call.name !== "inspect_pdf_editability" && call.name !== "compare_document_revisions") executor = new ModalPythonExecutor(ownerId, conversationId, responseDeadlineAt);
+              if (!isLocalPythonConfigured() && call.name !== "inspect_pdf_editability" && call.name !== "compare_document_revisions") throw new Error("Python execution is not configured.");
+              if (!executor && call.name !== "inspect_pdf_editability" && call.name !== "compare_document_revisions") executor = new LocalPythonExecutor(ownerId, conversationId, responseDeadlineAt);
               const result = await executePdfEditTool(call, { ownerId, conversationId, allowedPdfIds, allowedImageIds: new Set(allowedImageIds), allowedProjectIds, executor: executor ?? undefined, jobId: responseId });
               for (const artifact of result.artifacts ?? []) if (artifact.contentType === "application/pdf") allowedPdfIds.add(artifact.id);
               return result;
@@ -623,7 +623,7 @@ export async function generateChatResponse(
       } finally {
         if (signal.aborted) titleCoordinator.cancel();
         else await titleCoordinator.finish();
-        await (executor as ModalPythonExecutor | null)?.close().catch(() => undefined);
+        await (executor as LocalPythonExecutor | null)?.close().catch(() => undefined);
         if (!signal.aborted) {
           await enqueue({ type: "done", usage: sumRoundUsage(roundUsages) });
         }

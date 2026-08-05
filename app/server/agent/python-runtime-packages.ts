@@ -1,5 +1,5 @@
 /**
- * Packages baked into the Modal Python image and exposed through the
+ * Packages baked into the local Python worker image and exposed through the
  * conversation venv's system site packages.
  *
  * Keep distribution names (the names accepted by pip) separate from import
@@ -30,7 +30,7 @@ export const PYTHON_RUNTIME_PACKAGE_NAMES = Object.freeze(
   PYTHON_RUNTIME_PACKAGES.map(({ packageName }) => packageName),
 );
 
-/** A Dockerfile RUN instruction used to build the trusted runtime image layer. */
+/** A Dockerfile RUN instruction used by local worker image maintainers. */
 export const PYTHON_RUNTIME_PACKAGE_INSTALL_COMMAND = [
   "RUN python -m pip install --no-cache-dir --disable-pip-version-check",
   ...PYTHON_RUNTIME_PACKAGE_NAMES,

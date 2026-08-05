@@ -153,16 +153,19 @@ stack without Discord.
 
 ## Python tool
 
-The assistant can run Python in isolated Modal Sandboxes when
-`MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`, and a separate random
-`ARTIFACT_SIGNING_SECRET` are configured. Create a Modal API token in the Modal
-dashboard, generate a long random signing secret, and add all three values to
-the deployment. The optional `MODAL_APP_NAME` defaults to
-`wowzerbowser-python`. Conversation
-workspaces and installed packages persist in per-conversation Modal Volumes;
-compute is created only while the assistant is running Python. Python code has
-outbound TLS access so it can install packages and download data; do not place
-credentials or other sensitive files in its conversation workspace.
+The assistant runs Python in a private local Docker Compose `python-worker`
+service on the homelab. The service has a `0.75` CPU limit, `1.5 GiB` memory
+limit, a `128` process limit, and allows only one active Python execution at a
+time. It is non-root, drops Linux capabilities, uses `no-new-privileges`, has
+no host-published port, and is isolated from PostgreSQL and the other
+application services by a dedicated Compose network.
+
+Conversation workspaces and installed packages persist in a named Docker
+volume owned by the Python worker. Custom tools use temporary workspaces and
+receive only their explicitly configured environment values. Python code has
+outbound network access for package installation and downloads, but it does
+not inherit application credentials. Set `PYTHON_WORKER_SECRET` to at least 32
+random characters in the deployment environment.
 
 ## Web tools
 

@@ -3,7 +3,7 @@ import "server-only";
 import type { ChatToolCall, ChatToolResult } from "../../../lib/chat-protocol";
 import type { CustomToolTestResult } from "../../../lib/custom-tool-protocol";
 import { validateJsonAgainstSchema } from "../../../lib/custom-tool-protocol";
-import { PYTHON_TOOL_LIMITS, runIsolatedPythonTool } from "../modal/modal-python-executor";
+import { PYTHON_TOOL_LIMITS, runIsolatedPythonTool } from "../python/local-python-executor";
 import { decryptCustomToolSecret } from "./custom-tool-crypto";
 import type { ExecutableCustomTool } from "./custom-tool-repository";
 

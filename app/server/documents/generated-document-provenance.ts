@@ -2,12 +2,12 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { PythonToolInput } from "../../../lib/chat-protocol";
 import { outputContentType, type DocumentProjectManifestV1 } from "../../../lib/document-project";
-import type { ModalExecArtifact, ModalPythonExecutor } from "../modal/modal-python-executor";
+import type { LocalExecArtifact, LocalPythonExecutor } from "../python/local-python-executor";
 import { createDocumentProjectStore } from "./document-project-store";
 import { captureRevisionWorkspace } from "./document-project-workspace";
 
 export type GeneratedDocumentProvenance = { projectId: string; revisionId: string; canonicalOutputPath: string; entrypoint: string; sourceCompleteness: DocumentProjectManifestV1["sourceCompleteness"]; manifest: DocumentProjectManifestV1 };
-export async function registerGeneratedDocumentProvenance(input: { ownerId: string; conversationId: string; jobId: string | null; pythonInput: PythonToolInput; executor: ModalPythonExecutor; artifact: ModalExecArtifact }): Promise<GeneratedDocumentProvenance> {
+export async function registerGeneratedDocumentProvenance(input: { ownerId: string; conversationId: string; jobId: string | null; pythonInput: PythonToolInput; executor: LocalPythonExecutor; artifact: LocalExecArtifact }): Promise<GeneratedDocumentProvenance> {
   const contentType = outputContentType(input.artifact.path);
   if (!contentType) throw new Error("Generated document must be a PDF or DOCX file.");
   const projectId = randomUUID(); const revisionId = randomUUID(); const renderedDocumentId = randomUUID();

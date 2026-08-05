@@ -6,7 +6,7 @@ import { inspectPdfEditability } from "../documents/pdf-edit-inspector";
 import { editSourceBackedDocument } from "../documents/source-document-editor";
 import { editPdfOperations, type PdfOperation } from "../documents/pdf-operation-editor";
 import { compareDocumentRevisions } from "../documents/document-revision-compare";
-import type { ModalPythonExecutor } from "../modal/modal-python-executor";
+import type { LocalPythonExecutor } from "../python/local-python-executor";
 import { COMPARE_DOCUMENT_REVISIONS_TOOL_NAME, EDIT_PDF_TOOL_NAME, EDIT_SOURCE_BACKED_DOCUMENT_TOOL_NAME, INSPECT_PDF_EDITABILITY_TOOL_NAME } from "./pdf-edit-tool-manifest";
 
 export { availablePdfEditTools } from "./pdf-edit-tool-manifest";
@@ -60,7 +60,7 @@ function parseOperations(value: unknown): PdfOperation[] {
   }) as PdfOperation[];
 }
 
-export async function executePdfEditTool(call: ChatToolCall, context: { ownerId: string; conversationId: string; allowedPdfIds: ReadonlySet<string>; allowedImageIds?: ReadonlySet<string>; allowedProjectIds?: ReadonlySet<string>; executor?: ModalPythonExecutor; jobId?: string | null }): Promise<ChatToolResult> {
+export async function executePdfEditTool(call: ChatToolCall, context: { ownerId: string; conversationId: string; allowedPdfIds: ReadonlySet<string>; allowedImageIds?: ReadonlySet<string>; allowedProjectIds?: ReadonlySet<string>; executor?: LocalPythonExecutor; jobId?: string | null }): Promise<ChatToolResult> {
   try {
     const args = parseArguments(call); const documentId = args.documentId;
     if (call.name !== COMPARE_DOCUMENT_REVISIONS_TOOL_NAME && (!isId(documentId) || !context.allowedPdfIds.has(documentId))) return fail(call, "Document is not authorized for this conversation.");
