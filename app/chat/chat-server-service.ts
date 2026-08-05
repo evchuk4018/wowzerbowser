@@ -1,7 +1,7 @@
 import "server-only";
 
-import { createHash } from "node:crypto";
-import type { ChatAssistantRound, ChatModelPricing, ChatRequest, ChatStreamEvent, ChatToolCall, ChatToolResult, ChatUsage } from "../../lib/chat-protocol";
+import { createHash, randomUUID } from "node:crypto";
+import type { ChatAssistantRound, ChatModelPricing, ChatRequest, ChatStreamEvent, ChatToolCall, ChatToolResult, ChatUsage, DeepResearchPlan } from "../../lib/chat-protocol";
 import { chatProviderAdapter } from "../server/chat/chat-provider-registry";
 import { authorizeAutomationModel, authorizeChatModel } from "../server/chat/chat-model-catalog-service";
 import { availableChatTools, executePythonTool } from "../server/agent/python-tool";
@@ -70,6 +70,7 @@ import { connectorToolsToModelTools, executeConnectorTool, executeSearchConnecto
 import type { ConnectorTool } from "../../lib/connector-protocol";
 import { executeToolBatch, planToolBatches, toolExecutionMetadata } from "../server/agent/tool-execution-policy";
 import { ChatUsageEstimator } from "./chat-usage-estimator";
+import { orchestrateDeepResearch } from "../server/research/deep-research-orchestrator";
 
 const MAX_RESPONSE_MS = 240_000;
 
@@ -84,6 +85,20 @@ export type ChatRoundUsage = {
 };
 
 export type ChatSummaryUsage = ReasoningTitleUsage;
+
+function deepResearchPlanFor(request: string, items: { id: string; text: string }[]): DeepResearchPlan {
+  const planItems = items.length ? items : [
+    { id: "scope", text: "Establish the scope, definitions, and primary background." },
+    { id: "evidence", text: "Find authoritative evidence and current data relevant to the question." },
+    { id: "alternatives", text: "Compare competing interpretations, approaches, or alternatives." },
+    { id: "uncertainty", text: "Check limitations, criticism, disagreement, and unresolved uncertainty." },
+  ];
+  return {
+    id: `research-plan-${randomUUID()}`,
+    request,
+    items: planItems.slice(0, 6).map((item, index) => ({ id: item.id || `topic-${index + 1}`, title: item.text, question: item.text, focus: "Return evidence, relevant links, and a concise explanation of why each source matters." })),
+  };
+}
 
 function stableConversationId(request: ChatRequest): string {
   if (request.conversationId) return request.conversationId;
@@ -101,7 +116,7 @@ export async function generateChatResponse(
   persistUsage?: (usage: ChatRoundUsage) => Promise<void>,
   persistSummaryUsage?: (usage: ChatSummaryUsage) => Promise<void>,
   executionOptions: { profile?: "chat" | "automation"; onAutomationResult?: (result: AutomationRunResult) => void } = {},
-): Promise<void> {
+): Promise<{ awaitingApproval: boolean }> {
   const automationExecution = executionOptions.profile === "automation";
   if (typeof chatRequest.model === "string") {
     chatRequest = { ...chatRequest, model: { provider: "deepseek", model: chatRequest.model } };
@@ -287,6 +302,30 @@ export async function generateChatResponse(
   const enqueue = async (event: ChatStreamEvent) => {
     if (!signal.aborted) await persistEvent(event);
   };
+  if (!automationExecution && chatRequest.mode === "deep_research") {
+    const request = chatRequest.messages.at(-1)?.content ?? "";
+    const plan = chatRequest.deepResearchPlan ?? deepResearchPlanFor(request, planner.list?.items.map((item) => ({ id: item.id, text: item.text })) ?? []);
+    if (chatRequest.deepResearchPhase !== "execute") {
+      if (planner.list) await enqueue({ type: "todo_update", todos: planner.list });
+      await enqueue({ type: "deep_research_plan", plan });
+      await enqueue({ type: "done", usage: null });
+      return { awaitingApproval: true };
+    }
+    await enqueue({ type: "deep_research_plan", plan });
+    const result = await orchestrateDeepResearch({
+      ownerId,
+      conversationId,
+      jobId: responseId ?? `research-${conversationId}`,
+      request,
+      plan,
+      signal,
+      onUpdate: async ({ task, status, summary }) => enqueue({ type: "subagent_update", taskId: task.id, title: task.title, status, ...(summary ? { summary } : {}) }),
+    });
+    await enqueue({ type: "content", delta: result.report });
+    await enqueue({ type: "annotations", annotations: [], sources: result.sources });
+    await enqueue({ type: "done", usage: null });
+    return { awaitingApproval: false };
+  }
       if (planner.list) await enqueue({ type: "todo_update", todos: planner.list });
       await enqueue({
         type: "meta",
@@ -628,4 +667,5 @@ export async function generateChatResponse(
           await enqueue({ type: "done", usage: sumRoundUsage(roundUsages) });
         }
       }
+      return { awaitingApproval: false };
 }

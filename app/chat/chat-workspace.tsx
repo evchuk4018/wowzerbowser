@@ -60,6 +60,7 @@ import { isValidConversationId } from "../../lib/chat-conversation-id";
 import { useChatStartupSnapshot } from "./use-chat-startup-snapshot";
 import { defaultPdfPreviewWidth, clampPdfPreviewWidth } from "./pdf-preview-layout";
 import { PdfPreviewPanel, type PdfPreviewLoadState } from "./pdf-preview-panel";
+import { parseChatModeCommand, type ChatMode } from "../../lib/chat-modes";
 
 export type ChatWorkspaceProps = {
   user: AuthUser;
@@ -94,6 +95,7 @@ export function ChatWorkspace({
   const [startupError, setStartupError] = useState<string | null>(null);
   const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
   const [draft, setDraft] = useState(initialDraft);
+  const [mode, setMode] = useState<ChatMode>("normal");
   const [attachmentResetKey, setAttachmentResetKey] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_CHAT_SETTINGS);
@@ -361,6 +363,7 @@ export function ChatWorkspace({
     model: preferences.model,
     thinking: preferences.effectiveThinking,
     reasoningEffort: preferences.effectiveEffort,
+    mode,
     hasSession,
     dispatch,
     onDraftConsumed: () => setDraft(""),
@@ -769,7 +772,14 @@ export function ChatWorkspace({
   ) => {
     event?.preventDefault();
     if (startupPending) return;
-    return generation.sendMessage(draft, editingTurnId, attachments, editingAttachments, documents, editingDocuments);
+    const parsed = parseChatModeCommand(draft);
+    if (parsed.mode !== "normal") setMode(parsed.mode);
+    const effectiveMode = parsed.mode === "normal" ? mode : parsed.mode;
+    const request = parsed.content;
+    setDraft(request);
+    return generation.sendMessage(request, editingTurnId, attachments, editingAttachments, documents, editingDocuments, effectiveMode).finally(() => {
+      if (effectiveMode === "deep_research") setMode("normal");
+    });
   };
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -974,6 +984,8 @@ export function ChatWorkspace({
           onKeyDown={handleKeyDown}
           onStop={() => void generation.stopStreaming()}
           todos={latestMessage?.todos}
+          mode={mode}
+          setMode={setMode}
         />
       </section>
       {pdfPreview && (

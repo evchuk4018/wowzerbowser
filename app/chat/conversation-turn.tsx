@@ -9,7 +9,7 @@ import { ReasoningBlock } from "./reasoning-block";
 import { CallActivityIndicator } from "./call-activity-indicator";
 import type { ChatArtifact, ChatImageAttachment } from "../../lib/chat-protocol";
 import type { ChatDocumentAttachment } from "../../lib/chat-document";
-import { fetchChatImage } from "./chat-service";
+import { cancelChatJob, fetchChatImage, resumeChatJob } from "./chat-service";
 import { memo, useEffect, useState } from "react";
 import { loadChatImagePreview } from "./chat-image-preview-loader";
 import { ConnectorApprovalModal } from "../settings/connector-approval-modal";
@@ -225,6 +225,19 @@ function ConversationTurnInner({
               />
             )}
             <div className="message-bubble">
+              {assistantMessage.deepResearchPlan && (
+                <div className="deep-research-plan" role="region" aria-label="Deep research plan">
+                  <div className="deep-research-plan-title"><span aria-hidden="true">⌁</span> Deep research plan</div>
+                  <p>We’ll investigate these topics, then consolidate the evidence into a report.</p>
+                  <ol>{assistantMessage.deepResearchPlan.items.map((item) => <li key={item.id}><strong>{item.title}</strong><span>{item.question}</span></li>)}</ol>
+                  {assistantMessage.status === "complete" && assistantMessage.jobId && (
+                    <div className="deep-research-plan-actions">
+                      <button type="button" onClick={() => void resumeChatJob(conversationId, assistantMessage.jobId!).then(() => window.location.reload())}>Proceed</button>
+                      <button type="button" className="secondary" onClick={() => void cancelChatJob(conversationId, assistantMessage.jobId!).then(() => onEdit(turn))}>Revise</button>
+                    </div>
+                  )}
+                </div>
+              )}
               {assistantMessage.content ? (
                 <AssistantResponse content={assistantMessage.content}
                   annotations={assistantMessage.annotations}

@@ -159,6 +159,18 @@
   opacity: .42;
 }
 
+.deep-research-plan { margin-bottom: 12px; border: 1px solid rgba(170, 105, 255, .28); border-radius: 12px; background: rgba(100, 56, 150, .1); padding: 12px; }
+.deep-research-plan-title { color: #d6b8ff; font-size: 13px; font-weight: 700; }
+.deep-research-plan p { margin: 6px 0 10px; color: var(--muted); font-size: 12px; }
+.deep-research-plan ol { margin: 0; padding-left: 22px; color: var(--muted); font-size: 12px; }
+.deep-research-plan li { margin: 7px 0; padding-left: 3px; }
+.deep-research-plan li strong, .deep-research-plan li span { display: block; }
+.deep-research-plan li strong { color: var(--text); font-size: 12px; }
+.deep-research-plan li span { margin-top: 2px; color: var(--quiet); line-height: 1.35; }
+.deep-research-plan-actions { display: flex; gap: 7px; margin-top: 12px; }
+.deep-research-plan-actions button { border: 1px solid #8f4ed5; border-radius: 8px; background: #7b32c9; padding: 6px 11px; color: white; cursor: pointer; font-size: 12px; }
+.deep-research-plan-actions button.secondary { border-color: #4e3b68; background: transparent; color: var(--muted); }
+
 .response-tps {
   padding: 4px 8px;
   color: var(--quiet);

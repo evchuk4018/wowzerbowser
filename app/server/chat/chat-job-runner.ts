@@ -8,7 +8,7 @@ import type {
 } from "../../../lib/chat-protocol";
 import { generateChatResponse } from "../../chat/chat-server-service";
 import { recordUsage } from "../usage/usage-store";
-import { claimChatJob, createChatJobEventWriter, finishChatJob, renewChatJob, type ChatJobClaim } from "./chat-job-store";
+import { claimChatJob, createChatJobEventWriter, finishChatJob, renewChatJob, saveChatJobResearchPlan, setChatJobAwaitingApproval, type ChatJobClaim } from "./chat-job-store";
 import { createChatEventCoalescer } from "./chat-event-coalescer";
 import { CHAT_JOB_HEARTBEAT_MS } from "./chat-job-lease";
 import type { ChatCitation, ChatSource } from "../../../lib/chat-citations";
@@ -88,6 +88,7 @@ export async function runClaimedChatJob(
   let roundLastOutputAt: number | null = null;
   let annotations: ChatCitation[] = [];
   let sources: ChatSource[] = [];
+  let researchPlan: import("../../../lib/chat-protocol").DeepResearchPlan | null = null;
   const publishEvent = (event: ChatStreamEvent): void => {
     const sequence = nextEventIndex;
     nextEventIndex += 1;
@@ -112,6 +113,7 @@ export async function runClaimedChatJob(
     }
     if (event.type === "content") output += event.delta;
     if (event.type === "annotations") { annotations = event.annotations; sources = event.sources; }
+    if (event.type === "deep_research_plan") researchPlan = event.plan;
     if (event.type === "done") usage = event.usage;
     if (event.type === "error") generationError = event.message;
   };
@@ -154,7 +156,7 @@ export async function runClaimedChatJob(
     providerMetrics: responseMetrics(),
   });
   try {
-    await generateChatResponse(
+    const generation = await generateChatResponse(
       request,
       ownerId,
       controller.signal,
@@ -202,6 +204,11 @@ export async function runClaimedChatJob(
       },
     );
     await drainEventPipelines();
+    if (!controller.signal.aborted && generation.awaitingApproval) {
+      if (researchPlan) await saveChatJobResearchPlan(ownerId, claim.conversationId, claim.jobId, researchPlan);
+      await setChatJobAwaitingApproval(ownerId, claim.conversationId, claim.jobId, leaseToken);
+      return terminalResponse("awaiting_approval", null);
+    }
     if (!controller.signal.aborted) {
       const status = generationError ? "failed" : "completed";
       const applied = await finishChatJob(ownerId, claim.conversationId, claim.jobId, leaseToken, status, { error: generationError, usage, finalOutput: output, providerMetrics: responseMetrics() });

@@ -22,6 +22,7 @@ import {
 import { validateChatDocument, type PendingChatDocument } from "./chat-document-attachments";
 import { DOCX_CONTENT_TYPE, DOCUMENT_CONTENT_TYPES, type ChatDocumentAttachment } from "../../lib/chat-document";
 import type { TodoList } from "../../lib/todo-protocol";
+import { CHAT_MODE_COMMANDS, parseChatModeCommand, type ChatMode } from "../../lib/chat-modes";
 
 function formatDocumentSize(size: number): string {
   if (size < 1024) return `${size} B`;
@@ -85,6 +86,8 @@ export type ChatComposerProps = {
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onStop: () => void;
   todos?: TodoList;
+  mode: ChatMode;
+  setMode: Dispatch<SetStateAction<ChatMode>>;
 };
 
 function TodoBar({ todos }: { todos?: TodoList }) {
@@ -144,6 +147,8 @@ export function ChatComposer({
   onKeyDown,
   onStop,
   todos,
+  mode,
+  setMode,
 }: ChatComposerProps) {
   const [attachments, setAttachments] = useState<PendingChatImage[]>([]);
   const [documents, setDocuments] = useState<PendingChatDocument[]>([]);
@@ -153,6 +158,7 @@ export function ChatComposer({
   const attachmentsRef = useRef(attachments);
   const documentsRef = useRef(documents);
   const disabled = isStreaming || isSubmittingAttachments || startupPending;
+  const [commandMenuOpen, setCommandMenuOpen] = useState(false);
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -414,7 +420,11 @@ export function ChatComposer({
           aria-label="Message"
           placeholder="Message"
           disabled={isSubmittingAttachments}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => {
+            const next = event.target.value;
+            setDraft(next);
+            setCommandMenuOpen(/^\s*\/$/.test(next) || /^\s*\/\w/.test(next));
+          }}
           onKeyDown={(event) => {
             if (event.key === "Escape" && expanded) {
               event.preventDefault();
@@ -453,6 +463,29 @@ export function ChatComposer({
           >
             +
           </button>
+          {commandMenuOpen && !disabled && (
+            <div className="composer-command-popover" role="listbox" aria-label="Commands">
+              <div className="composer-command-heading">Commands</div>
+              {CHAT_MODE_COMMANDS.filter((item) => item.command.startsWith(draft.trim().toLowerCase()) || draft.trim() === "/").map((item) => (
+                <button
+                  type="button"
+                  className={`composer-command-option ${mode === item.mode ? "selected" : ""}`}
+                  key={item.command}
+                  onClick={() => {
+                    setMode(item.mode);
+                    const parsed = parseChatModeCommand(draft);
+                    setDraft(parsed.content);
+                    setCommandMenuOpen(false);
+                    requestAnimationFrame(() => textareaRef.current?.focus());
+                  }}
+                >
+                  <span className="composer-command-icon" aria-hidden="true">⌁</span>
+                  <span><strong>{item.label}</strong><small>{item.description}</small></span>
+                </button>
+              ))}
+            </div>
+          )}
+          {mode === "deep_research" && <span className="composer-mode-chip">Deep research</span>}
           <div className="composer-action-spacer" />
           <div className="composer-menu">
             <button

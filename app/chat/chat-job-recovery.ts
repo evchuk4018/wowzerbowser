@@ -83,6 +83,19 @@ export async function recoverPersistedJob({
       continue;
     }
     try {
+      let existing: ChatJobResumeResponse | null = null;
+      try { existing = await fetchJob(candidate.conversationId, candidate.message.jobId, after, signal); } catch {}
+      if (existing?.status === "awaiting_approval") {
+        for (const event of existing.events) {
+          if (!isSequencedEvent(event) || event.sequence <= after) continue;
+          after = event.sequence;
+          currentMessage = applyChatStreamEvent(currentMessage, event, event.sequence);
+          dispatch({ type: "UPDATE_MESSAGE", conversationId: candidate.conversationId, messageId: candidate.message.id, patch: currentMessage });
+        }
+        dispatch({ type: "UPDATE_MESSAGE", conversationId: candidate.conversationId, messageId: candidate.message.id, patch: { status: "complete" } });
+        onConversationStreamingChange?.(candidate.conversationId, false);
+        return;
+      }
       await resumeJob(candidate.conversationId, candidate.message.jobId);
     } catch {
       if (!(await waitForRetry(signal, retryAttempt++))) return;

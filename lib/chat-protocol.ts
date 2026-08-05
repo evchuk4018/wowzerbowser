@@ -249,6 +249,9 @@ export type ChatRequest = {
   thinking: boolean;
   reasoningEffort: ChatReasoningEffort;
   contextMode: "full" | "focused";
+  mode?: "normal" | "deep_research";
+  deepResearchPhase?: "plan" | "execute";
+  deepResearchPlan?: DeepResearchPlan;
   /** Stable client-generated id used to persist the execution volume. */
   conversationId?: string;
   /** Client-generated response identifier and idempotency key. */
@@ -323,6 +326,19 @@ export type ChatModelInfo = {
   pricing: ChatModelPricing | null;
 };
 
+export type DeepResearchPlanItem = {
+  id: string;
+  title: string;
+  question: string;
+  focus: string;
+};
+
+export type DeepResearchPlan = {
+  id: string;
+  request: string;
+  items: DeepResearchPlanItem[];
+};
+
 export type ChatModelPricing = {
   inputUsdPerMillion: number | null;
   cachedInputUsdPerMillion: number | null;
@@ -333,6 +349,8 @@ export type ChatModelPricing = {
 
 export type ChatStreamEvent =
   | { type: "todo_update"; todos: TodoList }
+  | { type: "deep_research_plan"; plan: DeepResearchPlan }
+  | { type: "subagent_update"; taskId: string; status: "queued" | "running" | "completed" | "failed"; title: string; summary?: string }
   | { type: "round"; round: number }
   | { type: "reasoning"; delta: string }
   | { type: "reasoning_details"; details: unknown[] }
@@ -861,6 +879,29 @@ export function parseChatRequest(value: unknown): ChatRequest {
     throw new ChatRequestValidationError("reasoningEffort is invalid.");
   }
 
+  const mode = value.mode === undefined ? "normal" : value.mode;
+  if (mode !== "normal" && mode !== "deep_research") throw new ChatRequestValidationError("mode is invalid.");
+  const deepResearchPhase = value.deepResearchPhase === undefined ? undefined : value.deepResearchPhase;
+  if (deepResearchPhase !== undefined && deepResearchPhase !== "plan" && deepResearchPhase !== "execute") {
+    throw new ChatRequestValidationError("deepResearchPhase is invalid.");
+  }
+  let deepResearchPlan: DeepResearchPlan | undefined;
+  if (value.deepResearchPlan !== undefined) {
+    if (!isRecord(value.deepResearchPlan) || typeof value.deepResearchPlan.id !== "string" || typeof value.deepResearchPlan.request !== "string" || !Array.isArray(value.deepResearchPlan.items)) {
+      throw new ChatRequestValidationError("deepResearchPlan is invalid.");
+    }
+    deepResearchPlan = {
+      id: value.deepResearchPlan.id.slice(0, 128),
+      request: value.deepResearchPlan.request.slice(0, 20_000),
+      items: value.deepResearchPlan.items.slice(0, 10).map((item, index) => {
+        if (!isRecord(item) || typeof item.id !== "string" || typeof item.title !== "string" || typeof item.question !== "string" || typeof item.focus !== "string") {
+          throw new ChatRequestValidationError(`deepResearchPlan.items[${index}] is invalid.`);
+        }
+        return { id: item.id.slice(0, 128), title: item.title.slice(0, 300), question: item.question.slice(0, 2000), focus: item.focus.slice(0, 1000) };
+      }),
+    };
+  }
+
   let conversationId: string | undefined;
   if (value.conversationId !== undefined) {
     if (typeof value.conversationId !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(value.conversationId)) {
@@ -913,6 +954,9 @@ export function parseChatRequest(value: unknown): ChatRequest {
     thinking: value.thinking,
     reasoningEffort: value.reasoningEffort as ChatReasoningEffort,
     contextMode,
+    mode,
+    ...(deepResearchPhase === undefined ? {} : { deepResearchPhase }),
+    ...(deepResearchPlan === undefined ? {} : { deepResearchPlan }),
     conversationId,
     jobId,
     idempotencyKey,

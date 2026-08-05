@@ -6,6 +6,7 @@ import type {
   ChatToolResult,
   ChatStreamEvent,
   ChatStreamMetrics,
+  DeepResearchPlan,
 } from "./chat-protocol";
 import type { ChatCitation, ChatSource } from "./chat-citations";
 import type { TodoList } from "./todo-protocol";
@@ -79,6 +80,7 @@ export type ChatHistoryMessage = {
   sources?: ChatSource[];
   todos?: TodoList;
   connectorApproval?: ConnectorApprovalSummary;
+  deepResearchPlan?: DeepResearchPlan;
 };
 
 export type ChatTurnVersion = {
@@ -218,6 +220,8 @@ export function applyChatStreamEvent(
     next.activities = activities;
   } else if (event.type === "todo_update") {
     next.todos = event.todos;
+  } else if (event.type === "deep_research_plan") {
+    next.deepResearchPlan = event.plan;
   } else if (event.type === "phase_summary") {
     next.activities = next.activities?.map((activity) =>
       activity.kind === "reasoning" && activity.phase === event.phase && (activity.summaryRevision ?? -1) <= event.revision

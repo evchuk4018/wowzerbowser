@@ -71,6 +71,10 @@ export function reduceChatStreamEvent(
     case "todo_update":
       waiting = false;
       break;
+    case "deep_research_plan":
+    case "subagent_update":
+      waiting = false;
+      break;
     case "error":
       waiting = false;
       streamError = true;

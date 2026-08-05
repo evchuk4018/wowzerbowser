@@ -278,6 +278,7 @@ export function normalizeStoredMessage(
   }
   if (typeof candidate.error === "string") message.error = candidate.error;
   if (candidate.todos && typeof candidate.todos === "object") message.todos = normalizeTodoList(candidate.todos);
+  if (candidate.deepResearchPlan && typeof candidate.deepResearchPlan === "object") message.deepResearchPlan = candidate.deepResearchPlan as Message["deepResearchPlan"];
   if (typeof candidate.jobId === "string" && candidate.jobId.length > 0) message.jobId = candidate.jobId;
   const lastSequence = finiteNumber(candidate.lastSequence);
   if (lastSequence !== undefined && lastSequence >= 0) message.lastSequence = lastSequence;

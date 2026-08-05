@@ -3,7 +3,7 @@ import { encodeChatLiveEnvelope } from "./encode-chat-live-envelope";
 import { getChatJob } from "./chat-job-store";
 import { subscribeToChatJobEvents } from "./chat-live-notifier";
 
-const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
+const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "awaiting_approval"]);
 const LIVE_HEARTBEAT_MS = 15_000;
 
 function waitFor(milliseconds: number, signal: AbortSignal): Promise<void> {
@@ -25,7 +25,7 @@ function waitFor(milliseconds: number, signal: AbortSignal): Promise<void> {
 function terminalFor(snapshot: ChatJobResumeResponse): ChatJobTerminalResponse {
   return {
     jobId: snapshot.jobId,
-    status: snapshot.status as "completed" | "failed" | "cancelled",
+    status: snapshot.status,
     error: snapshot.error,
     usage: snapshot.usage,
     ...(snapshot.providerMetrics ? { providerMetrics: snapshot.providerMetrics } : {}),

@@ -48,6 +48,7 @@ import {
   type PendingChatDocument,
 } from "./chat-document-attachments";
 import type { ChatDocumentAttachment } from "../../lib/chat-document";
+import type { ChatMode } from "../../lib/chat-modes";
 
 export type ActiveChatRequest = {
   conversationId: string;
@@ -67,6 +68,7 @@ export type ChatGenerationOptions = {
   model: ChatModelRef;
   thinking: boolean;
   reasoningEffort: ChatReasoningEffort;
+  mode: ChatMode;
   hasSession: () => Promise<boolean>;
   dispatch: Dispatch<ConversationAction>;
   /** Clear the composer after a prompt is accepted. */
@@ -84,6 +86,7 @@ export type SendMessage = (
   preservedAttachments?: readonly UploadedChatImage[],
   documents?: readonly PendingChatDocument[],
   preservedDocuments?: readonly ChatDocumentAttachment[],
+  requestedMode?: ChatMode,
 ) => Promise<void>;
 
 export type ChatGenerationResult = {
@@ -108,6 +111,7 @@ type GenerationInput = {
   model: ChatModelRef;
   thinking: boolean;
   reasoningEffort: ChatReasoningEffort;
+  mode: ChatMode;
   hasSession: () => Promise<boolean>;
   dispatch: Dispatch<ConversationAction>;
   onDraftConsumed?: () => void;
@@ -146,6 +150,7 @@ export function buildChatGenerationRequest(input: {
   model: ChatModelRef;
   thinking: boolean;
   reasoningEffort: ChatReasoningEffort;
+  mode: ChatMode;
   attachments?: UploadedChatImage[];
   documents?: ChatDocumentAttachment[];
 }): ChatRequest {
@@ -177,6 +182,8 @@ export function buildChatGenerationRequest(input: {
     model: input.model,
     thinking: input.thinking,
     reasoningEffort: input.reasoningEffort,
+    mode: input.mode,
+    ...(input.mode === "deep_research" ? { deepResearchPhase: "plan" as const } : {}),
     contextMode: input.settings.focusedContextEnabled ? "focused" : "full",
     conversationId: input.conversation.id,
     jobId: input.jobId,
@@ -257,6 +264,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     preservedAttachments = [],
     pendingDocuments = [],
     preservedDocuments = [],
+    requestedMode,
   ) => {
     const input = optionsRef.current;
     const authoredContent = rawContent.trim();
@@ -465,6 +473,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         settings: input.settings,
         model: input.model,
         thinking: input.thinking,
+        mode: requestedMode ?? input.mode,
         reasoningEffort: input.reasoningEffort,
         attachments: uploadedImages,
         documents: uploadedDocuments,

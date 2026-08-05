@@ -1,7 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import type { ChatJobResumeResponse, ChatJobStatus, ChatRequest, ChatStreamEvent, ChatStreamMetrics, ChatUsage } from "../../../lib/chat-protocol";
+import type { ChatJobResumeResponse, ChatJobStatus, ChatRequest, ChatStreamEvent, ChatStreamMetrics, ChatUsage, DeepResearchPlan } from "../../../lib/chat-protocol";
 import { databaseOwnerId, isoTimestamp, jsonb, query } from "../database/database";
 import { createAsyncBatchWriter, type AsyncBatchWriter } from "./chat-event-writer";
 import { authoritativeAttachmentsForSubmission } from "./chat-history-store";
@@ -188,12 +188,16 @@ export async function cancelChatJobsForConversation(ownerId: string, conversatio
   await Promise.all(rows.map((row) => cancelChatJob(ownerId, conversationId, row.job_id)));
 }
 
-export async function setChatJobAwaitingApproval(ownerId: string, conversationId: string, jobId: string): Promise<void> {
-  await query("update chat_jobs set status='awaiting_approval',updated_at=$1 where owner_id=$2 and conversation_id=$3 and job_id=$4 and status='running'", [new Date().toISOString(), databaseOwnerId(ownerId), conversationId, jobId]);
+export async function setChatJobAwaitingApproval(ownerId: string, conversationId: string, jobId: string, leaseToken?: string): Promise<void> {
+  await query("update chat_jobs set status='awaiting_approval',lease_expires_at=null,lease_token=null,heartbeat_at=$1,updated_at=$1 where owner_id=$2 and conversation_id=$3 and job_id=$4 and status='running' and ($5::uuid is null or lease_token=$5::uuid)", [new Date().toISOString(), databaseOwnerId(ownerId), conversationId, jobId, leaseToken ?? null]);
+}
+
+export async function saveChatJobResearchPlan(ownerId: string, conversationId: string, jobId: string, plan: DeepResearchPlan): Promise<void> {
+  await query("update chat_jobs set request=jsonb_set(request,'{deepResearchPlan}', $1::jsonb, true),updated_at=$2 where owner_id=$3 and conversation_id=$4 and job_id=$5 and status='running'", [jsonb(plan), new Date().toISOString(), databaseOwnerId(ownerId), conversationId, jobId]);
 }
 
 export async function resumeChatJobAfterApproval(ownerId: string, conversationId: string, jobId: string): Promise<void> {
-  await query("update chat_jobs set status='running',updated_at=$1 where owner_id=$2 and conversation_id=$3 and job_id=$4 and status='awaiting_approval'", [new Date().toISOString(), databaseOwnerId(ownerId), conversationId, jobId]);
+  await query("update chat_jobs set status='queued',request=jsonb_set(request,'{deepResearchPhase}','\"execute\"'::jsonb,true),updated_at=$1 where owner_id=$2 and conversation_id=$3 and job_id=$4 and status='awaiting_approval'", [new Date().toISOString(), databaseOwnerId(ownerId), conversationId, jobId]);
 }
 
 export async function deleteChatJobsForConversation(ownerId: string, conversationId: string): Promise<void> {
