@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseChatModeCommand } from "../lib/chat-modes.ts";
+import { chatModeCommandAtCaret, parseChatModeCommand } from "../lib/chat-modes.ts";
 import { runSubagents } from "../app/server/agent/subagent-coordinator.ts";
 
 test("deep research slash command is extracted from the prompt", () => {
@@ -9,6 +9,27 @@ test("deep research slash command is extracted from the prompt", () => {
     content: "compare battery technologies",
   });
   assert.deepEqual(parseChatModeCommand("ordinary question"), { mode: "normal", content: "ordinary question" });
+});
+
+test("deep research slash command is extracted from anywhere in a prompt", () => {
+  assert.deepEqual(parseChatModeCommand("compare /deep-research battery technologies"), {
+    mode: "deep_research",
+    content: "compare battery technologies",
+  });
+  assert.deepEqual(parseChatModeCommand("CHECK /DEEP-RESEARCH this"), {
+    mode: "deep_research",
+    content: "CHECK this",
+  });
+  assert.deepEqual(parseChatModeCommand("https://example.test/deep-research is a URL"), {
+    mode: "normal",
+    content: "https://example.test/deep-research is a URL",
+  });
+});
+
+test("command autocomplete finds a standalone slash token at the caret", () => {
+  assert.deepEqual(chatModeCommandAtCaret("compare /deep", 13), { start: 8, end: 13, query: "/deep" });
+  assert.deepEqual(chatModeCommandAtCaret("compare /deep battery", 13), { start: 8, end: 13, query: "/deep" });
+  assert.equal(chatModeCommandAtCaret("compare/deep", 12), null);
 });
 
 test("subagent coordinator runs bounded work and preserves task order", async () => {

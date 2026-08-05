@@ -22,7 +22,7 @@ import {
 import { validateChatDocument, type PendingChatDocument } from "./chat-document-attachments";
 import { DOCX_CONTENT_TYPE, DOCUMENT_CONTENT_TYPES, type ChatDocumentAttachment } from "../../lib/chat-document";
 import type { TodoList } from "../../lib/todo-protocol";
-import { CHAT_MODE_COMMANDS, parseChatModeCommand, type ChatMode } from "../../lib/chat-modes";
+import { CHAT_MODE_COMMANDS, chatModeCommandAtCaret, type ChatMode } from "../../lib/chat-modes";
 
 function formatDocumentSize(size: number): string {
   if (size < 1024) return `${size} B`;
@@ -159,6 +159,7 @@ export function ChatComposer({
   const documentsRef = useRef(documents);
   const disabled = isStreaming || isSubmittingAttachments || startupPending;
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
+  const [commandToken, setCommandToken] = useState<{ start: number; end: number; query: string } | null>(null);
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -423,7 +424,9 @@ export function ChatComposer({
           onChange={(event) => {
             const next = event.target.value;
             setDraft(next);
-            setCommandMenuOpen(/^\s*\/$/.test(next) || /^\s*\/\w/.test(next));
+            const token = chatModeCommandAtCaret(next, event.target.selectionStart);
+            setCommandToken(token);
+            setCommandMenuOpen(Boolean(token));
           }}
           onKeyDown={(event) => {
             if (event.key === "Escape" && expanded) {
@@ -463,20 +466,27 @@ export function ChatComposer({
           >
             +
           </button>
-          {commandMenuOpen && !disabled && (
+          {commandMenuOpen && commandToken && !disabled && (
             <div className="composer-command-popover" role="listbox" aria-label="Commands">
               <div className="composer-command-heading">Commands</div>
-              {CHAT_MODE_COMMANDS.filter((item) => item.command.startsWith(draft.trim().toLowerCase()) || draft.trim() === "/").map((item) => (
+              {CHAT_MODE_COMMANDS.filter((item) => item.command.startsWith(commandToken.query)).map((item) => (
                 <button
                   type="button"
                   className={`composer-command-option ${mode === item.mode ? "selected" : ""}`}
                   key={item.command}
                   onClick={() => {
                     setMode(item.mode);
-                    const parsed = parseChatModeCommand(draft);
-                    setDraft(parsed.content);
+                    const nextDraft = `${draft.slice(0, commandToken.start)}${item.command} ${draft.slice(commandToken.end)}`;
+                    setDraft(nextDraft);
+                    setCommandToken(null);
                     setCommandMenuOpen(false);
-                    requestAnimationFrame(() => textareaRef.current?.focus());
+                    requestAnimationFrame(() => {
+                      const textarea = textareaRef.current;
+                      if (!textarea) return;
+                      textarea.focus();
+                      const caret = commandToken.start + item.command.length + 1;
+                      textarea.setSelectionRange(caret, caret);
+                    });
                   }}
                 >
                   <span className="composer-command-icon" aria-hidden="true">⌁</span>
