@@ -75,6 +75,24 @@ test("attachment-free submission and claim use one atomic RPC", async () => {
   assert.doesNotMatch(route, /claimedRequest/);
 });
 
+test("chat response metrics are durable across job and message finalization", async () => {
+  const [migration, store, history, protocol] = await Promise.all([
+    source("database/migrations/012_chat_response_metrics.sql"),
+    source("app/server/chat/chat-job-store.ts"),
+    source("app/server/chat/chat-history-store.ts"),
+    source("lib/chat-protocol.ts"),
+  ]);
+  assert.match(migration, /add column if not exists provider_metrics jsonb/);
+  assert.match(migration, /add column if not exists stream_metrics jsonb/);
+  assert.match(migration, /p_provider_metrics jsonb/);
+  assert.match(migration, /stream_metrics=case/);
+  assert.match(store, /provider_metrics/);
+  assert.match(store, /providerMetrics/);
+  assert.match(history, /stream_metrics/);
+  assert.match(history, /streamMetrics/);
+  assert.match(protocol, /type ChatStreamMetrics/);
+});
+
 test("replay is ordered, exclusive, and owner isolated", async () => {
   const store = await source("app/server/chat/chat-job-store.ts");
   assert.match(store, /where owner_id=\$1/);

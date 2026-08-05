@@ -1,7 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import type { ChatJobResumeResponse, ChatJobStatus, ChatRequest, ChatStreamEvent, ChatUsage } from "../../../lib/chat-protocol";
+import type { ChatJobResumeResponse, ChatJobStatus, ChatRequest, ChatStreamEvent, ChatStreamMetrics, ChatUsage } from "../../../lib/chat-protocol";
 import { databaseOwnerId, isoTimestamp, jsonb, query } from "../database/database";
 import { createAsyncBatchWriter, type AsyncBatchWriter } from "./chat-event-writer";
 import { authoritativeAttachmentsForSubmission } from "./chat-history-store";
@@ -126,10 +126,10 @@ export function createChatJobEventWriter(
   );
 }
 
-export async function finishChatJob(ownerId: string, conversationId: string, jobId: string, leaseToken: string, status: ChatJobStatus, values: { error?: string | null; usage?: ChatUsage | null; finalOutput?: string | null } = {}) {
+export async function finishChatJob(ownerId: string, conversationId: string, jobId: string, leaseToken: string, status: ChatJobStatus, values: { error?: string | null; usage?: ChatUsage | null; finalOutput?: string | null; providerMetrics?: ChatStreamMetrics | null } = {}) {
   const [row] = await withChatPersistenceRetry(() => query<RpcRow>(
-    "select complete_chat_job_and_finalize_message($1,$2,$3,$4::uuid,$5,$6,$7::jsonb,$8) as result",
-    [databaseOwnerId(ownerId), conversationId, jobId, leaseToken, status, values.error ?? null, jsonb(values.usage ?? null), values.finalOutput ?? null],
+    "select complete_chat_job_and_finalize_message($1,$2,$3,$4::uuid,$5,$6,$7::jsonb,$8,$9::jsonb) as result",
+    [databaseOwnerId(ownerId), conversationId, jobId, leaseToken, status, values.error ?? null, jsonb(values.usage ?? null), values.finalOutput ?? null, jsonb(values.providerMetrics ?? null)],
   ));
   return Boolean((row.result as { applied?: boolean } | null)?.applied);
 }
@@ -137,8 +137,8 @@ export async function finishChatJob(ownerId: string, conversationId: string, job
 export async function getChatJob(ownerId: string, conversationId: string, jobId: string, after = 0): Promise<ChatJobResumeResponse | null> {
   const databaseOwner = databaseOwnerId(ownerId);
   const [jobRows, eventRows] = await Promise.all([
-    query<{ job_id: string; conversation_id: string; status: ChatJobStatus; error: string | null; usage: unknown; final_output: string | null; created_at: unknown; updated_at: unknown }>(
-      "select job_id,conversation_id,status,error,usage,final_output,created_at,updated_at from chat_jobs where owner_id=$1 and conversation_id=$2 and job_id=$3",
+    query<{ job_id: string; conversation_id: string; status: ChatJobStatus; error: string | null; usage: unknown; provider_metrics: unknown; final_output: string | null; created_at: unknown; updated_at: unknown }>(
+      "select job_id,conversation_id,status,error,usage,provider_metrics,final_output,created_at,updated_at from chat_jobs where owner_id=$1 and conversation_id=$2 and job_id=$3",
       [databaseOwner, conversationId, jobId],
     ),
     query<{ event_index: number | string; event: ChatStreamEvent }>(
@@ -164,6 +164,7 @@ export async function getChatJob(ownerId: string, conversationId: string, jobId:
     lastSequence: events.at(-1)?.sequence ?? after,
     error: job.error,
     usage: job.usage as ChatUsage | null,
+    providerMetrics: job.provider_metrics as ChatStreamMetrics | null,
     finalOutput: job.final_output,
     ...(annotationEvent?.type === "annotations" ? { annotations: annotationEvent.annotations, sources: annotationEvent.sources } : {}),
     createdAt: isoTimestamp(job.created_at),

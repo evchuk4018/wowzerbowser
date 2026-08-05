@@ -159,6 +159,14 @@
   opacity: .42;
 }
 
+.response-tps {
+  padding: 4px 8px;
+  color: var(--quiet);
+  font-size: 11px;
+  line-height: 24px;
+  white-space: nowrap;
+}
+
 .response-action-icon {
   width: 16px;
   height: 16px;

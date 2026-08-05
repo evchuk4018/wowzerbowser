@@ -2,6 +2,7 @@ import "server-only";
 import type {
   ChatJobTerminalResponse,
   ChatStreamEvent,
+  ChatStreamMetrics,
   ChatUsage,
   SequencedChatStreamEvent,
 } from "../../../lib/chat-protocol";
@@ -129,28 +130,29 @@ export async function runClaimedChatJob(
     }
     if (firstError !== null) throw firstError;
   };
-  const terminalResponse = (status: ChatJobTerminalResponse["status"], error: string | null): ChatJobTerminalResponse => {
+  const responseMetrics = (): ChatStreamMetrics => {
     const completionTokens = usage?.completionTokens ?? null;
     const currentRoundWindowMs = roundFirstOutputAt === null || roundLastOutputAt === null
       ? 0
       : Math.max(0, roundLastOutputAt - roundFirstOutputAt);
     const outputWindowMs = completedProviderOutputWindowMs + currentRoundWindowMs || null;
     return {
-      jobId: claim.jobId,
-      status,
-      error,
-      usage,
-      finalOutput: output,
-      ...(annotations.length ? { annotations, sources } : {}),
-      providerMetrics: {
-        completionTokens,
-        outputWindowMs,
-        outputTps: completionTokens !== null && outputWindowMs !== null && outputWindowMs > 0
-          ? completionTokens / (outputWindowMs / 1000)
-          : null,
-      },
+      completionTokens,
+      outputWindowMs,
+      outputTps: completionTokens !== null && outputWindowMs !== null && outputWindowMs > 0
+        ? completionTokens / (outputWindowMs / 1000)
+        : null,
     };
   };
+  const terminalResponse = (status: ChatJobTerminalResponse["status"], error: string | null): ChatJobTerminalResponse => ({
+    jobId: claim.jobId,
+    status,
+    error,
+    usage,
+    finalOutput: output,
+    ...(annotations.length ? { annotations, sources } : {}),
+    providerMetrics: responseMetrics(),
+  });
   try {
     await generateChatResponse(
       request,
@@ -202,7 +204,7 @@ export async function runClaimedChatJob(
     await drainEventPipelines();
     if (!controller.signal.aborted) {
       const status = generationError ? "failed" : "completed";
-      const applied = await finishChatJob(ownerId, claim.conversationId, claim.jobId, leaseToken, status, { error: generationError, usage, finalOutput: output });
+      const applied = await finishChatJob(ownerId, claim.conversationId, claim.jobId, leaseToken, status, { error: generationError, usage, finalOutput: output, providerMetrics: responseMetrics() });
       return applied ? terminalResponse(status, generationError) : null;
     }
     return cancellationObserved ? terminalResponse("cancelled", null) : null;
@@ -212,7 +214,7 @@ export async function runClaimedChatJob(
     if (controller.signal.aborted) {
       return cancellationObserved ? terminalResponse("cancelled", null) : null;
     }
-    const applied = await finishChatJob(ownerId, claim.conversationId, claim.jobId, leaseToken, "failed", { error: message, usage, finalOutput: output });
+    const applied = await finishChatJob(ownerId, claim.conversationId, claim.jobId, leaseToken, "failed", { error: message, usage, finalOutput: output, providerMetrics: responseMetrics() });
     return applied ? terminalResponse("failed", message) : null;
   } finally {
     await drainEventPipelines().catch(() => undefined);

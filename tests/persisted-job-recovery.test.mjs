@@ -81,6 +81,24 @@ test("retries when the session is temporarily unavailable", async () => {
   assert.equal(actions[0].type, "MARK_MESSAGE_COMPLETE");
 });
 
+test("restores response metrics when a completed job is recovered", async () => {
+  const controller = new AbortController();
+  const actions = [];
+  await recoverPersistedJob({
+    candidate,
+    signal: controller.signal,
+    hasSession: async () => true,
+    dispatch: (action) => actions.push(action),
+    resumeJob: async () => undefined,
+    waitForRetry: async () => true,
+    fetchJob: async () => ({
+      ...completedSnapshot,
+      providerMetrics: { completionTokens: 12, outputWindowMs: 600, outputTps: 20 },
+    }),
+  });
+  assert.deepEqual(actions[0].streamMetrics, { completionTokens: 12, outputWindowMs: 600, outputTps: 20 });
+});
+
 test("retries a transient job snapshot failure instead of leaving streaming stuck", async () => {
   const controller = new AbortController();
   let fetches = 0;

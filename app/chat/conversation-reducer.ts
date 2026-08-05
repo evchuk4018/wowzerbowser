@@ -257,6 +257,7 @@ export function conversationReducer(
         (message) => ({
           ...message,
           ...(typeof action.finalOutput === "string" ? { content: action.finalOutput } : {}),
+          ...(action.streamMetrics ? { streamMetrics: action.streamMetrics } : {}),
           status: "complete",
           error: undefined,
         }),

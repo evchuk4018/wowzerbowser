@@ -277,6 +277,7 @@ export type ChatJobResumeResponse = {
   lastSequence: number;
   error: string | null;
   usage: ChatUsage | null;
+  providerMetrics?: ChatStreamMetrics | null;
   finalOutput: string | null;
   annotations?: ChatCitation[];
   sources?: ChatSource[];
@@ -352,6 +353,7 @@ export type ChatStreamEvent =
       tools?: string[];
     }
   | { type: "done"; usage: ChatUsage | null; provider?: ChatProvider; model?: string; exactCostUsd?: number; pricing?: ChatModelPricing | null }
+  | { type: "metrics"; metrics: ChatStreamMetrics }
   | { type: "cancelled" }
   | { type: "error"; message: string };
 

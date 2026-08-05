@@ -5,6 +5,7 @@ import type {
   ChatToolCall,
   ChatToolResult,
   ChatStreamEvent,
+  ChatStreamMetrics,
 } from "./chat-protocol";
 import type { ChatCitation, ChatSource } from "./chat-citations";
 import type { TodoList } from "./todo-protocol";
@@ -67,6 +68,7 @@ export type ChatHistoryMessage = {
   artifacts?: ChatArtifact[];
   thinkingEnabled?: boolean;
   thinkingDurationMs?: number;
+  streamMetrics?: ChatStreamMetrics;
   status?: ChatMessageStatus;
   error?: string;
   jobId?: string;
@@ -289,6 +291,8 @@ export function applyChatStreamEvent(
     next.activities = finishRunningActivities(next.activities, true, now);
   } else if (event.type === "done") {
     next.activities = finishRunningActivities(next.activities, true, now);
+  } else if (event.type === "metrics") {
+    next.streamMetrics = event.metrics;
   } else if (event.type === "connector_approval") {
     next.connectorApproval = event.approval;
   }
@@ -298,7 +302,7 @@ export function applyChatStreamEvent(
 export function finalizeChatHistoryMessage(
   message: ChatHistoryMessage,
   status: ChatMessageStatus,
-  values: { error?: string | null; finalOutput?: string | null } = {},
+  values: { error?: string | null; finalOutput?: string | null; streamMetrics?: ChatStreamMetrics | null } = {},
   now = Date.now(),
 ): ChatHistoryMessage {
   const reasoningDuration = (message.activities ?? [])
@@ -309,6 +313,7 @@ export function finalizeChatHistoryMessage(
     content: values.finalOutput ?? message.content,
     status,
     error: values.error ?? message.error,
+    ...(values.streamMetrics ? { streamMetrics: values.streamMetrics } : {}),
     ...(message.thinkingDurationMs === undefined && reasoningDuration > 0
       ? { thinkingDurationMs: reasoningDuration }
       : {}),

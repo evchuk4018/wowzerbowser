@@ -85,6 +85,7 @@ export type MarkMessageCompleteAction = {
   conversationId: string;
   messageId: string;
   finalOutput?: string | null;
+  streamMetrics?: ChatHistoryMessage["streamMetrics"];
 };
 
 export type MarkMessageCancelledAction = {

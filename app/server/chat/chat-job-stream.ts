@@ -28,6 +28,7 @@ function terminalFor(snapshot: ChatJobResumeResponse): ChatJobTerminalResponse {
     status: snapshot.status as "completed" | "failed" | "cancelled",
     error: snapshot.error,
     usage: snapshot.usage,
+    ...(snapshot.providerMetrics ? { providerMetrics: snapshot.providerMetrics } : {}),
     finalOutput: snapshot.finalOutput ?? "",
     ...(snapshot.annotations ? { annotations: snapshot.annotations } : {}),
     ...(snapshot.sources ? { sources: snapshot.sources } : {}),

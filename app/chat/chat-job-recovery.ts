@@ -35,7 +35,13 @@ function isSequencedEvent(value: unknown): value is SequencedChatStreamEvent {
 
 function terminalAction(candidate: PersistedJobCandidate, snapshot: ChatJobResumeResponse): ConversationAction | null {
   if (snapshot.status === "completed") {
-    return { type: "MARK_MESSAGE_COMPLETE", conversationId: candidate.conversationId, messageId: candidate.message.id, ...(typeof snapshot.finalOutput === "string" ? { finalOutput: snapshot.finalOutput } : {}) };
+    return {
+      type: "MARK_MESSAGE_COMPLETE",
+      conversationId: candidate.conversationId,
+      messageId: candidate.message.id,
+      ...(typeof snapshot.finalOutput === "string" ? { finalOutput: snapshot.finalOutput } : {}),
+      ...(snapshot.providerMetrics ? { streamMetrics: snapshot.providerMetrics } : {}),
+    };
   }
   if (snapshot.status === "cancelled") return { type: "MARK_MESSAGE_CANCELLED", conversationId: candidate.conversationId, messageId: candidate.message.id };
   if (snapshot.status === "failed") return { type: "MARK_MESSAGE_ERROR", conversationId: candidate.conversationId, messageId: candidate.message.id, error: snapshot.error ?? "The response failed." };

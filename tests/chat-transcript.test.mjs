@@ -23,6 +23,8 @@ test("transcript extraction keeps controlled transcript and prompt-action hooks"
   assert.match(turn, /"Copy response"/);
   assert.match(turn, /disabled=\{isStreamingConversation \|\| !assistantMessage\.content\}/);
   assert.match(turn, /aria-label="Retry this response"/);
+  assert.match(turn, /className="response-tps"/);
+  assert.match(turn, /outputTps\.toFixed\(1\)/);
   assert.match(turn, /aria-label="Response versions"/);
   assert.match(turn, /AssistantActivityTimeline/);
   assert.match(workspace, /version\.user\.attachments/);

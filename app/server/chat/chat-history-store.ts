@@ -1,6 +1,6 @@
 import "server-only";
 
-import { normalizeChatImageAttachments, type ChatJobStatus, type ChatRequest, type ChatStreamEvent } from "../../../lib/chat-protocol";
+import { normalizeChatImageAttachments, type ChatJobStatus, type ChatRequest, type ChatStreamEvent, type ChatStreamMetrics } from "../../../lib/chat-protocol";
 import { ChatImageError, type ChatImageAttachment } from "../../../lib/chat-image";
 import type { ChatDocumentAttachment } from "../../../lib/chat-document";
 import {
@@ -32,6 +32,7 @@ type MessageRow = {
   artifacts: unknown;
   thinking_enabled: boolean | null;
   thinking_duration_ms: number | null;
+  stream_metrics: unknown;
   status: ChatMessageStatus | null;
   error: string | null;
   job_id: string | null;
@@ -74,6 +75,9 @@ function messageFromRow(row: MessageRow): ChatHistoryMessage {
     artifacts: arrayValue(row.artifacts),
     ...(row.thinking_enabled === null ? {} : { thinkingEnabled: row.thinking_enabled }),
     ...(row.thinking_duration_ms === null ? {} : { thinkingDurationMs: row.thinking_duration_ms }),
+    ...(row.stream_metrics && typeof row.stream_metrics === "object" && !Array.isArray(row.stream_metrics)
+      ? { streamMetrics: row.stream_metrics as ChatStreamMetrics }
+      : {}),
     ...(row.status === null ? {} : { status: row.status }),
     ...(row.error === null ? {} : { error: row.error }),
     ...(row.job_id === null ? {} : { jobId: row.job_id }),
@@ -108,6 +112,7 @@ function messageRow(
     artifacts: message.artifacts ?? [],
     thinking_enabled: message.thinkingEnabled ?? null,
     thinking_duration_ms: message.thinkingDurationMs ?? null,
+    stream_metrics: message.streamMetrics ?? null,
     status: message.status ?? null,
     error: message.error ?? null,
     job_id: message.jobId ?? null,
@@ -122,7 +127,7 @@ function messageRow(
 
 async function insertIfAbsent(tableName: "chat_conversations" | "chat_turns" | "chat_message_versions" | "chat_messages", row: Record<string, unknown>) {
   const entries = Object.entries(row);
-  const jsonColumns = new Set(["attachments", "documents", "activities", "artifacts", "annotations", "sources", "todos"]);
+  const jsonColumns = new Set(["attachments", "documents", "activities", "artifacts", "annotations", "sources", "todos", "stream_metrics"]);
   const values = entries.map(([key, value]) => jsonColumns.has(key) ? jsonb(value) : value);
   const placeholders = entries.map(([key], index) => jsonColumns.has(key) ? `$${index + 1}::jsonb` : `$${index + 1}`);
   try {
@@ -568,7 +573,7 @@ export async function getChatConversation(ownerId: string, conversationId: strin
   if (jobIds.length) {
     const [eventsResult, jobsResult] = await Promise.all([
       query<{ job_id: string; event_index: number | string; event: ChatStreamEvent }>("select job_id,event_index,event from chat_job_events where owner_id=$1 and conversation_id=$2 and job_id=any($3::text[]) order by event_index", [owner, conversationId, jobIds]),
-      query<{ job_id: string; status: ChatJobStatus; error: string | null; final_output: string | null }>("select job_id,status,error,final_output from chat_jobs where owner_id=$1 and conversation_id=$2 and job_id=any($3::text[])", [owner, conversationId, jobIds]),
+      query<{ job_id: string; status: ChatJobStatus; error: string | null; final_output: string | null; provider_metrics: unknown }>("select job_id,status,error,final_output,provider_metrics from chat_jobs where owner_id=$1 and conversation_id=$2 and job_id=any($3::text[])", [owner, conversationId, jobIds]),
     ]);
     const eventsByJob = new Map<string, Array<{ sequence: number; event: ChatStreamEvent }>>();
     for (const row of eventsResult) {
@@ -589,6 +594,9 @@ export async function getChatConversation(ownerId: string, conversationId: strin
         projected = finalizeChatHistoryMessage(projected, messageStatus, {
           error: job.error,
           finalOutput: job.final_output,
+          streamMetrics: job.provider_metrics && typeof job.provider_metrics === "object" && !Array.isArray(job.provider_metrics)
+            ? job.provider_metrics as ChatStreamMetrics
+            : null,
         });
       }
       return {

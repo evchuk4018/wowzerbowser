@@ -256,3 +256,40 @@ test("normalizes a cancelled live terminal frame", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("delivers terminal output metrics after an already-persisted done event", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response([
+    `data: ${JSON.stringify({
+      type: "submission",
+      submission: { jobId: "job-1", status: "queued", resumed: false },
+    })}`,
+    `data: ${JSON.stringify({
+      type: "event",
+      event: { type: "done", usage: { completionTokens: 12 }, sequence: 1, jobId: "job-1" },
+    })}`,
+    `data: ${JSON.stringify({
+      type: "terminal",
+      terminal: {
+        jobId: "job-1",
+        status: "completed",
+        error: null,
+        usage: { completionTokens: 12 },
+        providerMetrics: { completionTokens: 12, outputWindowMs: 600, outputTps: 20 },
+        finalOutput: "Answer",
+      },
+    })}`,
+    "",
+  ].join("\n\n"), { status: 202 });
+
+  try {
+    const received = [];
+    for await (const event of streamChatResponse({ conversationId: "conversation-1", jobId: "job-1" }, "token")) {
+      received.push(event);
+    }
+    assert.deepEqual(received.map(({ type }) => type), ["done", "metrics"]);
+    assert.deepEqual(received.at(-1).metrics, { completionTokens: 12, outputWindowMs: 600, outputTps: 20 });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

@@ -1,5 +1,6 @@
 import type {
   ChatJobStatus,
+  ChatStreamMetrics,
   ChatUsage,
   SequencedChatStreamEvent,
 } from "../../lib/chat-protocol";
@@ -9,6 +10,7 @@ export function chatTerminalEvents(input: {
   status: ChatJobStatus;
   error: string | null;
   usage: ChatUsage | null;
+  providerMetrics?: ChatStreamMetrics | null;
   after: number;
   sawError: boolean;
   sawDone: boolean;
@@ -30,6 +32,10 @@ export function chatTerminalEvents(input: {
   if (input.status !== "cancelled" && !input.sawDone) {
     sequence += 1;
     events.push({ type: "done", usage: input.usage, sequence, jobId: input.jobId });
+  }
+  if (input.providerMetrics && Object.values(input.providerMetrics).some((value) => typeof value === "number" && Number.isFinite(value))) {
+    sequence += 1;
+    events.push({ type: "metrics", metrics: input.providerMetrics, sequence, jobId: input.jobId });
   }
   return events;
 }

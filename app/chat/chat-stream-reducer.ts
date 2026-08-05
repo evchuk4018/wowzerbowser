@@ -89,6 +89,10 @@ export function reduceChatStreamEvent(
         now,
       );
       break;
+    case "metrics":
+      waiting = false;
+      message = { ...message, streamMetrics: event.metrics };
+      break;
     case "meta":
     case "reasoning_details":
       break;

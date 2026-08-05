@@ -139,6 +139,11 @@ function ConversationTurnInner({
   if (!version) return null;
   const userMessage = version.user;
   const assistantMessage = version.assistant;
+  const outputTps = assistantMessage.status === "complete"
+    && typeof assistantMessage.streamMetrics?.outputTps === "number"
+    && Number.isFinite(assistantMessage.streamMetrics.outputTps)
+    ? `${assistantMessage.streamMetrics.outputTps.toFixed(1)} t/s`
+    : null;
   const hasUserAttachments = Boolean(userMessage.attachments?.length || userMessage.documents?.length);
   const handleContextMenu = (event: React.MouseEvent<HTMLElement>) => {
     event.preventDefault();
@@ -269,6 +274,7 @@ function ConversationTurnInner({
               </svg>
               <span>Retry</span>
             </button>
+            {outputTps && <span className="response-tps" aria-label={`Response speed: ${outputTps}`}>{outputTps}</span>}
             <span className="visually-hidden" aria-live="polite">
               {copiedMessageId === assistantMessage.id ? "Response copied to clipboard." : ""}
             </span>
