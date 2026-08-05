@@ -102,7 +102,15 @@ export async function flushUsageOutbox(ownerId: string): Promise<void> {
       await writeUsageRecord(input);
       await query("delete from chat_usage_outbox where owner_id=$1 and id=$2", [databaseOwner, value.id]);
       deleted += 1;
-    } catch {
+    } catch (error) {
+      console.warn("usage-outbox-flush-failed", {
+        ownerId,
+        outboxId: String(value.id),
+        provider: input.provider,
+        model: input.model,
+        requestKind: input.requestKind,
+        error: error instanceof Error ? error.message : String(error),
+      });
       // Leave the row queued for the next usage report or request.
     }
     if (!deleted) return;
