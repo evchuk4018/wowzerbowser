@@ -66,6 +66,7 @@ MAX_ISOLATED_SOURCE_BYTES = 256 * 1024
 MAX_LIST_ENTRIES = 100
 MAX_WORKSPACE_FILE_SIZE = 100 * 1024 * 1024
 SESSION_TTL_SECONDS = MAX_RESPONSE_SECONDS + 60.0
+VENV_INITIALIZATION_ATTEMPTS = 2
 SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9._:-]{1,200}$")
 SAFE_PACKAGE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*(?:[<>=!~]=?[A-Za-z0-9.*+!-]+)?$")
 SAFE_PATH = re.compile(r"^[A-Za-z0-9_./ -]+$")
@@ -514,14 +515,91 @@ def base_environment(workspace: Path, extra: dict[str, str] | None = None) -> di
     return environment
 
 
-def ensure_virtual_environment(workspace: Path, deadline: float) -> Path:
-    python = workspace / ".venv" / "bin" / "python"
-    config = workspace / ".venv" / "pyvenv.cfg"
-    if not python.exists() or not config.exists():
-        result = run_process(["python", "-m", "venv", "--system-site-packages", str(workspace / ".venv")], workspace, deadline, output_limit=MAX_OUTPUT_BYTES, environment=base_environment(workspace))
+def virtual_environment_paths(root: Path) -> tuple[Path, Path, Path]:
+    return root / "bin" / "python", root / "bin" / "pip", root / "pyvenv.cfg"
+
+
+def virtual_environment_is_ready(root: Path) -> bool:
+    python, _pip, config = virtual_environment_paths(root)
+    return python.is_file() and config.is_file()
+
+
+def virtual_environment_is_usable(root: Path, workspace: Path, deadline: float, environment: dict[str, str]) -> bool:
+    if not virtual_environment_is_ready(root):
+        return False
+    python, _pip, _config = virtual_environment_paths(root)
+    validation = run_process(
+        [str(python), "-c", "import pip, sys; raise SystemExit(0 if sys.prefix != sys.base_prefix else 1)"],
+        workspace,
+        deadline,
+        output_limit=MAX_OUTPUT_BYTES,
+        environment=environment,
+    )
+    if validation.timed_out:
+        raise DeadlineExceeded()
+    return validation.exit_code == 0
+
+
+def initialize_virtual_environment(workspace: Path, deadline: float) -> Path:
+    target = workspace / ".venv"
+    python, _pip, _config = virtual_environment_paths(target)
+    environment = base_environment(workspace)
+
+    if virtual_environment_is_usable(target, workspace, deadline, environment):
+        return python
+
+    if target.exists():
+        # A workspace created by an older worker may contain a partially
+        # initialized venv. Repair it in place so existing user-installed
+        # packages are preserved.
+        result = run_process(["python", "-m", "venv", "--system-site-packages", "--without-pip", str(target)], workspace, deadline, output_limit=MAX_OUTPUT_BYTES, environment=environment)
+        if result.timed_out:
+            raise DeadlineExceeded()
         if result.exit_code != 0:
             raise WorkerError(500, result.stderr or "Unable to initialize Python workspace.")
+        if not virtual_environment_is_usable(target, workspace, deadline, environment):
+            raise WorkerError(500, "Python workspace initialization did not produce a usable environment.")
+        return python
+
+    # Build new environments outside the published .venv path. If venv setup
+    # fails, a later attempt must not mistake a partial directory for a usable
+    # environment.
+    temporary = Path(tempfile.mkdtemp(prefix=".venv-", dir=str(workspace / ".runs")))
+    published = False
+    try:
+        result = run_process(["python", "-m", "venv", "--system-site-packages", "--without-pip", str(temporary)], workspace, deadline, output_limit=MAX_OUTPUT_BYTES, environment=environment)
+        if result.timed_out:
+            raise DeadlineExceeded()
+        if result.exit_code != 0:
+            raise WorkerError(500, result.stderr or "Unable to initialize Python workspace.")
+        if not virtual_environment_is_usable(temporary, workspace, deadline, environment):
+            raise WorkerError(500, "Python workspace initialization did not produce a usable environment.")
+        try:
+            os.replace(temporary, target)
+            published = True
+        except FileExistsError:
+            # Another opener may have completed initialization while this
+            # request was building its temporary environment.
+            if not virtual_environment_is_usable(target, workspace, deadline, environment):
+                raise WorkerError(500, "Python workspace initialization raced with another setup attempt.")
+    finally:
+        if not published and temporary.exists():
+            shutil.rmtree(temporary, ignore_errors=True)
     return python
+
+
+def ensure_virtual_environment(workspace: Path, deadline: float) -> Path:
+    last_error: WorkerError | None = None
+    for attempt in range(VENV_INITIALIZATION_ATTEMPTS):
+        try:
+            return initialize_virtual_environment(workspace, deadline)
+        except DeadlineExceeded:
+            raise
+        except WorkerError as error:
+            last_error = error
+            if attempt + 1 == VENV_INITIALIZATION_ATTEMPTS:
+                raise
+    raise last_error or WorkerError(500, "Unable to initialize Python workspace.")
 
 
 def validate_python_input(value: Any) -> dict[str, Any]:
@@ -696,6 +774,19 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
                 session = Session(token, key, workspace, now() + SESSION_TTL_SECONDS)
                 SESSIONS_BY_TOKEN[token] = session
                 TOKENS_BY_KEY[key] = token
+            try:
+                # Prepare the workspace before the caller receives a session.
+                # This keeps venv creation out of the first user-visible
+                # execution and serializes setup with normal executions.
+                with execution_slot(time.time() + CALL_TIMEOUT_SECONDS):
+                    ensure_virtual_environment(workspace, time.time() + CALL_TIMEOUT_SECONDS)
+            except Exception:
+                with STATE_LOCK:
+                    if SESSIONS_BY_TOKEN.get(token) is session:
+                        SESSIONS_BY_TOKEN.pop(token, None)
+                    if TOKENS_BY_KEY.get(key) == token:
+                        TOKENS_BY_KEY.pop(key, None)
+                raise
             return 200, {"session": token}, "json"
         if path == "/v1/sessions/close" and method == "POST":
             token = body.get("session")

@@ -65,3 +65,13 @@ test("the local worker image bakes trusted packages and preserves venvs", async 
   assert.doesNotMatch(source, /venv.*--clear/);
   assert.doesNotMatch(source, /shutil\.rmtree\(.*\.venv/);
 });
+
+test("Python sessions prepare a retryable workspace before execution", async () => {
+  const source = await readFile(new URL("../docker/python-worker/server.py", import.meta.url), "utf8");
+  assert.match(source, /VENV_INITIALIZATION_ATTEMPTS = 2/);
+  assert.match(source, /--system-site-packages.*--without-pip/);
+  assert.match(source, /tempfile\.mkdtemp\(prefix="\.venv-", dir=str\(workspace \/ "\.runs"\)\)/);
+  assert.match(source, /os\.replace\(temporary, target\)/);
+  assert.match(source, /def virtual_environment_is_usable/);
+  assert.match(source, /ensure_virtual_environment\(workspace, time\.time\(\) \+ CALL_TIMEOUT_SECONDS\)/);
+});
