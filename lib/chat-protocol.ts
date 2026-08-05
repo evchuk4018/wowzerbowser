@@ -302,6 +302,7 @@ export type ChatStreamMetrics = {
   completionTokens: number | null;
   outputWindowMs: number | null;
   outputTps: number | null;
+  runCost?: ChatRunCost;
 };
 export type ChatLiveStreamEnvelope =
   | { type: "submission"; submission: ChatJobSubmissionResponse }
@@ -347,6 +348,12 @@ export type ChatModelPricing = {
   reasoningUsdPerMillion: number | null;
 };
 
+export type ChatRunCostSource = "exact" | "estimated" | "unpriced";
+export type ChatRunCost = {
+  costUsd: number | null;
+  source: ChatRunCostSource;
+};
+
 export type ChatStreamEvent =
   | { type: "todo_update"; todos: TodoList }
   | { type: "deep_research_plan"; plan: DeepResearchPlan }
@@ -370,7 +377,7 @@ export type ChatStreamEvent =
       responseId?: string;
       tools?: string[];
     }
-  | { type: "done"; usage: ChatUsage | null; provider?: ChatProvider; model?: string; exactCostUsd?: number; pricing?: ChatModelPricing | null }
+  | { type: "done"; usage: ChatUsage | null; provider?: ChatProvider; model?: string; exactCostUsd?: number; pricing?: ChatModelPricing | null; runCost?: ChatRunCost }
   | { type: "metrics"; metrics: ChatStreamMetrics }
   | { type: "cancelled" }
   | { type: "error"; message: string };

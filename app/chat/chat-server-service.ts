@@ -70,6 +70,7 @@ import { connectorToolsToModelTools, executeConnectorTool, executeSearchConnecto
 import type { ConnectorTool } from "../../lib/connector-protocol";
 import { executeToolBatch, planToolBatches, toolExecutionMetadata } from "../server/agent/tool-execution-policy";
 import { ChatUsageEstimator } from "./chat-usage-estimator";
+import { calculateChatRunCost, type ChatRunCostInput } from "../../lib/usage-pricing";
 import { orchestrateDeepResearch } from "../server/research/deep-research-orchestrator";
 
 const MAX_RESPONSE_MS = 240_000;
@@ -346,6 +347,7 @@ export async function generateChatResponse(
       const replayRounds: ChatAssistantRound[] = [];
       let usageEstimator: ChatUsageEstimator | null = null;
       const roundUsages: Array<ReturnType<typeof latestNonNullUsage>> = [];
+      const roundCostInputs: Array<ChatRunCostInput | null> = [];
       let executor: LocalPythonExecutor | null = null;
       const recalledContexts = new Map<string, string>();
       let currentPhase = 1;
@@ -387,6 +389,7 @@ export async function generateChatResponse(
           const calls: ChatToolCall[] = [];
           const reasoningDetails: unknown[] = [];
           const roundUsageIndex = roundUsages.push(null) - 1;
+          roundCostInputs.push(null);
           let providerAccepted = false;
           let actualModel = chatRequest.model.model;
           let exactCostUsd: number | undefined;
@@ -427,7 +430,7 @@ export async function generateChatResponse(
               }
             }
           } finally {
-            if (providerAccepted && persistUsage) {
+            if (providerAccepted) {
               const providerUsage = roundUsages[roundUsageIndex];
               const estimatedUsage = providerUsage
                 ? undefined
@@ -441,7 +444,7 @@ export async function generateChatResponse(
                   tools: toolDefinitions,
                   output: `${reasoningParts.join("")} ${contentParts.join("")} ${calls.map((call) => call.arguments).join(" ")}`,
                 });
-              await persistUsage({
+              const roundUsage = {
                 round,
                 usage: providerUsage,
                 ...(estimatedUsage ? { estimatedUsage } : {}),
@@ -449,7 +452,13 @@ export async function generateChatResponse(
                 model: actualModel,
                 ...(exactCostUsd === undefined ? {} : { exactCostUsd }),
                 pricing,
-              });
+              } satisfies ChatRoundUsage;
+              roundCostInputs[roundUsageIndex] = {
+                usage: providerUsage ?? estimatedUsage,
+                ...(exactCostUsd === undefined ? {} : { exactCostUsd }),
+                pricing,
+              };
+              if (persistUsage) await persistUsage(roundUsage);
             }
           }
 
@@ -664,7 +673,11 @@ export async function generateChatResponse(
         else await titleCoordinator.finish();
         await (executor as LocalPythonExecutor | null)?.close().catch(() => undefined);
         if (!signal.aborted) {
-          await enqueue({ type: "done", usage: sumRoundUsage(roundUsages) });
+          await enqueue({
+            type: "done",
+            usage: sumRoundUsage(roundUsages),
+            runCost: calculateChatRunCost(roundCostInputs.flatMap((input) => input ? [input] : [])),
+          });
         }
       }
       return { awaitingApproval: false };

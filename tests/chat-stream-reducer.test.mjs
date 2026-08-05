@@ -81,10 +81,10 @@ test("retains output metrics delivered after the terminal event", () => {
   const state = reduceChatStreamEvents(createChatStreamState(baseMessage), [
     event(1, { type: "content", delta: "Answer" }),
     event(2, { type: "done", usage: { completionTokens: 12 } }),
-    event(3, { type: "metrics", metrics: { completionTokens: 12, outputWindowMs: 600, outputTps: 20 } }),
+    event(3, { type: "metrics", metrics: { completionTokens: 12, outputWindowMs: 600, outputTps: 20, runCost: { costUsd: 0.0004, source: "estimated" } } }),
   ]);
   assert.equal(state.message.status, "complete");
-  assert.deepEqual(state.message.streamMetrics, { completionTokens: 12, outputWindowMs: 600, outputTps: 20 });
+  assert.deepEqual(state.message.streamMetrics, { completionTokens: 12, outputWindowMs: 600, outputTps: 20, runCost: { costUsd: 0.0004, source: "estimated" } });
 });
 
 test("cancelled events finish the message without an error", () => {

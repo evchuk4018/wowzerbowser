@@ -171,12 +171,18 @@
 .deep-research-plan-actions button { border: 1px solid #8f4ed5; border-radius: 8px; background: #7b32c9; padding: 6px 11px; color: white; cursor: pointer; font-size: 12px; }
 .deep-research-plan-actions button.secondary { border-color: #4e3b68; background: transparent; color: var(--muted); }
 
-.response-tps {
+.response-tps,
+.response-cost {
   padding: 4px 8px;
   color: var(--quiet);
   font-size: 11px;
   line-height: 24px;
   white-space: nowrap;
+}
+
+.response-cost {
+  border-left: 1px solid rgba(255, 255, 255, .1);
+  padding-left: 10px;
 }
 
 .response-action-icon {

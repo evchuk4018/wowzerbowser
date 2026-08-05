@@ -540,6 +540,8 @@ test("chat orchestration completes after more than six sequential tool calls", a
   assert.deepEqual(events.filter(({ type }) => type === "error"), []);
   assert.equal(events.find(({ type }) => type === "content")?.delta, "All seven tool calls completed.");
   assert.equal(events.at(-1)?.type, "done");
+  assert.equal(events.at(-1)?.runCost?.source, "estimated");
+  assert.ok(events.at(-1)?.runCost?.costUsd > 0);
   assert.equal(roundUsages.length, 8);
   assert.equal(roundUsages.slice(0, 7).every(({ usage, estimatedUsage }) => usage?.promptTokens === 1 && estimatedUsage === undefined), true);
   assert.equal(roundUsages[7].usage, null);

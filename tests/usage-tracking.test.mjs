@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { calculateUsageCost, estimateUsageFromText } from "../lib/usage-pricing.ts";
+import { calculateChatModelCost, calculateChatRunCost, calculateUsageCost, estimateUsageFromText } from "../lib/usage-pricing.ts";
 import { DEFAULT_DEEPSEEK_USAGE_PRICING } from "../app/providers/deepseek/deepseek-pricing.ts";
 import { localBucketKey, localParts, usageWindow } from "../app/server/usage/usage-time.ts";
 import { aggregateUsageRecords } from "../app/server/usage/usage-service.ts";
@@ -18,6 +18,30 @@ test("estimates missing provider usage and keeps the estimate bounded", () => {
   const estimate = estimateUsageFromText("a".repeat(9), "b".repeat(5));
   assert.deepEqual(estimate, { promptTokens: 3, completionTokens: 2, totalTokens: 5 });
   assert.equal(calculateUsageCost(estimate, DEFAULT_DEEPSEEK_USAGE_PRICING[1]), (3 * 0.435 + 2 * 0.87) / 1_000_000);
+});
+
+test("calculates chat-run costs from model pricing and preserves exact provider costs", () => {
+  const pricing = {
+    inputUsdPerMillion: 0.14,
+    cachedInputUsdPerMillion: 0.0028,
+    outputUsdPerMillion: 0.28,
+    requestUsd: 0.01,
+    reasoningUsdPerMillion: 0.5,
+  };
+  const usage = { promptTokens: 1_000_000, cachedPromptTokens: 200_000, completionTokens: 100_000, reasoningTokens: 20_000 };
+  assert.equal(
+    calculateChatModelCost(usage, pricing),
+    0.14 * 0.8 + 0.0028 * 0.2 + 0.28 * 0.1 + 0.5 * 0.02 + 0.01,
+  );
+  assert.deepEqual(calculateChatRunCost([{ usage, pricing }]), {
+    costUsd: 0.14 * 0.8 + 0.0028 * 0.2 + 0.28 * 0.1 + 0.5 * 0.02 + 0.01,
+    source: "estimated",
+  });
+  assert.deepEqual(calculateChatRunCost([{ usage, pricing, exactCostUsd: 0.1234 }]), {
+    costUsd: 0.1234,
+    source: "exact",
+  });
+  assert.deepEqual(calculateChatRunCost([{ usage }]), { costUsd: null, source: "unpriced" });
 });
 
 test("local usage windows and buckets use the requested timezone", () => {

@@ -320,6 +320,14 @@ export function applyChatStreamEvent(
     next.activities = finishRunningActivities(next.activities, true, now);
   } else if (event.type === "done") {
     next.activities = finishRunningActivities(next.activities, true, now);
+    if (event.runCost) {
+      next.streamMetrics = {
+        completionTokens: next.streamMetrics?.completionTokens ?? null,
+        outputWindowMs: next.streamMetrics?.outputWindowMs ?? null,
+        outputTps: next.streamMetrics?.outputTps ?? null,
+        runCost: event.runCost,
+      };
+    }
   } else if (event.type === "metrics") {
     next.streamMetrics = event.metrics;
   } else if (event.type === "connector_approval") {

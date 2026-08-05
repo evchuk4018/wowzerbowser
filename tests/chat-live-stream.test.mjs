@@ -275,7 +275,7 @@ test("delivers terminal output metrics after an already-persisted done event", a
         status: "completed",
         error: null,
         usage: { completionTokens: 12 },
-        providerMetrics: { completionTokens: 12, outputWindowMs: 600, outputTps: 20 },
+        providerMetrics: { completionTokens: 12, outputWindowMs: 600, outputTps: 20, runCost: { costUsd: 0.0004, source: "estimated" } },
         finalOutput: "Answer",
       },
     })}`,
@@ -288,7 +288,7 @@ test("delivers terminal output metrics after an already-persisted done event", a
       received.push(event);
     }
     assert.deepEqual(received.map(({ type }) => type), ["done", "metrics"]);
-    assert.deepEqual(received.at(-1).metrics, { completionTokens: 12, outputWindowMs: 600, outputTps: 20 });
+    assert.deepEqual(received.at(-1).metrics, { completionTokens: 12, outputWindowMs: 600, outputTps: 20, runCost: { costUsd: 0.0004, source: "estimated" } });
   } finally {
     globalThis.fetch = originalFetch;
   }

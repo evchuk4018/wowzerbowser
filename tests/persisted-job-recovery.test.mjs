@@ -93,10 +93,10 @@ test("restores response metrics when a completed job is recovered", async () => 
     waitForRetry: async () => true,
     fetchJob: async () => ({
       ...completedSnapshot,
-      providerMetrics: { completionTokens: 12, outputWindowMs: 600, outputTps: 20 },
+      providerMetrics: { completionTokens: 12, outputWindowMs: 600, outputTps: 20, runCost: { costUsd: 0.0004, source: "estimated" } },
     }),
   });
-  assert.deepEqual(actions[0].streamMetrics, { completionTokens: 12, outputWindowMs: 600, outputTps: 20 });
+  assert.deepEqual(actions[0].streamMetrics, { completionTokens: 12, outputWindowMs: 600, outputTps: 20, runCost: { costUsd: 0.0004, source: "estimated" } });
 });
 
 test("retries a transient job snapshot failure instead of leaving streaming stuck", async () => {

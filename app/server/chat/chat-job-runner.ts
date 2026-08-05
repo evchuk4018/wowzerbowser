@@ -1,6 +1,7 @@
 import "server-only";
 import type {
   ChatJobTerminalResponse,
+  ChatRunCost,
   ChatStreamEvent,
   ChatStreamMetrics,
   ChatUsage,
@@ -81,6 +82,7 @@ export async function runClaimedChatJob(
   const eventWriter = createChatJobEventWriter(ownerId, claim.conversationId, claim.jobId, leaseToken);
   let output = "";
   let usage: ChatUsage | null = null;
+  let runCost: ChatRunCost | null = null;
   let generationError: string | null = null;
   let nextEventIndex = Math.max(1, claim.nextEventIndex);
   let completedProviderOutputWindowMs = 0;
@@ -114,7 +116,10 @@ export async function runClaimedChatJob(
     if (event.type === "content") output += event.delta;
     if (event.type === "annotations") { annotations = event.annotations; sources = event.sources; }
     if (event.type === "deep_research_plan") researchPlan = event.plan;
-    if (event.type === "done") usage = event.usage;
+    if (event.type === "done") {
+      usage = event.usage;
+      runCost = event.runCost ?? runCost;
+    }
     if (event.type === "error") generationError = event.message;
   };
   const eventCoalescer = createChatEventCoalescer(publishEvent);
@@ -144,6 +149,7 @@ export async function runClaimedChatJob(
       outputTps: completionTokens !== null && outputWindowMs !== null && outputWindowMs > 0
         ? completionTokens / (outputWindowMs / 1000)
         : null,
+      ...(runCost ? { runCost } : {}),
     };
   };
   const terminalResponse = (status: ChatJobTerminalResponse["status"], error: string | null): ChatJobTerminalResponse => ({

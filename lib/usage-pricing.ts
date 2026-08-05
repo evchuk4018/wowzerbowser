@@ -1,4 +1,4 @@
-import type { ChatUsage } from "./chat-protocol";
+import type { ChatModelPricing, ChatRunCost, ChatUsage } from "./chat-protocol";
 import type { UsagePricing } from "./usage-protocol";
 
 function nonNegative(value: number | undefined): number {
@@ -36,6 +36,59 @@ export function calculateUsageCost(usage: ChatUsage, pricing: UsagePricing | nul
     + cachedPromptTokens * cachedRate
     + completionTokens * pricing.outputUsdPerMillion
   ) / 1_000_000;
+}
+
+export function calculateChatModelCost(usage: ChatUsage, pricing: ChatModelPricing | null): number | null {
+  if (!pricing) return null;
+  const normalized = normalizeUsage(usage);
+  const promptTokens = normalized.promptTokens ?? 0;
+  const completionTokens = normalized.completionTokens ?? 0;
+  const reasoningTokens = normalized.reasoningTokens ?? 0;
+  const cachedPromptTokens = Math.min(promptTokens, normalized.cachedPromptTokens ?? 0);
+  const uncachedPromptTokens = promptTokens - cachedPromptTokens;
+  const hasTokenUsage = promptTokens > 0 || completionTokens > 0;
+
+  if (hasTokenUsage && (pricing.inputUsdPerMillion === null || pricing.outputUsdPerMillion === null)) return null;
+
+  const cachedRate = pricing.cachedInputUsdPerMillion ?? pricing.inputUsdPerMillion ?? 0;
+  const tokenCost = (
+    uncachedPromptTokens * (pricing.inputUsdPerMillion ?? 0)
+    + cachedPromptTokens * cachedRate
+    + completionTokens * (pricing.outputUsdPerMillion ?? 0)
+    + reasoningTokens * (pricing.reasoningUsdPerMillion ?? 0)
+  ) / 1_000_000;
+  return tokenCost + (pricing.requestUsd ?? 0);
+}
+
+export type ChatRunCostInput = {
+  usage?: ChatUsage | null;
+  exactCostUsd?: number;
+  pricing?: ChatModelPricing | null;
+};
+
+function nonNegativeFinite(value: number | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+export function calculateChatRunCost(rounds: readonly ChatRunCostInput[]): ChatRunCost {
+  if (!rounds.length) return { costUsd: null, source: "unpriced" };
+
+  let total = 0;
+  let exact = true;
+  for (const round of rounds) {
+    const exactCost = nonNegativeFinite(round.exactCostUsd);
+    if (exactCost !== null) {
+      total += exactCost;
+      continue;
+    }
+    if (!round.usage) return { costUsd: null, source: "unpriced" };
+    const estimatedCost = calculateChatModelCost(round.usage, round.pricing ?? null);
+    if (estimatedCost === null) return { costUsd: null, source: "unpriced" };
+    total += estimatedCost;
+    exact = false;
+  }
+
+  return { costUsd: total, source: exact ? "exact" : "estimated" };
 }
 
 export function estimateUsageFromText(input: string, output: string): ChatUsage {

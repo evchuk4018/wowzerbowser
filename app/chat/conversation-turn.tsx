@@ -68,6 +68,14 @@ function formatDocumentSize(size: number): string {
   return `${(size / (1024 * 1024)).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)} MB`;
 }
 
+function formatRunCost(costUsd: number): string {
+  if (costUsd === 0) return "$0.00";
+  if (costUsd >= 0.01) return `$${costUsd.toFixed(2)}`;
+  if (costUsd >= 0.0001) return `$${costUsd.toFixed(4)}`;
+  if (costUsd < 0.000001) return "<$0.000001";
+  return `$${costUsd.toFixed(6)}`;
+}
+
 function UserDocument({ document }: { document: ChatDocumentAttachment }) {
   const isPdf = document.contentType === "application/pdf";
   const type = isPdf ? "PDF" : "DOCX";
@@ -143,6 +151,12 @@ function ConversationTurnInner({
     && typeof assistantMessage.streamMetrics?.outputTps === "number"
     && Number.isFinite(assistantMessage.streamMetrics.outputTps)
     ? `${assistantMessage.streamMetrics.outputTps.toFixed(1)} t/s`
+    : null;
+  const runCost = assistantMessage.status === "complete"
+    && typeof assistantMessage.streamMetrics?.runCost?.costUsd === "number"
+    && Number.isFinite(assistantMessage.streamMetrics.runCost.costUsd)
+    && assistantMessage.streamMetrics.runCost.costUsd >= 0
+    ? `${formatRunCost(assistantMessage.streamMetrics.runCost.costUsd)}${assistantMessage.streamMetrics.runCost.source === "estimated" ? " est." : ""}`
     : null;
   const hasUserAttachments = Boolean(userMessage.attachments?.length || userMessage.documents?.length);
   const handleContextMenu = (event: React.MouseEvent<HTMLElement>) => {
@@ -288,6 +302,7 @@ function ConversationTurnInner({
               <span>Retry</span>
             </button>
             {outputTps && <span className="response-tps" aria-label={`Response speed: ${outputTps}`}>{outputTps}</span>}
+            {runCost && <span className="response-cost" aria-label={`Run cost: ${runCost}`}>{runCost}</span>}
             <span className="visually-hidden" aria-live="polite">
               {copiedMessageId === assistantMessage.id ? "Response copied to clipboard." : ""}
             </span>
