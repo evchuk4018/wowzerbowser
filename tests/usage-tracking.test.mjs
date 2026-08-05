@@ -98,6 +98,7 @@ test("usage persistence and API keep provider data server-side and owner-scoped"
   assert.match(store, /where owner_id=\$1/);
   assert.match(store, /databaseOwnerId\(ownerId\)/);
   assert.match(store, /usage_source/);
+  assert.match(store, /costUsd, input\.source, input\.exactCostUsd \?\? null, effectivePricing/);
   assert.match(store, /flushUsageOutbox/);
   assert.match(route, /authorizeOwnerSession/);
   assert.match(route, /assertTimeZone/);
