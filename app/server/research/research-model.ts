@@ -1,9 +1,11 @@
 import "server-only";
 import { completeOpenRouterQwenText } from "../../providers/openrouter/openrouter-qwen-text-adapter";
+import type { QwenTextOptionsForResearch } from "../../providers/openrouter/openrouter-qwen-text-adapter";
 import type { ResearchClaim } from "../../../lib/chat-protocol";
 import type { ResearchQuery } from "./research-types";
 
 type Answer = Awaited<ReturnType<typeof completeOpenRouterQwenText>>;
+export type ResearchReasoningDelta = (delta: string) => Promise<void> | void;
 const json = (content: string): Record<string, unknown> => {
   const cleaned = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   const value = JSON.parse(cleaned);
@@ -12,9 +14,16 @@ const json = (content: string): Record<string, unknown> => {
 };
 const strings = (value: unknown, maximum = 20): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()).slice(0, maximum) : [];
 
-export async function decomposeResearchRequest(request: string, maximum: number, signal: AbortSignal | undefined, onAnswer: (answer: Answer) => Promise<void>): Promise<ResearchQuery[]> {
-  const answer = await completeOpenRouterQwenText(request.slice(0, 20_000), {
+function streamingOptions(signal: AbortSignal | undefined, onReasoningDelta: ResearchReasoningDelta | undefined): QwenTextOptionsForResearch {
+  return {
     signal,
+    ...(onReasoningDelta ? { stream: true, reasoningEffort: "low" as const, onReasoningDelta } : {}),
+  };
+}
+
+export async function decomposeResearchRequest(request: string, maximum: number, signal: AbortSignal | undefined, onAnswer: (answer: Answer) => Promise<void>, onReasoningDelta?: ResearchReasoningDelta): Promise<ResearchQuery[]> {
+  const answer = await completeOpenRouterQwenText(request.slice(0, 20_000), {
+    ...streamingOptions(signal, onReasoningDelta),
     timeoutMs: 20_000,
     maxTokens: 900,
     systemPrompt: `Return strict JSON {"queries":[{"query":"...","intent":"official|recent|analysis|community|contradicting|academic|developer","freshness":"day|week|month|year"}]}. Create ${Math.min(5, maximum)} to ${maximum} targeted queries. Collectively cover primary/official sources, recent information, independent analysis, community anecdotes, and contradicting evidence. Use academic or developer intents when relevant. No markdown.`,
@@ -29,9 +38,9 @@ export async function decomposeResearchRequest(request: string, maximum: number,
   }).filter((item): item is ResearchQuery => Boolean(item)).slice(0, maximum);
 }
 
-export async function extractResearchClaims(request: string, evidence: string, signal: AbortSignal | undefined, onAnswer: (answer: Answer) => Promise<void>): Promise<ResearchClaim[]> {
+export async function extractResearchClaims(request: string, evidence: string, signal: AbortSignal | undefined, onAnswer: (answer: Answer) => Promise<void>, onReasoningDelta?: ResearchReasoningDelta): Promise<ResearchClaim[]> {
   const answer = await completeOpenRouterQwenText(`<request>${request}</request>\n<evidence>${evidence}</evidence>`, {
-    signal,
+    ...streamingOptions(signal, onReasoningDelta),
     timeoutMs: 25_000,
     maxTokens: 2_500,
     systemPrompt: 'Extract only material claims supported by the evidence. Return strict JSON {"claims":[{"id":"claim-1","claim":"...","supportingSourceIds":["src_..."],"conflictingSourceIds":[],"dates":[],"confidence":"high|medium|low","status":"supported|weak|conflicting|outdated"}]}. Preserve exact source ids. Identify conflicts instead of merging them away. No markdown.',
@@ -40,9 +49,9 @@ export async function extractResearchClaims(request: string, evidence: string, s
   return normalizeClaims(json(answer.content).claims);
 }
 
-export async function verifyResearchClaims(request: string, claims: ResearchClaim[], evidence: string, signal: AbortSignal | undefined, onAnswer: (answer: Answer) => Promise<void>): Promise<{ claims: ResearchClaim[]; followUpQueries: ResearchQuery[] }> {
+export async function verifyResearchClaims(request: string, claims: ResearchClaim[], evidence: string, signal: AbortSignal | undefined, onAnswer: (answer: Answer) => Promise<void>, onReasoningDelta?: ResearchReasoningDelta): Promise<{ claims: ResearchClaim[]; followUpQueries: ResearchQuery[] }> {
   const answer = await completeOpenRouterQwenText(`<request>${request}</request>\n<claims>${JSON.stringify(claims)}</claims>\n<evidence>${evidence}</evidence>`, {
-    signal,
+    ...streamingOptions(signal, onReasoningDelta),
     timeoutMs: 25_000,
     maxTokens: 2_500,
     systemPrompt: 'Verify every claim against the evidence. Downgrade unsupported or outdated claims and expose conflicts. Return strict JSON {"claims":[same schema],"followUpQueries":[{"query":"...","intent":"official|recent|analysis|community|contradicting|academic|developer"}]}. Return at most two follow-up queries only for consequential gaps or conflicts. Preserve exact source ids. No markdown.',
@@ -71,4 +80,3 @@ function normalizeClaims(value: unknown): ResearchClaim[] {
     return { id: typeof item.id === "string" ? item.id.slice(0, 64) : `claim-${index + 1}`, claim, supportingSourceIds: strings(item.supportingSourceIds), conflictingSourceIds: strings(item.conflictingSourceIds), dates: strings(item.dates, 10), confidence, status };
   }).filter((item): item is ResearchClaim => Boolean(item)).slice(0, 50);
 }
-

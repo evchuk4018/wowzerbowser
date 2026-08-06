@@ -5,6 +5,8 @@ import { availableDeepResearchTools, DEEP_RESEARCH_TOOL_DEFINITIONS } from "../a
 import { executeDeepResearchTool } from "../app/server/agent/deep-research-tool.ts";
 import { assertPublicResearchUrl } from "../app/providers/research/research-page-adapters.ts";
 import { searchSelfHosted } from "../app/server/search/search-service.ts";
+import { runSubagents } from "../app/server/agent/subagent-coordinator.ts";
+import { ResearchTraceCoordinator } from "../app/server/research/deep-research-service.ts";
 
 const source = (overrides = {}) => ({
   id: `src_${String(overrides.rank ?? 1).padStart(16, "0")}`,
@@ -91,5 +93,85 @@ test("self-hosted search focus preserves the unified provider contract", async (
     assert.equal(new Set(requested.map((url) => url.hostname)).size, 4);
   } finally {
     globalThis.fetch = previousFetch;
+  }
+});
+
+test("subagent coordinator queues every task before concurrent workers and returns ordered terminal results", async () => {
+  const tasks = [
+    { id: "one", title: "One", prompt: "one" },
+    { id: "two", title: "Two", prompt: "two" },
+    { id: "three", title: "Three", prompt: "three" },
+  ];
+  const updates = [];
+  const started = [];
+  const results = await runSubagents({
+    tasks,
+    concurrency: 2,
+    onUpdate: (update) => updates.push(update),
+    worker: async (task) => {
+      started.push(task.id);
+      await new Promise((resolve) => setTimeout(resolve, task.id === "one" ? 25 : 1));
+      if (task.id === "two") throw new Error("worker failed");
+      return task.id.toUpperCase();
+    },
+  });
+
+  assert.deepEqual(updates.slice(0, 3).map(({ status, task }) => [status, task.id]), [
+    ["queued", "one"], ["queued", "two"], ["queued", "three"],
+  ]);
+  assert.deepEqual(started, ["one", "two", "three"]);
+  assert.deepEqual(results.map((result) => [result.task.id, result.value, result.error]), [
+    ["one", "ONE", undefined], ["two", undefined, "worker failed"], ["three", "THREE", undefined],
+  ]);
+  for (const task of tasks) {
+    const taskUpdates = updates.filter((update) => update.task.id === task.id);
+    assert.equal(taskUpdates[0].status, "queued");
+    assert.ok(["completed", "failed"].includes(taskUpdates.at(-1).status));
+  }
+});
+
+test("pre-aborted subagent runs still publish queued and terminal cancellation updates", async () => {
+  const controller = new AbortController();
+  controller.abort("cancelled");
+  const updates = [];
+  let workerCalls = 0;
+  const tasks = [
+    { id: "cancel-one", title: "One", prompt: "one" },
+    { id: "cancel-two", title: "Two", prompt: "two" },
+  ];
+  const results = await runSubagents({
+    tasks,
+    signal: controller.signal,
+    onUpdate: (update) => updates.push(update),
+    worker: async () => {
+      workerCalls += 1;
+      return "unexpected";
+    },
+  });
+
+  assert.equal(workerCalls, 0);
+  assert.deepEqual(updates.map(({ status }) => status), ["queued", "queued", "failed", "failed"]);
+  assert.deepEqual(results.map((result) => result.error), ["Subagent cancelled.", "Subagent cancelled."]);
+});
+
+test("research trace callbacks expose only bounded shared stage entries and never private reasoning", async () => {
+  const updates = [];
+  const coordinator = new ResearchTraceCoordinator({
+    actorId: "actor/private",
+    onUpdate: (update) => updates.push(update),
+  });
+  coordinator.appendReasoning("PRIVATE_REASONING_MUST_NOT_ESCAPE");
+  await coordinator.update("query_planning", "started");
+  await coordinator.update("searching", "completed", "completed");
+  await coordinator.update("verification", "failed", "failed");
+  coordinator.cancel();
+
+  assert.equal(updates.length, 3);
+  assert.deepEqual(updates.map((update) => update.trace[0].kind), ["stage", "stage", "stage"]);
+  assert.deepEqual(updates.map((update) => update.trace[0].status), ["running", "completed", "failed"]);
+  for (const update of updates) {
+    assert.ok(update.trace[0].id.length <= 128);
+    assert.ok(update.trace[0].label.length <= 512);
+    assert.ok(!JSON.stringify(update).includes("PRIVATE_REASONING_MUST_NOT_ESCAPE"));
   }
 });

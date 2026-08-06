@@ -22,17 +22,19 @@ export const QWEN_REASONING_SUMMARY_MAX_OUTPUT_TOKENS = 32;
 export const QWEN_TITLE_MAX_OUTPUT_TOKENS = 24;
 export const QWEN_TITLE_TIMEOUT_MS = 15_000;
 
+type ResponseUsage = {
+  prompt_tokens?: unknown;
+  completion_tokens?: unknown;
+  total_tokens?: unknown;
+  cost?: unknown;
+  prompt_tokens_details?: { cached_tokens?: unknown };
+  completion_tokens_details?: { reasoning_tokens?: unknown };
+};
+
 type ResponseBody = {
   model?: unknown;
-  choices?: Array<{ message?: { content?: unknown } }>;
-  usage?: {
-    prompt_tokens?: unknown;
-    completion_tokens?: unknown;
-    total_tokens?: unknown;
-    cost?: unknown;
-    prompt_tokens_details?: { cached_tokens?: unknown };
-    completion_tokens_details?: { reasoning_tokens?: unknown };
-  } | null;
+  choices?: Array<{ message?: { content?: unknown }; delta?: { content?: unknown; reasoning?: unknown; reasoning_content?: unknown } }>;
+  usage?: ResponseUsage | null;
 };
 
 type QwenTextOptions = {
@@ -41,6 +43,16 @@ type QwenTextOptions = {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   maxTokens?: number;
+  /** Opt into OpenRouter SSE. Research uses this with a low reasoning effort. */
+  stream?: boolean;
+  reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" | "max";
+  /** Server-only sink for private reasoning deltas; deltas never enter the answer. */
+  onReasoningDelta?: (delta: string) => Promise<void> | void;
+};
+
+export type QwenTextOptionsForResearch = Pick<QwenTextOptions, "signal" | "fetchImpl" | "timeoutMs" | "maxTokens" | "onReasoningDelta"> & {
+  stream?: boolean;
+  reasoningEffort?: QwenTextOptions["reasoningEffort"];
 };
 
 export type QwenTextAnswer = {
@@ -101,6 +113,29 @@ function textOf(value: unknown): string {
   }).join("").trim();
 }
 
+function streamTextOf(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!Array.isArray(value)) return "";
+  return value.map((part) => {
+    if (typeof part === "string") return part;
+    return part && typeof part === "object" && "text" in part && typeof part.text === "string" ? part.text : "";
+  }).join("");
+}
+
+async function forwardReasoningDelta(callback: QwenTextOptions["onReasoningDelta"], delta: string): Promise<void> {
+  if (!callback || !delta) return;
+  try {
+    await callback(delta);
+  } catch {
+    // Private tracing is best effort and must never fail the provider request.
+  }
+}
+
+function costOfUsage(value: ResponseBody["usage"]): number | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  return numberOrUndefined(value.cost);
+}
+
 function signalFor(options: QwenTextOptions, timeout: AbortSignal | null): AbortSignal | undefined {
   if (options.signal && timeout) return AbortSignal.any([options.signal, timeout]);
   return options.signal ?? timeout ?? undefined;
@@ -113,14 +148,16 @@ export async function completeOpenRouterQwenText(
   if (!openRouterApiKey()) throw new OpenRouterError("OpenRouter Qwen tasks are not configured.", 503);
   const timeout = options.timeoutMs === undefined ? null : AbortSignal.timeout(options.timeoutMs);
   const signal = signalFor(options, timeout);
+  const streaming = options.stream === true || Boolean(options.onReasoningDelta);
   const body = {
     models: [OPENROUTER_QWEN_FLASH_MODEL, OPENROUTER_DEEPSEEK_FLASH_MODEL],
     messages: [
       ...(options.systemPrompt ? [{ role: "system", content: options.systemPrompt }] : []),
       { role: "user", content: prompt },
     ],
-    reasoning: { effort: "none" },
-    stream: false,
+    reasoning: { effort: streaming ? options.reasoningEffort ?? "low" : "none" },
+    stream: streaming,
+    ...(streaming ? { stream_options: { include_usage: true } } : {}),
     ...(options.maxTokens === undefined ? {} : { max_tokens: options.maxTokens }),
   };
   let response: Response;
@@ -143,6 +180,7 @@ export async function completeOpenRouterQwenText(
       response.status >= 500 ? 502 : response.status,
     );
   }
+  if (streaming) return readQwenSseResponse(response, body, options, signal);
   let payload: ResponseBody;
   try {
     payload = await response.json() as ResponseBody;
@@ -157,6 +195,75 @@ export async function completeOpenRouterQwenText(
     usage: usageFromResponse(payload.usage),
     estimatedUsage: estimateUsageFromText(JSON.stringify(body), content),
     ...(numberOrUndefined(payload.usage?.cost) === undefined ? {} : { exactCostUsd: numberOrUndefined(payload.usage?.cost) }),
+  };
+}
+
+async function readQwenSseResponse(
+  response: Response,
+  body: object,
+  options: QwenTextOptions,
+  signal: AbortSignal | undefined,
+): Promise<QwenTextAnswer> {
+  if (!response.body) throw new OpenRouterError("OpenRouter returned an empty Qwen task stream.", 502);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let content = "";
+  let model = "";
+  let measuredUsage: ResponseUsage | null = null;
+  let completed = false;
+
+  const consume = async (block: string): Promise<void> => {
+    const data = block
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trim())
+      .join("\n");
+    if (!data || data === "[DONE]") {
+      if (data === "[DONE]") completed = true;
+      return;
+    }
+    let chunk: ResponseBody;
+    try {
+      chunk = JSON.parse(data) as ResponseBody;
+    } catch {
+      return;
+    }
+    if (typeof chunk.model === "string" && chunk.model) model = chunk.model;
+    if (chunk.usage && typeof chunk.usage === "object") measuredUsage = chunk.usage;
+    const delta = chunk.choices?.[0]?.delta;
+    const nextContent = streamTextOf(delta?.content);
+    if (nextContent) content += nextContent;
+    const reasoning = streamTextOf(delta?.reasoning ?? delta?.reasoning_content);
+    await forwardReasoningDelta(options.onReasoningDelta, reasoning);
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      const blocks = buffer.split(/\r?\n\r?\n/);
+      buffer = blocks.pop() ?? "";
+      for (const block of blocks) await consume(block);
+      if (done) break;
+    }
+    if (buffer.trim()) await consume(buffer);
+  } catch (error) {
+    if (options.signal?.aborted || signal?.aborted) throw new OpenRouterError("OpenRouter Qwen task was cancelled.", 499);
+    if (error instanceof OpenRouterError) throw error;
+    throw new OpenRouterError("OpenRouter Qwen task stream is unavailable.", 502);
+  } finally {
+    if (!completed && (options.signal?.aborted || signal?.aborted)) await reader.cancel().catch(() => undefined);
+  }
+
+  if (!content.trim()) throw new OpenRouterError("OpenRouter returned an empty Qwen task response.", 502);
+  const exactCostUsd = costOfUsage(measuredUsage);
+  return {
+    content: content.trim(),
+    model: model || OPENROUTER_QWEN_FLASH_MODEL,
+    usage: usageFromResponse(measuredUsage),
+    estimatedUsage: estimateUsageFromText(JSON.stringify(body), content),
+    ...(exactCostUsd === undefined ? {} : { exactCostUsd }),
   };
 }
 

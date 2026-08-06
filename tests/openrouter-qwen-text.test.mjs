@@ -53,7 +53,40 @@ test("Qwen text adapter sends OpenRouter requests with reasoning disabled and ca
   ]);
   assert.deepEqual(body.reasoning, { effort: "none" });
   assert.equal(body.stream, false);
+  assert.equal(body.stream_options, undefined);
   assert.equal(body.max_tokens, 24);
+});
+
+test("Qwen opt-in streaming parses SSE content and usage while keeping reasoning server-side", async () => {
+  const reasoning = [];
+  const calls = [];
+  const sse = [
+    'data: {"model":"qwen/stream","choices":[{"delta":{"reasoning":"private plan"}}]}',
+    'data: {"choices":[{"delta":{"content":"Hello "}}]}',
+    'data: {"choices":[{"delta":{"reasoning":" and private detail"}}]}',
+    'data: {"choices":[{"delta":{"content":"world"}}],"usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14,"cost":0.0042}}',
+    "data: [DONE]",
+    "",
+  ].join("\n\n");
+  const answer = await completeOpenRouterQwenText("stream prompt", {
+    stream: true,
+    reasoningEffort: "low",
+    onReasoningDelta: (delta) => reasoning.push(delta),
+    fetchImpl: async (_url, init) => {
+      calls.push(JSON.parse(init.body));
+      return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+    },
+  });
+
+  assert.equal(answer.content, "Hello world");
+  assert.equal(answer.model, "qwen/stream");
+  assert.deepEqual(reasoning, ["private plan", " and private detail"]);
+  assert.equal(answer.usage?.totalTokens, 14);
+  assert.equal(answer.exactCostUsd, 0.0042);
+  assert.ok(!answer.content.includes("private"));
+  assert.deepEqual(calls[0].reasoning, { effort: "low" });
+  assert.equal(calls[0].stream, true);
+  assert.deepEqual(calls[0].stream_options, { include_usage: true });
 });
 
 test("Qwen task wrappers preserve title, summary, reasoning, and recall limits", async () => {
