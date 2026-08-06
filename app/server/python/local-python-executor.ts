@@ -1,6 +1,7 @@
 import "server-only";
 
 import { PYTHON_TOOL_INPUT_LIMITS, relativeWorkspacePath, validatePythonToolInput } from "../../../lib/python-tool-policy";
+import type { WorkspaceCommandResult } from "../../../lib/workspace-protocol";
 
 export { relativeWorkspacePath, validatePythonToolInput } from "../../../lib/python-tool-policy";
 
@@ -37,6 +38,34 @@ export type LocalExecResult = {
 };
 
 export type IsolatedPythonResult = Omit<LocalExecResult, "artifacts">;
+
+export type WorkspaceSearchMatch = {
+  path: string;
+  line: number;
+  column: number;
+  excerpt: string;
+};
+
+export type WorkspaceSearchResult = {
+  matches: WorkspaceSearchMatch[];
+  truncated: boolean;
+};
+
+export type WorkspaceWriteOptions = {
+  overwrite?: boolean;
+  replace?: boolean;
+  expectedSha256?: string;
+};
+
+export type LocalCommandInput = {
+  command: string;
+  args?: string[];
+  cwd?: string;
+  stdin?: string;
+  timeoutMs?: number;
+};
+
+export type LocalCommandResult = WorkspaceCommandResult;
 
 export function isLocalPythonConfigured(): boolean {
   return Boolean(PYTHON_WORKER_URL && PYTHON_WORKER_SECRET.length >= 32);
@@ -97,6 +126,22 @@ async function requestJson<T>(path: string, value: unknown, deadlineAt: number, 
   }, deadlineAt);
   if (!response.ok) throw await responseError(response);
   return await response.json() as T;
+}
+
+function workspaceDirectoryPath(pathValue: string | undefined): string {
+  if (pathValue === undefined || pathValue.trim() === "" || pathValue.trim() === "." || pathValue.trim() === "./") return "";
+  return relativeWorkspacePath(pathValue);
+}
+
+const BLOCKED_COMMANDS = new Set(["bash", "busybox", "csh", "dash", "fish", "ksh", "sh", "zsh"]);
+
+function writeOptions(value: boolean | WorkspaceWriteOptions): Required<Pick<WorkspaceWriteOptions, "overwrite">> & Pick<WorkspaceWriteOptions, "expectedSha256"> {
+  if (typeof value === "boolean") return { overwrite: value };
+  if (!value || typeof value !== "object") throw new Error("Workspace write options are invalid.");
+  const overwrite = value.overwrite ?? value.replace ?? false;
+  if (typeof overwrite !== "boolean") throw new Error("Workspace write overwrite must be a boolean.");
+  if (value.expectedSha256 !== undefined && !/^[0-9a-f]{64}$/iu.test(value.expectedSha256)) throw new Error("expectedSha256 must be a SHA-256 hex digest.");
+  return { overwrite, ...(value.expectedSha256 ? { expectedSha256: value.expectedSha256 } : {}) };
 }
 
 export async function runIsolatedPythonTool(
@@ -177,12 +222,28 @@ export class LocalPythonExecutor {
     await requestJson("/v1/workspace/mkdir", { session, path }, this.responseDeadlineAt);
   }
 
-  async writeWorkspaceFile(pathValue: string, bytes: Uint8Array): Promise<void> {
+  async writeWorkspaceFile(pathValue: string, bytes: Uint8Array, overwriteOrOptions: boolean | WorkspaceWriteOptions = false): Promise<void> {
     const path = relativeWorkspacePath(pathValue);
-    if (!path.startsWith("documents/") || bytes.byteLength > PYTHON_TOOL_LIMITS.maxArtifactBytes) throw new Error("Document workspace write is not allowed.");
+    if (!(bytes instanceof Uint8Array) || bytes.byteLength > PYTHON_TOOL_LIMITS.maxArtifactBytes) throw new Error("Workspace write is not allowed.");
+    const options = writeOptions(overwriteOrOptions);
     const session = await this.ensureSession(this.responseDeadlineAt);
     const encoded = Buffer.from(bytes).toString("base64");
-    await requestJson("/v1/workspace/write", { session, path, bytes: encoded }, this.responseDeadlineAt, "PUT");
+    await requestJson("/v1/workspace/write", {
+      session,
+      path,
+      bytes: encoded,
+      ...(options.overwrite ? { replace: true } : {}),
+      ...(options.expectedSha256 ? { expectedSha256: options.expectedSha256 } : {}),
+    }, this.responseDeadlineAt, "PUT");
+  }
+
+  async replaceWorkspaceFile(pathValue: string, bytes: Uint8Array): Promise<void>;
+  async replaceWorkspaceFile(pathValue: string, expectedSha256: string | undefined | null, bytes: Uint8Array): Promise<void>;
+  async replaceWorkspaceFile(pathValue: string, expectedSha256OrBytes: string | Uint8Array | null | undefined, bytesValue?: Uint8Array): Promise<void> {
+    const expectedSha256 = typeof expectedSha256OrBytes === "string" ? expectedSha256OrBytes : undefined;
+    const bytes = expectedSha256OrBytes instanceof Uint8Array ? expectedSha256OrBytes : bytesValue;
+    if (!bytes) throw new Error("Replacement bytes are required.");
+    await this.writeWorkspaceFile(pathValue, bytes, { overwrite: true, ...(expectedSha256 ? { expectedSha256 } : {}) });
   }
 
   async copyWorkspaceFile(sourceValue: string, destinationValue: string): Promise<void> {
@@ -190,11 +251,50 @@ export class LocalPythonExecutor {
     await this.writeWorkspaceFile(destinationValue, bytes);
   }
 
-  async listWorkspaceTree(rootValue: string): Promise<Array<{ path: string; size: number }>> {
-    const root = relativeWorkspacePath(rootValue);
+  async listWorkspaceTree(rootValue = ""): Promise<Array<{ path: string; size: number }>> {
+    const root = workspaceDirectoryPath(rootValue);
     const session = await this.ensureSession(this.responseDeadlineAt);
     const result = await requestJson<{ items: Array<{ path: string; size: number }> }>("/v1/workspace/list", { session, path: root }, this.responseDeadlineAt);
     return result.items;
+  }
+
+  async searchWorkspace(query: string, rootValue = ""): Promise<WorkspaceSearchResult> {
+    if (typeof query !== "string" || !query || query.length > 1_024) throw new Error("Search query must be a bounded non-empty string.");
+    const root = workspaceDirectoryPath(rootValue);
+    const session = await this.ensureSession(this.responseDeadlineAt);
+    return requestJson<WorkspaceSearchResult>("/v1/workspace/search", { session, query, root }, this.responseDeadlineAt);
+  }
+
+  async deleteWorkspaceFile(pathValue: string): Promise<void> {
+    const path = relativeWorkspacePath(pathValue);
+    const session = await this.ensureSession(this.responseDeadlineAt);
+    await requestJson("/v1/workspace/delete", { session, path }, this.responseDeadlineAt);
+  }
+
+  async runCommand(input: LocalCommandInput): Promise<LocalCommandResult> {
+    if (!input || typeof input !== "object" || typeof input.command !== "string" || !input.command || input.command.length > 128 || /[^A-Za-z0-9._+-]/u.test(input.command) || BLOCKED_COMMANDS.has(input.command.toLowerCase())) {
+      throw new Error("command must name a permitted executable without shell syntax.");
+    }
+    const args = input.args ?? [];
+    if (!Array.isArray(args) || args.length > 32 || args.some((arg) => typeof arg !== "string" || arg.length > 4_096)) throw new Error("args must contain at most 32 bounded strings.");
+    if (args.reduce((total, arg) => total + Buffer.byteLength(arg, "utf8"), 0) > 64 * 1024) throw new Error("command arguments are too large.");
+    if (input.stdin !== undefined && (typeof input.stdin !== "string" || Buffer.byteLength(input.stdin, "utf8") > 64 * 1024)) throw new Error("stdin is too long.");
+    const timeoutMs = input.timeoutMs ?? PYTHON_TOOL_LIMITS.callTimeoutMs;
+    if (!Number.isFinite(timeoutMs) || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > PYTHON_TOOL_LIMITS.callTimeoutMs) throw new Error("timeoutMs must be between 1 and 60000.");
+    const cwd = workspaceDirectoryPath(input.cwd);
+    const startedAt = Date.now();
+    const deadlineAt = Math.min(this.responseDeadlineAt, startedAt + timeoutMs);
+    if (startedAt >= this.responseDeadlineAt) throw new Error("The response reached its 240-second execution limit.");
+    const session = await this.ensureSession(deadlineAt);
+    return requestJson<LocalCommandResult>("/v1/command", {
+      session,
+      command: input.command,
+      args,
+      cwd,
+      ...(input.stdin !== undefined ? { stdin: input.stdin } : {}),
+      timeoutMs,
+      deadlineAt,
+    }, deadlineAt);
   }
 
   async close(): Promise<void> {
