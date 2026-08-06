@@ -381,6 +381,7 @@ export type ChatStreamEvent =
   | {
       type: "deep_research_orchestrator_update";
       status: "running" | "completed" | "failed";
+      reasoningDelta?: string;
       summary?: string;
       summaryRevision?: number;
       trace?: ChatResearchTraceEntry[];

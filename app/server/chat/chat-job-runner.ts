@@ -108,7 +108,7 @@ export async function runClaimedChatJob(
       roundFirstOutputAt = null;
       roundLastOutputAt = null;
     }
-    if (event.type === "reasoning" || event.type === "content") {
+    if (event.type === "reasoning" || event.type === "content" || (event.type === "deep_research_orchestrator_update" && event.reasoningDelta)) {
       const now = performance.now();
       roundFirstOutputAt ??= now;
       roundLastOutputAt = now;

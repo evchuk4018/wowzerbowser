@@ -243,31 +243,33 @@ test("subagent updates are idempotent and accumulate only new summary revisions 
   assert.equal(evidence?.startedAt, 100);
 });
 
-test("orchestrator updates create title-only reasoning without raw reasoning content", () => {
+test("orchestrator updates accumulate visible reasoning alongside summaries", () => {
   let state = createChatStreamState(baseMessage);
   state = reduceChatStreamEvent(state, event(1, {
     type: "deep_research_orchestrator_update",
     status: "running",
+    reasoningDelta: "I am comparing the approved findings. ",
     summary: "Coordinating research",
     summaryRevision: 1,
     trace: [{ id: "orchestrator-stage", kind: "stage", label: "Coordinate", status: "running" }],
   }), { now: 100 });
   const orchestrator = state.message.activities?.find(({ id }) => id === "deep-research-orchestrator");
   assert.equal(orchestrator?.kind, "reasoning");
-  assert.equal(orchestrator?.content, "");
+  assert.equal(orchestrator?.content, "I am comparing the approved findings. ");
   assert.equal(orchestrator?.summary, "Coordinating research");
   assert.deepEqual(orchestrator?.trace, [{ id: "orchestrator-stage", kind: "stage", label: "Coordinate", status: "running" }]);
-  assert.equal(state.message.reasoning, "");
+  assert.equal(state.message.reasoning, "I am comparing the approved findings. ");
 
   state = reduceChatStreamEvent(state, event(2, {
     type: "deep_research_orchestrator_update",
     status: "completed",
+    reasoningDelta: "I can now synthesize the report.",
     summary: "Research coordinated",
     summaryRevision: 2,
   }), { now: 250 });
   const reasoning = state.message.activities?.filter(({ kind }) => kind === "reasoning");
   assert.equal(reasoning?.length, 1);
-  assert.equal(reasoning?.[0].content, "");
+  assert.equal(reasoning?.[0].content, "I am comparing the approved findings. I can now synthesize the report.");
   assert.equal(reasoning?.[0].status, "complete");
   assert.equal(reasoning?.[0].summaryRevision, 2);
 });

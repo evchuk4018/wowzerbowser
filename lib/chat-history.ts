@@ -226,9 +226,15 @@ function legacyToolKind(call: ChatToolCall): "python" | "web" {
 const ORCHESTRATOR_ACTIVITY_ID = "deep-research-orchestrator";
 const MAX_RESEARCH_SUMMARY_LENGTH = 4_000;
 const MAX_RESEARCH_SUMMARY_HISTORY = 128;
+const MAX_RESEARCH_REASONING_LENGTH = 12_000;
 
 function safeResearchText(value: string): string {
   return value.slice(0, MAX_RESEARCH_SUMMARY_LENGTH);
+}
+
+function appendBoundedResearchReasoning(current: string, delta: string | undefined): string {
+  if (!delta) return current;
+  return `${current}${delta}`.slice(0, MAX_RESEARCH_REASONING_LENGTH);
 }
 
 function validResearchRevision(value: number | undefined): value is number {
@@ -363,13 +369,14 @@ function applyOrchestratorUpdate(
     && (event.summaryRevision === undefined || previous?.summaryRevision === undefined || event.summaryRevision > previous.summaryRevision)
     ? safeResearchText(event.summary)
     : previous?.summary;
+  const content = appendBoundedResearchReasoning(previous?.content ?? "", event.reasoningDelta);
   const status = event.status === "running" ? "running" : "complete";
   const activity: ChatReasoningActivity = {
     id: ORCHESTRATOR_ACTIVITY_ID,
     kind: "reasoning",
     round: previous?.round ?? round,
     phase: previous?.phase ?? phase,
-    content: "",
+    content,
     status,
     ...(summary === undefined ? {} : { summary }),
     ...(summaryRevision === undefined ? {} : { summaryRevision }),
@@ -439,6 +446,9 @@ export function applyChatStreamEvent(
       next.tracePhase ?? 1,
       now,
     );
+    if (event.reasoningDelta) {
+      next.reasoning = appendBoundedResearchReasoning(next.reasoning ?? "", event.reasoningDelta);
+    }
   } else if (event.type === "phase_summary") {
     next.activities = next.activities?.map((activity) =>
       activity.kind === "reasoning" && activity.id !== ORCHESTRATOR_ACTIVITY_ID && activity.phase === event.phase && (activity.summaryRevision ?? -1) <= event.revision

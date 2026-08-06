@@ -84,15 +84,18 @@ export class ResearchTraceCoordinator {
   private readonly titleCoordinator: ReasoningTitleCoordinator;
   private readonly actorId: string;
   private readonly onUpdate?: ResearchProgressCallback;
+  private readonly onReasoningDelta?: (delta: string) => Promise<void> | void;
 
   constructor(input: {
     actorId: string;
     signal?: AbortSignal;
     onUpdate?: ResearchProgressCallback;
+    onReasoningDelta?: (delta: string) => Promise<void> | void;
     onSummaryUsage?: (usage: ReasoningTitleUsage) => Promise<void>;
   }) {
     this.actorId = input.actorId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64) || "research";
     this.onUpdate = input.onUpdate;
+    this.onReasoningDelta = input.onReasoningDelta;
     const signal = input.signal ?? new AbortController().signal;
     this.titleCoordinator = new ReasoningTitleCoordinator({
       signal,
@@ -105,11 +108,12 @@ export class ResearchTraceCoordinator {
     });
   }
 
-  appendReasoning(delta: string): void {
+  async appendReasoning(delta: string): Promise<void> {
     if (!delta || this.reasoningCharacters >= 12_000) return;
     const bounded = delta.slice(0, 12_000 - this.reasoningCharacters);
     this.reasoningCharacters += bounded.length;
     this.titleCoordinator.append(bounded);
+    await this.onReasoningDelta?.(bounded);
   }
 
   async update(stage: ResearchTraceStage, operation: ResearchTraceOperation, status: ResearchTrace["status"] = operation === "failed" ? "failed" : operation === "completed" ? "completed" : "running"): Promise<void> {

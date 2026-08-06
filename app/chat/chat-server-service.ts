@@ -320,9 +320,10 @@ export async function generateChatResponse(
       request,
       plan,
       signal,
-      onOrchestratorUpdate: async ({ status, summary, summaryRevision, trace }) => enqueue({
+      onOrchestratorUpdate: async ({ status, reasoningDelta, summary, summaryRevision, trace }) => enqueue({
         type: "deep_research_orchestrator_update",
         status,
+        ...(reasoningDelta ? { reasoningDelta } : {}),
         ...(summary ? { summary } : {}),
         ...(summaryRevision === undefined ? {} : { summaryRevision }),
         ...(trace ? { trace } : {}),

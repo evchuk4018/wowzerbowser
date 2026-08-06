@@ -175,3 +175,19 @@ test("research trace callbacks expose only bounded shared stage entries and neve
     assert.ok(!JSON.stringify(update).includes("PRIVATE_REASONING_MUST_NOT_ESCAPE"));
   }
 });
+
+test("research trace coordinator forwards bounded reasoning only through its explicit public sink", async () => {
+  const updates = [];
+  const reasoning = [];
+  const coordinator = new ResearchTraceCoordinator({
+    actorId: "orchestrator",
+    onUpdate: (update) => updates.push(update),
+    onReasoningDelta: (delta) => reasoning.push(delta),
+  });
+
+  await coordinator.appendReasoning("Visible orchestrator reasoning.");
+  coordinator.cancel();
+
+  assert.deepEqual(reasoning, ["Visible orchestrator reasoning."]);
+  assert.deepEqual(updates, []);
+});

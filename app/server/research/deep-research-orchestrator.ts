@@ -17,6 +17,7 @@ export type Finding = { taskId: string; title: string; claims: unknown[]; source
 export type ResearchOrchestratorStatus = "running" | "completed" | "failed";
 export type ResearchOrchestratorUpdate = {
   status: ResearchOrchestratorStatus;
+  reasoningDelta?: string;
   summary?: string;
   summaryRevision?: number;
   trace?: ResearchTrace[];
@@ -62,6 +63,7 @@ export async function orchestrateDeepResearch(input: {
     actorId: input.jobId,
     signal: input.signal,
     onUpdate: async (update: ResearchProgressUpdate) => emitOrchestrator(input.onOrchestratorUpdate, { status: "running", ...update }),
+    onReasoningDelta: async (reasoningDelta) => emitOrchestrator(input.onOrchestratorUpdate, { status: "running", reasoningDelta }),
     onSummaryUsage: async (usage) => recordResearchModelUsage({
       ownerId: input.ownerId,
       conversationId: input.conversationId,

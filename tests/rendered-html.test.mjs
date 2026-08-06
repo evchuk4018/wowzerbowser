@@ -870,6 +870,21 @@ test("renders web activities inside thought-process disclosures", async () => {
   assert.match(styles, /\.web-nested/);
 });
 
+test("shows deep research activity live and collapses it after completion", async () => {
+  const [activity, styles] = await Promise.all([
+    readFile(new URL("../app/chat/assistant-activity.tsx", import.meta.url), "utf8"),
+    readStyles(),
+  ]);
+  assert.match(activity, /ResearchActivityDisclosure/);
+  assert.match(activity, /DEEP_RESEARCH_ORCHESTRATOR_ID/);
+  assert.match(activity, /autoOpen=\{isDeepResearch && streaming\}/);
+  assert.match(activity, /const previousStreaming = useRef\(streaming\)/);
+  assert.match(activity, /previousStreaming\.current && !streaming/);
+  assert.match(activity, /className=\{`research-activity/);
+  assert.match(styles, /\.research-activity/);
+  assert.match(styles, /\.research-activity-open/);
+});
+
 test("renders explicit phase breaks as visible reasoning boundaries", async () => {
   const [activity, styles] = await Promise.all([
     readFile(new URL("../app/chat/assistant-activity.tsx", import.meta.url), "utf8"),

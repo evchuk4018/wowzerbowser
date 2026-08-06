@@ -17,10 +17,21 @@ export type ChatEventCoalescer = {
 const DEFAULT_FLUSH_INTERVAL_MS = 16;
 const DEFAULT_MAX_TEXT_LENGTH = 4_096;
 
-type CoalescibleEvent = Extract<ChatStreamEvent, { type: "content" | "reasoning" }>;
+type CoalescibleEvent = Extract<ChatStreamEvent, { type: "content" | "reasoning" | "deep_research_orchestrator_update" }>;
 
 function isCoalescible(event: ChatStreamEvent): event is CoalescibleEvent {
-  return event.type === "content" || event.type === "reasoning";
+  if (event.type === "content" || event.type === "reasoning") return Boolean(event.delta);
+  return event.type === "deep_research_orchestrator_update" && Boolean(event.reasoningDelta);
+}
+
+function deltaOf(event: CoalescibleEvent): string {
+  return event.type === "deep_research_orchestrator_update" ? event.reasoningDelta ?? "" : event.delta;
+}
+
+function withDelta(event: CoalescibleEvent, delta: string): CoalescibleEvent {
+  return event.type === "deep_research_orchestrator_update"
+    ? { ...event, reasoningDelta: delta }
+    : { ...event, delta };
 }
 
 /**
@@ -93,10 +104,10 @@ export function createChatEventCoalescer(
         await flush();
       }
 
-      if (pending) pending = { ...pending, delta: `${pending.delta}${event.delta}` };
-      else pending = { ...event };
+      if (pending) pending = withDelta(pending, `${deltaOf(pending)}${deltaOf(event)}`);
+      else pending = withDelta(event, deltaOf(event));
 
-      if (pending.delta.length >= maxTextLength) {
+      if (deltaOf(pending).length >= maxTextLength) {
         clearTimer();
         await flush();
       } else {

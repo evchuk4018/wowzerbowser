@@ -16,6 +16,18 @@ test("coalesces adjacent reasoning and content deltas on a timer", async () => {
   await coalescer.drain();
 });
 
+test("coalesces adjacent orchestrator reasoning while preserving the latest structural boundary", async () => {
+  const events = [];
+  const coalescer = createChatEventCoalescer((event) => events.push(event), { flushIntervalMs: 10, maxTextLength: 100 });
+
+  await coalescer.enqueue({ type: "deep_research_orchestrator_update", status: "running", reasoningDelta: "compare " });
+  await coalescer.enqueue({ type: "deep_research_orchestrator_update", status: "running", reasoningDelta: "findings" });
+  await wait(20);
+
+  assert.deepEqual(events, [{ type: "deep_research_orchestrator_update", status: "running", reasoningDelta: "compare findings" }]);
+  await coalescer.drain();
+});
+
 test("flushes text at the size limit and keeps structural events ordered", async () => {
   const events = [];
   const coalescer = createChatEventCoalescer((event) => events.push(event), { flushIntervalMs: 1_000, maxTextLength: 5 });

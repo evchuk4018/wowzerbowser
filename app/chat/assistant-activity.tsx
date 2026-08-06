@@ -1,6 +1,7 @@
 "use client";
 
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type {
   ChatArtifact,
 } from "../../lib/chat-protocol";
@@ -41,6 +42,8 @@ function useLiveDuration(startedAt?: number, running = false) {
 
   return startedAt === undefined ? undefined : Math.max(0, now - startedAt);
 }
+
+const DEEP_RESEARCH_ORCHESTRATOR_ID = "deep-research-orchestrator";
 
 type PythonSource = {
   filename: string;
@@ -157,8 +160,16 @@ function ImageDisclosure({ activity }: { activity: ImageActivity }) {
 }
 type RenderableActivity = AssistantActivity | SubagentActivity;
 
-function ReasoningCard({ activity, phaseActivities }: { activity: ReasoningActivity; phaseActivities: RenderableActivity[] }) {
-  const [open, setOpen] = useState(false);
+function ReasoningCard({
+  activity,
+  phaseActivities,
+  autoOpen = false,
+}: {
+  activity: ReasoningActivity;
+  phaseActivities: RenderableActivity[];
+  autoOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(autoOpen);
   const liveDuration = useLiveDuration(activity.startedAt, activity.status === "running");
   const duration = activity.durationMs ?? liveDuration;
   const subagents = phaseActivities.filter((item): item is SubagentActivity => item.kind === "subagent");
@@ -194,6 +205,49 @@ function ReasoningCard({ activity, phaseActivities }: { activity: ReasoningActiv
           {subagents.map((item) => <SubagentDisclosure key={item.id} activity={item} />)}
         </div>
       )}
+    </section>
+  );
+}
+
+function ResearchActivityDisclosure({
+  activity,
+  subagents,
+  streaming,
+  children,
+}: {
+  activity: ReasoningActivity;
+  subagents: SubagentActivity[];
+  streaming: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(streaming);
+  const previousStreaming = useRef(streaming);
+  const completedSubagents = subagents.filter((item) => item.status === "completed").length;
+  const status = streaming ? "Working" : "Complete";
+
+  useEffect(() => {
+    if (previousStreaming.current && !streaming) setOpen(false);
+    if (!previousStreaming.current && streaming) setOpen(true);
+    previousStreaming.current = streaming;
+  }, [streaming]);
+
+  return (
+    <section className={`research-activity ${open ? "research-activity-open" : ""}`}>
+      <button
+        type="button"
+        className="research-activity-summary"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span className="reasoning-chevron" aria-hidden="true">â€º</span>
+        <span className="research-activity-heading">
+          <span className="research-activity-title">Deep research</span>
+          <span className="research-activity-current">{activity.summary ?? "Coordinating research"}</span>
+        </span>
+        <span className={`research-activity-status research-activity-status-${streaming ? "running" : "complete"}`} role="status" aria-live="polite">{status}</span>
+        {subagents.length > 0 && <span className="research-activity-count">{completedSubagents}/{subagents.length} agents</span>}
+      </button>
+      {open && <div className="research-activity-details">{children}</div>}
     </section>
   );
 }
@@ -393,23 +447,45 @@ function AssistantActivityTimelineInner({
           const segments = phaseSegments(group.activities);
           return (
             <div className="reasoning-phase" data-phase={phase} key={`phase-${phase}`}>
-              {segments.map((segment) => segment.kind === "output" ? (
-                <OutputBubble
-                  key={segment.activity.id}
-                  activity={segment.activity}
-                  annotations={annotationsForOutput(annotations, outputOffsets.get(segment.activity.id) ?? 0, segment.activity.content.length)}
-                  sources={sources}
-                  artifacts={artifacts}
-                  onOpenArtifact={onOpenArtifact}
-                  streaming={streaming && segment.activity.id === lastOutputId}
-                />
-              ) : (
-                <ReasoningCard
-                  key={`reasoning-${segment.activities[0]?.id ?? phase}`}
-                  activity={reasoningForActivities(phase, segment.activities)}
-                  phaseActivities={segment.activities}
-                />
-              ))}
+              {segments.map((segment) => {
+                if (segment.kind === "output") {
+                  return (
+                    <OutputBubble
+                      key={segment.activity.id}
+                      activity={segment.activity}
+                      annotations={annotationsForOutput(annotations, outputOffsets.get(segment.activity.id) ?? 0, segment.activity.content.length)}
+                      sources={sources}
+                      artifacts={artifacts}
+                      onOpenArtifact={onOpenArtifact}
+                      streaming={streaming && segment.activity.id === lastOutputId}
+                    />
+                  );
+                }
+
+                const activity = reasoningForActivities(phase, segment.activities);
+                const subagents = segment.activities.filter((item): item is SubagentActivity => item.kind === "subagent");
+                const isDeepResearch = subagents.length > 0
+                  || segment.activities.some((item) => item.kind === "reasoning" && item.id === DEEP_RESEARCH_ORCHESTRATOR_ID);
+                const card = (
+                  <ReasoningCard
+                    key={`reasoning-${segment.activities[0]?.id ?? phase}`}
+                    activity={activity}
+                    phaseActivities={segment.activities}
+                    autoOpen={isDeepResearch && streaming}
+                  />
+                );
+                if (!isDeepResearch) return card;
+                return (
+                  <ResearchActivityDisclosure
+                    key={`research-${segment.activities[0]?.id ?? phase}`}
+                    activity={activity}
+                    subagents={subagents}
+                    streaming={streaming}
+                  >
+                    {card}
+                  </ResearchActivityDisclosure>
+                );
+              })}
               {group.phaseBreak?.update && (
                 <div className="message-bubble phase-progress-update" role="status" aria-label="Progress update">
                   <span className="phase-progress-update-label">Progress update</span>
