@@ -317,21 +317,6 @@ function queuedSubagentActivity(
   };
 }
 
-function applyResearchPlanActivities(
-  activities: ChatAssistantActivity[] | undefined,
-  plan: DeepResearchPlan,
-  round: number,
-  phase: number,
-): ChatAssistantActivity[] {
-  const next = [...(activities ?? [])];
-  for (const item of plan.items) {
-    if (!next.some((activity) => activity.kind === "subagent" && activity.taskId === item.id)) {
-      next.push(queuedSubagentActivity(item.id, item.title, round, phase));
-    }
-  }
-  return orderSubagentActivities(next, plan);
-}
-
 function applySubagentUpdate(
   activities: ChatAssistantActivity[] | undefined,
   event: Extract<ChatStreamEvent, { type: "subagent_update" }>,
@@ -437,12 +422,6 @@ export function applyChatStreamEvent(
     next.todos = event.todos;
   } else if (event.type === "deep_research_plan") {
     next.deepResearchPlan = event.plan;
-    next.activities = applyResearchPlanActivities(
-      next.activities,
-      event.plan,
-      next.traceRound ?? 1,
-      next.tracePhase ?? 1,
-    );
   } else if (event.type === "subagent_update") {
     next.activities = applySubagentUpdate(
       next.activities,
