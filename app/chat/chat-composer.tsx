@@ -22,7 +22,7 @@ import {
 import { validateChatDocument, type PendingChatDocument } from "./chat-document-attachments";
 import { DOCX_CONTENT_TYPE, DOCUMENT_CONTENT_TYPES, type ChatDocumentAttachment } from "../../lib/chat-document";
 import type { TodoList } from "../../lib/todo-protocol";
-import { CHAT_MODE_COMMANDS, chatModeCommandAtCaret, type ChatMode } from "../../lib/chat-modes";
+import { CHAT_MODE_COMMANDS, chatModeCommandAtCaret, clearChatModeCommand, type ChatMode } from "../../lib/chat-modes";
 
 function formatDocumentSize(size: number): string {
   if (size < 1024) return `${size} B`;
@@ -495,7 +495,21 @@ export function ChatComposer({
               ))}
             </div>
           )}
-          {mode === "deep_research" && <span className="composer-mode-chip">Deep research</span>}
+          {mode === "deep_research" && (
+            <button
+              type="button"
+              className="composer-mode-chip"
+              aria-label="Disable deep research"
+              aria-pressed={true}
+              disabled={disabled}
+              onClick={() => {
+                setMode("normal");
+                setDraft((current) => clearChatModeCommand(current));
+              }}
+            >
+              Deep research
+            </button>
+          )}
           <div className="composer-action-spacer" />
           <div className="composer-menu">
             <button

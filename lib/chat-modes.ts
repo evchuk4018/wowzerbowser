@@ -5,12 +5,17 @@ export const CHAT_MODE_COMMANDS = [
 ];
 
 const DEEP_RESEARCH_COMMAND = /(^|\s+)\/deep-research(?=\s|$)/i;
+const DEEP_RESEARCH_COMMAND_GLOBAL = /(^|\s+)\/deep-research(?=\s|$)/gi;
+
+export function clearChatModeCommand(value: string): string {
+  return value.replace(DEEP_RESEARCH_COMMAND_GLOBAL, "").trim();
+}
 
 export function parseChatModeCommand(value: string): { mode: ChatMode; content: string } {
   if (!DEEP_RESEARCH_COMMAND.test(value)) return { mode: "normal", content: value };
   return {
     mode: "deep_research",
-    content: value.replace(DEEP_RESEARCH_COMMAND, "").trim(),
+    content: clearChatModeCommand(value),
   };
 }
 

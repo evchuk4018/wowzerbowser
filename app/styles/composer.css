@@ -329,7 +329,10 @@
 .composer-command-option strong { color: inherit; font-size: 13px; }
 .composer-command-option small { margin-top: 3px; color: var(--quiet); font-size: 11px; line-height: 1.35; }
 .composer-command-icon { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 8px; background: #2b2235; color: #dbb8ff; font-size: 18px; }
-.composer-mode-chip { border: 1px solid rgba(170, 105, 255, .35); border-radius: 999px; background: rgba(100, 56, 150, .18); padding: 6px 9px; color: #d6b8ff; font-size: 11px; font-weight: 650; }
+.composer-mode-chip { border: 1px solid rgba(170, 105, 255, .35); border-radius: 999px; background: rgba(100, 56, 150, .18); padding: 6px 9px; color: #d6b8ff; cursor: pointer; font: inherit; font-size: 11px; font-weight: 650; }
+.composer-mode-chip:hover { border-color: rgba(203, 161, 255, .7); background: rgba(123, 50, 201, .28); }
+.composer-mode-chip:focus-visible { outline: 2px solid #cba1ff; outline-offset: 2px; }
+.composer-mode-chip:disabled { cursor: default; opacity: .7; }
 
 .composer-menu {
   position: relative;

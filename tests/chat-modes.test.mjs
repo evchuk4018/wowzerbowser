@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chatModeCommandAtCaret, parseChatModeCommand } from "../lib/chat-modes.ts";
+import { chatModeCommandAtCaret, clearChatModeCommand, parseChatModeCommand } from "../lib/chat-modes.ts";
 import { runSubagents } from "../app/server/agent/subagent-coordinator.ts";
 
 test("deep research slash command is extracted from the prompt", () => {
@@ -24,6 +24,12 @@ test("deep research slash command is extracted from anywhere in a prompt", () =>
     mode: "normal",
     content: "https://example.test/deep-research is a URL",
   });
+});
+
+test("deep research mode can be cleared without changing URL text", () => {
+  assert.equal(clearChatModeCommand("/deep-research compare battery technologies"), "compare battery technologies");
+  assert.equal(clearChatModeCommand("compare /deep-research battery technologies"), "compare battery technologies");
+  assert.equal(clearChatModeCommand("https://example.test/deep-research is a URL"), "https://example.test/deep-research is a URL");
 });
 
 test("command autocomplete finds a standalone slash token at the caret", () => {
