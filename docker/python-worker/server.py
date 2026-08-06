@@ -134,7 +134,7 @@ os.environ.pop("PYTHON_WORKER_SECRET", None)
 STATE_LOCK = threading.RLock()
 EXECUTION_SLOT = threading.Lock()
 SESSIONS_BY_TOKEN: dict[str, Session] = {}
-TOKENS_BY_KEY: dict[str, str] = {}
+TOKENS_BY_KEY: dict[str, set[str]] = {}
 
 
 def now() -> float:
@@ -627,6 +627,18 @@ def workspace_for(key: str) -> Path:
     return WORKSPACE_ROOT / key
 
 
+def remove_session(token: str) -> Session | None:
+    session = SESSIONS_BY_TOKEN.pop(token, None)
+    if session is None:
+        return None
+    tokens = TOKENS_BY_KEY.get(session.key)
+    if tokens is not None:
+        tokens.discard(token)
+        if not tokens:
+            TOKENS_BY_KEY.pop(session.key, None)
+    return session
+
+
 def cleanup_sessions() -> None:
     expired: list[str] = []
     with STATE_LOCK:
@@ -634,9 +646,7 @@ def cleanup_sessions() -> None:
             if session.expires_at < now():
                 expired.append(token)
         for token in expired:
-            session = SESSIONS_BY_TOKEN.pop(token, None)
-            if session is not None:
-                TOKENS_BY_KEY.pop(session.key, None)
+            remove_session(token)
 
 
 def session_for(token: Any) -> Session:
@@ -998,14 +1008,12 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             key = workspace_key(owner_id, conversation_id)
             with STATE_LOCK:
                 cleanup_sessions()
-                if key in TOKENS_BY_KEY:
-                    raise WorkerError(409, "Python is already running for this conversation.")
                 token = secrets.token_urlsafe(24)
                 workspace = workspace_for(key)
                 workspace.mkdir(parents=True, exist_ok=True)
                 session = Session(token, key, workspace, now() + SESSION_TTL_SECONDS)
                 SESSIONS_BY_TOKEN[token] = session
-                TOKENS_BY_KEY[key] = token
+                TOKENS_BY_KEY.setdefault(key, set()).add(token)
             try:
                 # Prepare the workspace before the caller receives a session.
                 # This keeps venv creation out of the first user-visible
@@ -1015,17 +1023,14 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             except Exception:
                 with STATE_LOCK:
                     if SESSIONS_BY_TOKEN.get(token) is session:
-                        SESSIONS_BY_TOKEN.pop(token, None)
-                    if TOKENS_BY_KEY.get(key) == token:
-                        TOKENS_BY_KEY.pop(key, None)
+                        remove_session(token)
                 raise
             return 200, {"session": token}, "json"
         if path == "/v1/sessions/close" and method == "POST":
             token = body.get("session")
             with STATE_LOCK:
-                session = SESSIONS_BY_TOKEN.pop(token, None) if isinstance(token, str) else None
-                if session is not None:
-                    TOKENS_BY_KEY.pop(session.key, None)
+                if isinstance(token, str):
+                    remove_session(token)
             return 200, {"closed": True}, "json"
         if path == "/v1/execute" and method == "POST":
             session = session_for(body.get("session"))
@@ -1101,8 +1106,8 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
                 return 200, {"deleted": True}, "json"
             key = workspace_key(body.get("ownerId"), body.get("conversationId"))
             with STATE_LOCK:
-                token = TOKENS_BY_KEY.pop(key, None)
-                if token is not None:
+                tokens = TOKENS_BY_KEY.pop(key, set())
+                for token in tokens:
                     SESSIONS_BY_TOKEN.pop(token, None)
             with execution_slot(time.time() + 10):
                 shutil.rmtree(workspace_for(key), ignore_errors=True)

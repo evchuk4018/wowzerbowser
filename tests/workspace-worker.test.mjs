@@ -18,6 +18,14 @@ test("the Python worker exposes bounded, session-scoped workspace operations", (
   assert.doesNotMatch(workerSource, /shell=True/);
 });
 
+test("the Python worker allows parallel session handles for one shared workspace", () => {
+  assert.match(workerSource, /TOKENS_BY_KEY: dict\[str, set\[str\]\] = \{\}/);
+  assert.match(workerSource, /TOKENS_BY_KEY\.setdefault\(key, set\(\)\)\.add\(token\)/);
+  assert.match(workerSource, /tokens\.discard\(token\)/);
+  assert.match(workerSource, /for token in tokens:\s+SESSIONS_BY_TOKEN\.pop\(token, None\)/);
+  assert.doesNotMatch(workerSource, /if key in TOKENS_BY_KEY:\s+raise WorkerError\(409, "Python is already running for this conversation\."\)/);
+});
+
 test("LocalPythonExecutor keeps root-directory and file-path contracts distinct", async () => {
   process.env.PYTHON_WORKER_URL = "http://python-worker:5003";
   process.env.PYTHON_WORKER_SECRET = "01234567890123456789012345678901";
