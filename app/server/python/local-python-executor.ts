@@ -1,7 +1,6 @@
 import "server-only";
 
 import { PYTHON_TOOL_INPUT_LIMITS, relativeWorkspacePath, validatePythonToolInput } from "../../../lib/python-tool-policy";
-import type { WorkspaceCommandResult } from "../../../lib/workspace-protocol";
 
 export { relativeWorkspacePath, validatePythonToolInput } from "../../../lib/python-tool-policy";
 
@@ -65,7 +64,31 @@ export type LocalCommandInput = {
   timeoutMs?: number;
 };
 
-export type LocalCommandResult = WorkspaceCommandResult;
+export type LocalCommandChangedFile = {
+  path: string;
+  name: string;
+  size: number;
+  contentType: string;
+  language: string;
+  editable: boolean;
+  preview: "html" | "markdown" | "svg" | "text" | "none";
+  sha256?: string;
+};
+
+/** Command metadata is kept structural so this runtime slice has no protocol-layer dependency. */
+export type LocalCommandResult = {
+  command: string;
+  args: string[];
+  cwd: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  durationMs: number;
+  timedOut?: boolean;
+  stdoutTruncated?: boolean;
+  stderrTruncated?: boolean;
+  changedFiles?: LocalCommandChangedFile[];
+};
 
 export function isLocalPythonConfigured(): boolean {
   return Boolean(PYTHON_WORKER_URL && PYTHON_WORKER_SECRET.length >= 32);
