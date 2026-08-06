@@ -187,9 +187,11 @@ test("web search queries every self-hosted provider and caps higher counts", asy
   const originalStack = process.env.SEARCH_STACK_ENABLED;
   process.env.SEARCH_STACK_ENABLED = "true";
   const requestedUrls = [];
-  globalThis.fetch = async (url) => {
+  const requested = [];
+  globalThis.fetch = async (url, init = {}) => {
     const value = String(url);
     requestedUrls.push(value);
+    requested.push({ url: value, init });
     if (value.includes("searxng")) return Response.json({ results: [{ title: "Web result", url: "https://example.com/web", content: "Web evidence" }] });
     if (value.includes("wikipedia")) return Response.json({ query: { pages: { "1": { title: "Reference", fullurl: "https://en.wikipedia.org/wiki/Reference", extract: "Reference evidence" } } } });
     if (value.includes("miniflux")) return Response.json({ entries: [{ title: "News result", url: "https://news.example.com/story", content: "News evidence", published_at: "2026-08-04T12:00:00Z" }] });
@@ -201,7 +203,12 @@ test("web search queries every self-hosted provider and caps higher counts", asy
     assert.equal(result.web?.kind, "search");
     assert.equal(result.web?.query, "current date");
     assert.equal(requestedUrls.length, 4);
-    assert.ok(requestedUrls.some((url) => url.includes("searxng") && new URL(url).searchParams.get("q") === "current date"));
+    const searxngRequest = requested.find(({ url }) => url.includes("searxng"));
+    assert.ok(searxngRequest);
+    assert.equal(searxngRequest.init.method, "POST");
+    assert.equal(searxngRequest.init.headers["Content-Type"], "application/x-www-form-urlencoded");
+    assert.equal(new URLSearchParams(searxngRequest.init.body).get("q"), "current date");
+    assert.equal(new URLSearchParams(searxngRequest.init.body).get("categories"), "news");
     assert.ok(requestedUrls.some((url) => url.includes("redlib")));
     assert.ok(requestedUrls.some((url) => url.includes("wikipedia")));
     assert.ok(requestedUrls.some((url) => url.includes("miniflux")));

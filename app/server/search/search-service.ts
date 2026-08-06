@@ -15,12 +15,61 @@ const PROVIDER_WEIGHTS: Record<SearchFocus, Record<SearchProviderName, number>> 
   reference: { searxng: 0.85, redlib: 0.55, mediawiki: 1.6, miniflux: 0.6 },
 };
 
+const RELEVANCE_STOP_WORDS = new Set([
+  "a", "about", "an", "and", "are", "at", "be", "by", "for", "from", "how", "in", "is", "it", "me",
+  "of", "on", "or", "please", "search", "tell", "the", "to", "what", "when", "where", "which", "who", "why",
+  "with",
+]);
+
 export class SearchUnavailableError extends Error {
   constructor(failedProviders: SearchProviderName[] = []) {
-    super(failedProviders.length
-      ? `The self-hosted search stack is temporarily unavailable (${failedProviders.join(", ")}).`
-      : "The self-hosted search stack is temporarily unavailable.");
+    super(failedProviders.length ? `Search providers are unavailable (${failedProviders.join(", ")}).` : "Search providers are unavailable.");
+    this.name = "SearchUnavailableError";
   }
+}
+
+export class SearchNoResultsError extends Error {
+  constructor() {
+    super("No search results were found.");
+    this.name = "SearchNoResultsError";
+  }
+}
+
+type ProviderState = "fulfilled-with-results" | "fulfilled-empty" | "rejected";
+
+type ProviderOutcome = {
+  name: SearchProviderName;
+  state: ProviderState;
+  candidates: SearchCandidate[];
+  error?: unknown;
+};
+
+function lexicalTokens(value: string): string[] {
+  return value
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .toLocaleLowerCase("en-US")
+    .split(/[^\p{L}\p{N}]+/gu)
+    .filter((token) => token.length > 1 && !RELEVANCE_STOP_WORDS.has(token));
+}
+
+function mediaWikiCandidateIsRelevant(item: SearchCandidate, query: string): boolean {
+  const queryTerms = new Set(lexicalTokens(query));
+  if (!queryTerms.size) return false;
+  const resultTerms = new Set(lexicalTokens(`${item.title} ${item.snippet}`));
+  let matches = 0;
+  for (const term of queryTerms) if (resultTerms.has(term)) matches += 1;
+  return matches >= Math.min(2, queryTerms.size);
+}
+
+function filterCandidates(candidates: SearchCandidate[], query: SearchProviderQuery): SearchCandidate[] {
+  if (query.focus === "reference") return candidates;
+  return candidates.filter((item) => item.provider !== "mediawiki" || mediaWikiCandidateIsRelevant(item, query.query));
+}
+
+function providerErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message.slice(0, 240);
+  return "unknown provider error";
 }
 
 function rankCandidates(candidates: SearchCandidate[], focus: SearchFocus, count: number): SearchCandidate[] {
@@ -68,12 +117,21 @@ export async function searchSelfHosted(input: {
     ["mediawiki", searchMediaWiki(query, input.signal)],
     ["miniflux", searchMiniflux(query, input.signal)],
   ];
-  const results = await Promise.all(providers.map(async ([name, request]) => [name, await Promise.allSettled([request])] as const));
-  const failedProviders = results.flatMap(([name, [result]]) => result.status === "rejected" ? [name] : []);
-  const candidates = results.flatMap(([, [result]]) => result.status === "fulfilled" ? result.value : []);
-  if (failedProviders.length && candidates.length) {
-    console.warn(`[search] provider failures: ${failedProviders.join(", ")}`);
+  const outcomes: ProviderOutcome[] = await Promise.all(providers.map(async ([name, request]): Promise<ProviderOutcome> => {
+    try {
+      const candidates = filterCandidates(await request, query);
+      return { name, state: candidates.length ? "fulfilled-with-results" : "fulfilled-empty", candidates };
+    } catch (error) {
+      console.warn(`[search] provider ${name} rejected: ${providerErrorMessage(error)}`);
+      return { name, state: "rejected", candidates: [], error };
+    }
+  }));
+  const failedProviders = outcomes.filter((outcome) => outcome.state === "rejected").map((outcome) => outcome.name);
+  const candidates = outcomes.flatMap((outcome) => outcome.candidates);
+  if (failedProviders.length && candidates.length) console.warn(`[search] partial provider failures: ${failedProviders.join(", ")}`);
+  if (!candidates.length) {
+    if (failedProviders.length) throw new SearchUnavailableError(failedProviders);
+    throw new SearchNoResultsError();
   }
-  if (!candidates.length) throw new SearchUnavailableError(failedProviders);
   return rankCandidates(candidates, query.focus, query.count);
 }

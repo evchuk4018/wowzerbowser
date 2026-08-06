@@ -91,7 +91,7 @@ services:
       start_period: 15s
 
   searxng:
-    image: docker.io/searxng/searxng:latest
+    image: docker.io/searxng/searxng@sha256:f4c8e59de166ed71f6380c0847c312ca51f0d41996e31d0559163b6b09ecde52
     environment:
       SEARXNG_SECRET: ${SEARXNG_SECRET:-replace-with-a-long-random-secret}
       SEARXNG_BIND_ADDRESS: 0.0.0.0
@@ -112,14 +112,14 @@ services:
     mem_limit: 512m
     pids_limit: 128
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; response = urllib.request.urlopen('http://127.0.0.1:8080/search?q=healthcheck&format=json', timeout=4); raise SystemExit(0 if response.status == 200 else 1)"]
+      test: ["CMD", "python", "-c", "import json, urllib.parse, urllib.request; data = urllib.parse.urlencode({'q': 'healthcheck', 'format': 'json', 'categories': 'general', 'pageno': '1'}).encode(); request = urllib.request.Request('http://127.0.0.1:8080/search', data=data, method='POST', headers={'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded'}); response = urllib.request.urlopen(request, timeout=4); content_type = response.headers.get_content_type(); payload = json.load(response); raise SystemExit(0 if response.status == 200 and 'json' in content_type and isinstance(payload, dict) else 1)"]
       interval: 20s
       timeout: 8s
       retries: 6
       start_period: 30s
 
   redlib:
-    image: quay.io/redlib/redlib:latest
+    image: quay.io/redlib/redlib@sha256:e6647a94d553bf3f7c95c53fc6d9da5785e6c278d9002e99ea32abdb5e3c513a
     environment:
       PORT: 8080
       ENABLE_RSS: "on"
@@ -136,7 +136,7 @@ services:
     mem_limit: 256m
     pids_limit: 128
     healthcheck:
-      test: ["CMD-SHELL", "wget --server-response --spider --timeout=5 http://127.0.0.1:8080/ 2>&1 | grep -qE 'HTTP/[0-9.]+ [0-9]+'"]
+      test: ["CMD-SHELL", "body=$$(wget -qO- -T 5 'http://127.0.0.1:8080/search?q=healthcheck&sort=relevance') || exit 1; printf '%s' \"$$body\" | grep -q 'id=\"column_one\"'"]
       interval: 20s
       timeout: 5s
       retries: 6

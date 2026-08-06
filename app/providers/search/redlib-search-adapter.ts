@@ -3,7 +3,7 @@ import "server-only";
 import { JSDOM } from "jsdom";
 import { CHAT_SOURCE_SNIPPET_MAX_LENGTH } from "../../../lib/chat-citations";
 import type { SearchCandidate, SearchProviderQuery } from "../../server/search/search-types";
-import { requireOk, searchRequest, text } from "./search-http";
+import { searchRequest, text } from "./search-http";
 import { candidate } from "./search-candidate";
 
 const POST_PATH = /\/r\/[^/]+\/comments\//i;
@@ -18,14 +18,27 @@ function resultText(anchor: Element): string {
   return (container?.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, CHAT_SOURCE_SNIPPET_MAX_LENGTH);
 }
 
+function requireSearchResponse(response: Response): void {
+  if (!response.ok) {
+    console.warn(`[search] redlib search endpoint returned status ${response.status}.`);
+    throw new Error(`Redlib search failed with status ${response.status}.`);
+  }
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (!contentType.includes("html")) throw new Error("Redlib search returned an unexpected content type.");
+}
+
 export async function searchRedlib(query: SearchProviderQuery, signal?: AbortSignal): Promise<SearchCandidate[]> {
   const base = process.env.REDLIB_URL?.trim() || "http://redlib:8080";
   const endpoint = new URL("/search", `${base.replace(/\/$/, "")}/`);
-  endpoint.search = new URLSearchParams({ q: query.query, sort: "relevance", type: "posts" }).toString();
+  endpoint.search = new URLSearchParams({ q: query.query, sort: "relevance" }).toString();
   const response = await searchRequest(endpoint.toString(), { headers: { Accept: "text/html" } }, signal);
-  requireOk(response, "Redlib");
+  requireSearchResponse(response);
   const html = await response.text();
   const dom = new JSDOM(html, { url: endpoint.toString() });
+  if (dom.window.document.querySelector("#error")) {
+    console.warn("[search] redlib search returned an upstream error page.");
+    throw new Error("Redlib search returned an upstream error page.");
+  }
   const seen = new Set<string>();
   const results: SearchCandidate[] = [];
   for (const anchor of [...dom.window.document.querySelectorAll("a[href]")]) {

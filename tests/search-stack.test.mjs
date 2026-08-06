@@ -4,13 +4,14 @@ import { extractFirecrawl } from "../app/providers/research/research-page-adapte
 import { searchRedlib } from "../app/providers/search/redlib-search-adapter.ts";
 import { searchMiniflux } from "../app/providers/search/miniflux-search-adapter.ts";
 import { searchSearXNG } from "../app/providers/search/searxng-search-adapter.ts";
+import { SearchNoResultsError, SearchUnavailableError, searchSelfHosted } from "../app/server/search/search-service.ts";
 
-test("Redlib search normalizes discussion links to public Reddit URLs", async () => {
+test("Redlib v0.36 search HTML normalizes discussion links to public Reddit URLs", async () => {
   const previousFetch = globalThis.fetch;
   const previousUrl = process.env.REDLIB_URL;
   process.env.REDLIB_URL = "http://redlib:8080";
   globalThis.fetch = async () => new Response(
-    '<main><article><a href="/r/selfhosted/comments/abc123/self_hosted_search/">Self-hosted search</a><p>Community experience</p></article></main>',
+    '<main><div id="column_one"><article class="post"><a class="post_title" href="/r/selfhosted/comments/abc123/self_hosted_search/">Self-hosted search</a><p>Community experience</p></article></div></main>',
     { headers: { "content-type": "text/html" } },
   );
   try {
@@ -19,6 +20,43 @@ test("Redlib search normalizes discussion links to public Reddit URLs", async ()
     assert.equal(results[0].provider, "redlib");
     assert.equal(results[0].url, "https://www.reddit.com/r/selfhosted/comments/abc123/self_hosted_search");
     assert.match(results[0].snippet, /Community experience/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousUrl === undefined) delete process.env.REDLIB_URL; else process.env.REDLIB_URL = previousUrl;
+  }
+});
+
+test("Redlib search preserves upstream HTTP failures", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousUrl = process.env.REDLIB_URL;
+  process.env.REDLIB_URL = "http://redlib:8080";
+  try {
+    for (const status of [403, 404]) {
+      globalThis.fetch = async () => new Response("upstream failure", { status, headers: { "content-type": "text/html" } });
+      await assert.rejects(
+        searchRedlib({ query: "weather cup", focus: "community", count: 5, queryIndex: 0, intent: "community" }),
+        new RegExp(`status ${status}`),
+      );
+    }
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousUrl === undefined) delete process.env.REDLIB_URL; else process.env.REDLIB_URL = previousUrl;
+  }
+});
+
+test("Redlib search rejects a 200 upstream-error page instead of returning empty results", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousUrl = process.env.REDLIB_URL;
+  process.env.REDLIB_URL = "http://redlib:8080";
+  globalThis.fetch = async () => new Response(
+    '<main><div id="error"><h1>Failed to parse page JSON data</h1></div></main>',
+    { headers: { "content-type": "text/html" } },
+  );
+  try {
+    await assert.rejects(
+      searchRedlib({ query: "weather cup", focus: "community", count: 5, queryIndex: 0, intent: "community" }),
+      /upstream error page/i,
+    );
   } finally {
     globalThis.fetch = previousFetch;
     if (previousUrl === undefined) delete process.env.REDLIB_URL; else process.env.REDLIB_URL = previousUrl;
@@ -76,25 +114,118 @@ test("page retrieval falls back to bounded direct HTML extraction when Firecrawl
 
 test("news searches use the SearXNG news category and latest feed entries for broad queries", async () => {
   const previousFetch = globalThis.fetch;
+  const previousSearXNGUrl = process.env.SEARXNG_URL;
+  const previousMinifluxUrl = process.env.MINIFLUX_URL;
   const calls = [];
   process.env.SEARXNG_URL = "http://searxng:8080";
   process.env.MINIFLUX_URL = "http://miniflux:8080";
-  globalThis.fetch = async (url) => {
-    calls.push(String(url));
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), init });
     if (String(url).includes("searxng")) return Response.json({ results: [{ title: "Headline", url: "https://example.com/news", content: "Current news" }] });
     return Response.json({ entries: [{ title: "Feed headline", url: "https://example.com/feed", content: "Latest feed item", published_at: "2026-08-04T12:00:00Z" }] });
   };
   try {
-    const query = { query: "top news today", focus: "news", count: 10, queryIndex: 0, intent: "recent" };
+    const query = { query: "top news today", focus: "news", count: 10, queryIndex: 0, intent: "recent", freshness: "day" };
     await searchSearXNG(query);
     await searchMiniflux(query);
-    assert.match(calls[0], /categories=news/);
-    assert.match(calls[1], /\/v1\/entries\?/);
-    assert.doesNotMatch(calls[1], /search=/);
+    assert.equal(calls[0].url, "http://searxng:8080/search");
+    assert.equal(calls[0].init.method, "POST");
+    assert.equal(calls[0].init.headers.Accept, "application/json");
+    assert.equal(calls[0].init.headers["Content-Type"], "application/x-www-form-urlencoded");
+    assert.deepEqual(Object.fromEntries(new URLSearchParams(calls[0].init.body)), {
+      q: "top news today",
+      format: "json",
+      categories: "news",
+      pageno: "1",
+      time_range: "day",
+    });
+    assert.equal(calls[1].url.startsWith("http://miniflux:8080/v1/entries?"), true);
+    assert.doesNotMatch(calls[1].url, /search=/);
   } finally {
     globalThis.fetch = previousFetch;
-    delete process.env.SEARXNG_URL;
-    delete process.env.MINIFLUX_URL;
+    if (previousSearXNGUrl === undefined) delete process.env.SEARXNG_URL; else process.env.SEARXNG_URL = previousSearXNGUrl;
+    if (previousMinifluxUrl === undefined) delete process.env.MINIFLUX_URL; else process.env.MINIFLUX_URL = previousMinifluxUrl;
+  }
+});
+
+test("SearXNG rejects a successful HTML page instead of parsing the UI", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousUrl = process.env.SEARXNG_URL;
+  process.env.SEARXNG_URL = "http://searxng:8080";
+  globalThis.fetch = async () => new Response("<html><body>Search UI</body></html>", {
+    status: 200,
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+  try {
+    await assert.rejects(
+      searchSearXNG({ query: "weather cup", focus: "general", count: 5, queryIndex: 0, intent: "general" }),
+      /non-json/i,
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousUrl === undefined) delete process.env.SEARXNG_URL; else process.env.SEARXNG_URL = previousUrl;
+  }
+});
+
+test("general search does not return irrelevant MediaWiki fallback pages", async () => {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const value = String(url);
+    if (value.includes("searxng")) return Response.json({ results: [] });
+    if (value.includes("redlib")) return new Response(
+      '<main><div id="column_one"><center>No posts were found.</center></div></main>',
+      { headers: { "content-type": "text/html" } },
+    );
+    if (value.includes("wikipedia")) return Response.json({ query: { pages: {
+      "1": { title: "Major League Soccer", fullurl: "https://en.wikipedia.org/wiki/Major_League_Soccer", extract: "The league is a professional soccer competition." },
+      "2": { title: "FC Bayern Munich", fullurl: "https://en.wikipedia.org/wiki/FC_Bayern_Munich", extract: "A football club based in Munich." },
+    } } });
+    return Response.json({ entries: [] });
+  };
+  try {
+    await assert.rejects(
+      searchSelfHosted({ query: "Pokémon Weather Cup Magcargo", focus: "general", count: 10 }),
+      (error) => error instanceof SearchNoResultsError && /no search results/i.test(error.message),
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("search returns healthy provider results when another provider is unavailable", async () => {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const value = String(url);
+    if (value.includes("searxng")) return Response.json({ results: [{ title: "Weather Cup guide", url: "https://example.com/weather-cup", content: "Magcargo matchup evidence" }] });
+    if (value.includes("redlib")) return new Response("Reddit unavailable", { status: 404, headers: { "content-type": "text/html" } });
+    if (value.includes("wikipedia")) return Response.json({ query: { pages: {
+      "1": { title: "Major League Soccer", fullurl: "https://en.wikipedia.org/wiki/Major_League_Soccer", extract: "The league is a professional soccer competition." },
+    } } });
+    return Response.json({ entries: [] });
+  };
+  try {
+    const results = await searchSelfHosted({ query: "Pokémon Weather Cup Magcargo", focus: "general", count: 10 });
+    assert.equal(results.length, 1);
+    assert.equal(results[0].provider, "searxng");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("search reports rejected provider names when no provider has usable results", async () => {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error("connection refused"); };
+  try {
+    await assert.rejects(
+      searchSelfHosted({ query: "weather cup", focus: "general", count: 10 }),
+      (error) => error instanceof SearchUnavailableError
+        && /searxng/.test(error.message)
+        && /redlib/.test(error.message)
+        && /mediawiki/.test(error.message)
+        && /miniflux/.test(error.message),
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
   }
 });
 

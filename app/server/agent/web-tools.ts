@@ -3,7 +3,7 @@ import "server-only";
 import type { ChatToolCall, ChatToolResult } from "../../../lib/chat-protocol";
 import { CHAT_SOURCE_SNIPPET_MAX_LENGTH, sourceForUrl } from "../../../lib/chat-citations";
 import { isSearchFocus, type SearchFocus } from "../../../lib/search-protocol";
-import { SearchUnavailableError, searchSelfHosted } from "../search/search-service";
+import { SearchNoResultsError, SearchUnavailableError, searchSelfHosted } from "../search/search-service";
 import { fetchResearchPage } from "../research/research-page-service";
 
 export const WEB_SEARCH_TOOL_NAME = "web_search";
@@ -19,7 +19,7 @@ const MAX_LOCATION = 300;
 
 export const WEB_TOOL_DEFINITIONS = [
   { type: "function" as const, function: { name: WEB_SEARCH_TOOL_NAME, description: "Search the web for concise, current result snippets.", parameters: { type: "object", additionalProperties: false, required: ["query"], properties: { query: { type: "string", minLength: 1, maxLength: 400 }, count: { type: "integer", minimum: 1, maximum: MAX_RESULTS }, focus: { type: "string", enum: ["general", "news", "community", "reference"] } } } } },
-  { type: "function" as const, function: { name: FETCH_PAGE_TOOL_NAME, description: "Read a specific public web page as bounded Markdown.", parameters: { type: "object", additionalProperties: false, required: ["url"], properties: { url: { type: "string", minLength: 1, maxLength: 2_000, format: "uri" } } } } },
+  { type: "function" as const, function: { name: FETCH_PAGE_TOOL_NAME, description: "Read a specific public web page as bounded Markdown. Use a URL returned by web_search or explicitly supplied by the user; do not guess undocumented paths.", parameters: { type: "object", additionalProperties: false, required: ["url"], properties: { url: { type: "string", minLength: 1, maxLength: 2_000, format: "uri" } } } } },
   { type: "function" as const, function: { name: CHECK_TIME_TOOL_NAME, description: "Check the current server time, optionally in an IANA time zone.", parameters: { type: "object", additionalProperties: false, properties: { timeZone: { type: "string", minLength: 1, maxLength: MAX_TIME_ZONE } } } } },
   { type: "function" as const, function: { name: CHECK_DATE_TOOL_NAME, description: "Check the current server calendar date, optionally in an IANA time zone.", parameters: { type: "object", additionalProperties: false, properties: { timeZone: { type: "string", minLength: 1, maxLength: MAX_TIME_ZONE } } } } },
   { type: "function" as const, function: { name: CHECK_LOCATION_TOOL_NAME, description: "Check the configured coarse deployment location. This does not locate the user.", parameters: { type: "object", additionalProperties: false, properties: {} } } },
@@ -134,7 +134,9 @@ export async function executeWebTool(call: ChatToolCall, signal?: AbortSignal): 
     }
     throw new Error(`Unknown tool: ${call.name}`);
   } catch (error) {
-    const message = error instanceof SearchUnavailableError ? error.message : error instanceof Error ? error.message : "Web tool failed.";
+    const message = error instanceof SearchUnavailableError || error instanceof SearchNoResultsError
+      ? error.message
+      : error instanceof Error ? error.message : "Web tool failed.";
     return { id: call.id, name: call.name, ok: false, stdout: "", stderr: message, durationMs: Date.now() - startedAt };
   }
 }

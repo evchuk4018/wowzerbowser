@@ -14,15 +14,24 @@ const FRESHNESS: Record<NonNullable<SearchProviderQuery["freshness"]>, string> =
 export async function searchSearXNG(query: SearchProviderQuery, signal?: AbortSignal): Promise<SearchCandidate[]> {
   const base = process.env.SEARXNG_URL?.trim() || "http://searxng:8080";
   const endpoint = new URL("/search", `${base.replace(/\/$/, "")}/`);
-  endpoint.search = new URLSearchParams({
+  const form = new URLSearchParams({
     q: query.query,
     format: "json",
     categories: query.focus === "news" ? "news" : "general",
     pageno: "1",
     ...(query.freshness ? { time_range: FRESHNESS[query.freshness] } : {}),
-  }).toString();
-  const response = await searchRequest(endpoint.toString(), { headers: { Accept: "application/json" } }, signal);
+  });
+  const response = await searchRequest(endpoint.toString(), {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: form.toString(),
+  }, signal);
   requireOk(response, "SearXNG");
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (!contentType.includes("json")) throw new Error("SearXNG search returned a non-JSON response.");
   const body = record(await response.json());
   return array(body.results).map((item, index) => {
     const row = record(item);
