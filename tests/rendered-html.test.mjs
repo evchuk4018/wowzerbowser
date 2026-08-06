@@ -541,6 +541,14 @@ test("expands assistant responses across the mobile transcript", async () => {
   );
 });
 
+test("keeps streamed thinking and assistant output within the available width", async () => {
+  const styles = await readStyles();
+
+  assert.match(styles, /\.reasoning-content \{[\s\S]*?white-space: pre-wrap;[\s\S]*?overflow-wrap: anywhere;/);
+  assert.match(styles, /\.assistant-activity-timeline \{[\s\S]*?min-width: 0;[\s\S]*?max-width: 100%;/);
+  assert.match(styles, /\.assistant-activity-output \{[\s\S]*?min-width: 0;[\s\S]*?max-width: 100%;/);
+});
+
 test("uses normal whitespace flow for rendered assistant Markdown", async () => {
   const styles = await readStyles();
 

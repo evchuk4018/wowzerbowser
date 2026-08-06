@@ -1,5 +1,7 @@
 .reasoning-block {
   width: min(100%, 680px);
+  min-width: 0;
+  max-width: 100%;
   margin: 0 0 10px 2px;
   border-left: 2px solid #50524b;
   color: var(--muted);
@@ -7,6 +9,7 @@
 
 .reasoning-summary {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 7px;
   border: 0;
@@ -15,6 +18,11 @@
   color: #b9bab2;
   cursor: pointer;
   font-size: 13px;
+}
+
+.reasoning-summary > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .reasoning-summary:hover {
@@ -40,11 +48,13 @@
 }
 
 .reasoning-content {
+  min-width: 0;
   padding: 9px 14px 5px 27px;
   color: #a4a59e;
   font-size: 13px;
   line-height: 1.6;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .reasoning-python-list {

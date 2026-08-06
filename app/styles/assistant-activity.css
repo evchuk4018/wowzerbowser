@@ -28,13 +28,22 @@
 .assistant-activity-timeline {
   display: grid;
   width: min(100%, 680px);
+  min-width: 0;
+  max-width: 100%;
   gap: 6px;
   margin-bottom: 10px;
 }
 
 .reasoning-phase {
   display: grid;
+  min-width: 0;
+  max-width: 100%;
   gap: 6px;
+}
+
+.assistant-activity-output {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .phase-progress-update {
