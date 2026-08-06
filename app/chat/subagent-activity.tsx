@@ -2,41 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { formatDuration } from "./format-duration";
+import type { ChatResearchTraceEntry } from "../../lib/chat-protocol";
+import type { ChatResearchSummaryRevision, ChatSubagentActivity } from "../../lib/chat-history";
 
-type SubagentStatus = "queued" | "running" | "completed" | "failed";
-
-type SubagentSummary = string | {
-  title?: string;
-  summary?: string;
-  createdAt?: number;
-};
-
-type SubagentTraceEntry = string | {
-  stage?: string;
-  operation?: string;
-  title?: string;
-  status?: SubagentStatus;
-  durationMs?: number;
-};
-
-/** Temporary structural mirror of ChatSubagentActivity until the shared export lands. */
-export type SubagentActivity = {
-  id: string;
-  kind: "subagent";
-  round: number;
-  phase: number;
-  taskId?: string;
-  title: string;
-  status: SubagentStatus;
-  summary?: string;
-  summaries?: SubagentSummary[];
-  summaryHistory?: SubagentSummary[];
-  trace?: SubagentTraceEntry[];
-  stages?: SubagentTraceEntry[];
-  operations?: SubagentTraceEntry[];
-  startedAt?: number;
-  durationMs?: number;
-};
+export type SubagentActivity = ChatSubagentActivity;
 
 const TRACE_LIMIT = 40;
 
@@ -52,28 +21,26 @@ function useLiveDuration(startedAt: number | undefined, running: boolean) {
   return startedAt === undefined ? undefined : Math.max(0, now - startedAt);
 }
 
-function summaryText(item: SubagentSummary): string | undefined {
-  if (typeof item === "string") return item.trim() || undefined;
-  return item.summary?.trim() || item.title?.trim() || undefined;
+function summaryText(item: ChatResearchSummaryRevision): string | undefined {
+  return item.summary.trim() || undefined;
 }
 
 function latestTitle(activity: SubagentActivity): string {
-  const history = activity.summaryHistory ?? activity.summaries ?? [];
+  const history = activity.summaryHistory ?? [];
   const latest = history.toReversed().map(summaryText).find(Boolean);
   return activity.summary?.trim() || latest || activity.title;
 }
 
-function traceLabel(item: SubagentTraceEntry): string {
-  if (typeof item === "string") return item;
-  return item.title?.trim() || item.operation?.trim() || item.stage?.trim() || "Research step";
+function traceLabel(item: ChatResearchTraceEntry): string {
+  return item.label.trim() || "Research step";
 }
 
 export function SubagentDisclosure({ activity }: { activity: SubagentActivity }) {
   const [open, setOpen] = useState(false);
   const liveDuration = useLiveDuration(activity.startedAt, activity.status === "running");
   const duration = activity.durationMs ?? liveDuration;
-  const summaries = activity.summaryHistory ?? activity.summaries ?? (activity.summary ? [activity.summary] : []);
-  const trace = (activity.trace ?? activity.operations ?? activity.stages ?? []).slice(-TRACE_LIMIT);
+  const summaries = activity.summaryHistory ?? (activity.summary ? [{ revision: 0, summary: activity.summary }] : []);
+  const trace = (activity.trace ?? []).slice(-TRACE_LIMIT);
   const statusLabel = activity.status[0].toUpperCase() + activity.status.slice(1);
 
   return (
@@ -115,7 +82,7 @@ export function SubagentDisclosure({ activity }: { activity: SubagentActivity })
                     <li key={`${index}-${traceLabel(item)}`}>
                       <span>{traceLabel(item)}</span>
                       {detail?.status && <span className="subagent-trace-meta">{detail.status}</span>}
-                      {detail?.durationMs !== undefined && <span className="subagent-trace-meta">{formatDuration(detail.durationMs)}</span>}
+                      {detail?.detail && <span className="subagent-trace-meta">{detail.detail}</span>}
                     </li>
                   );
                 })}

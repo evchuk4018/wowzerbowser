@@ -41,6 +41,7 @@ export function toChatMessageInput(message: Pick<ChatHistoryMessage, "role" | "c
       round.toolCalls = [...(round.toolCalls ?? []), { ...activity.call, result: activity.result }];
       continue;
     }
+    if (activity.kind === "subagent") continue;
     round.toolCalls = [...(round.toolCalls ?? []), {
       ...activity.call,
       result: activity.result ?? {

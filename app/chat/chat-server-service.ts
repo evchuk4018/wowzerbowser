@@ -320,7 +320,22 @@ export async function generateChatResponse(
       request,
       plan,
       signal,
-      onUpdate: async ({ task, status, summary }) => enqueue({ type: "subagent_update", taskId: task.id, title: task.title, status, ...(summary ? { summary } : {}) }),
+      onOrchestratorUpdate: async ({ status, summary, summaryRevision, trace }) => enqueue({
+        type: "deep_research_orchestrator_update",
+        status,
+        ...(summary ? { summary } : {}),
+        ...(summaryRevision === undefined ? {} : { summaryRevision }),
+        ...(trace ? { trace } : {}),
+      }),
+      onSubagentUpdate: async ({ task, status, summary, summaryRevision, trace }) => enqueue({
+        type: "subagent_update",
+        taskId: task.id,
+        title: task.title,
+        status,
+        ...(summary ? { summary } : {}),
+        ...(summaryRevision === undefined ? {} : { summaryRevision }),
+        ...(trace ? { trace } : {}),
+      }),
     });
     await enqueue({ type: "content", delta: result.report });
     await enqueue({ type: "annotations", annotations: [], sources: result.sources });
