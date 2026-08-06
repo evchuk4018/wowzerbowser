@@ -3,11 +3,16 @@ import type {
   ChatToolCall,
   ChatToolResult,
 } from "../../lib/chat-protocol";
-import { normalizeChatImageAttachments, parseChatImageToolResult } from "../../lib/chat-protocol";
+import {
+  normalizeChatImageAttachments,
+  normalizeChatResearchTrace,
+  parseChatImageToolResult,
+} from "../../lib/chat-protocol";
 import type {
   ChatAssistantActivity,
   ChatConversation,
   ChatConversationSummary,
+  ChatResearchSummaryRevision,
 } from "../../lib/chat-history";
 import { DOCUMENT_CONTENT_TYPES, type ChatDocumentAttachment } from "../../lib/chat-document";
 import { CHAT_SOURCE_SNIPPET_MAX_LENGTH, sourceForUrl } from "../../lib/chat-citations";
@@ -47,6 +52,8 @@ type RecordValue = Record<string, unknown>;
 
 const MESSAGE_STATUSES = new Set(["streaming", "complete", "error", "cancelled"]);
 const ACTIVITY_STATUSES = new Set(["running", "complete", "completed", "failed"]);
+const MAX_RESEARCH_SUMMARY_LENGTH = 4_000;
+const MAX_RESEARCH_SUMMARY_HISTORY = 128;
 
 function asRecord(value: unknown): RecordValue | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -173,22 +180,73 @@ function normalizeToolResult(value: unknown): ChatToolResult | undefined {
   return result;
 }
 
+function normalizeResearchSummaryHistory(value: unknown): ChatResearchSummaryRevision[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<number>();
+  return value.slice(0, MAX_RESEARCH_SUMMARY_HISTORY).flatMap((item, index) => {
+    const candidate = asRecord(item);
+    const revision = candidate ? finiteNumber(candidate.revision) : typeof item === "string" ? index : undefined;
+    const summary = candidate
+      ? typeof candidate.summary === "string" ? candidate.summary : undefined
+      : typeof item === "string" ? item : undefined;
+    if (revision === undefined || !Number.isInteger(revision) || revision < 0 || summary === undefined || seen.has(revision)) return [];
+    seen.add(revision);
+    return [{ revision, summary: summary.slice(0, MAX_RESEARCH_SUMMARY_LENGTH) }];
+  });
+}
+
 function normalizeActivity(value: unknown, loadedAt: number, freezeRunning: boolean): ChatAssistantActivity | null {
   const candidate = asRecord(value);
   if (!candidate) return null;
   const id = nonEmptyString(candidate.id);
   const round = finiteNumber(candidate.round);
   const phase = finiteNumber(candidate.phase) ?? 1;
+  const startedAt = nonNegativeNumber(candidate.startedAt);
+  const durationMs = nonNegativeNumber(candidate.durationMs);
+  if (!id || round === undefined) return null;
+
+  if (candidate.kind === "subagent") {
+    const taskId = nonEmptyString(candidate.taskId);
+    const title = nonEmptyString(candidate.title);
+    const status = candidate.status === "queued" || candidate.status === "running" || candidate.status === "completed" || candidate.status === "failed"
+      ? candidate.status
+      : null;
+    if (!taskId || !title || !status) return null;
+    const activity: Extract<ChatAssistantActivity, { kind: "subagent" }> = {
+      id,
+      kind: "subagent",
+      round,
+      phase,
+      taskId,
+      title: title.slice(0, MAX_RESEARCH_SUMMARY_LENGTH),
+      status,
+    };
+    if (typeof candidate.summary === "string") activity.summary = candidate.summary.slice(0, MAX_RESEARCH_SUMMARY_LENGTH);
+    let summaryHistory = normalizeResearchSummaryHistory(candidate.summaryHistory);
+    const summaryRevision = finiteNumber(candidate.summaryRevision);
+    if (summaryHistory.length === 0 && summaryRevision !== undefined && Number.isInteger(summaryRevision) && summaryRevision >= 0 && activity.summary !== undefined) {
+      summaryHistory = [{ revision: summaryRevision, summary: activity.summary }];
+    }
+    if (summaryHistory.length) activity.summaryHistory = summaryHistory;
+    const trace = normalizeChatResearchTrace(candidate.trace);
+    if (trace.length) activity.trace = trace;
+    if (startedAt !== undefined) activity.startedAt = startedAt;
+    if (durationMs !== undefined) activity.durationMs = durationMs;
+    if (freezeRunning && (activity.status === "running" || activity.status === "queued")) {
+      activity.status = "failed";
+      activity.durationMs = durationMs ?? (startedAt === undefined ? undefined : Math.max(0, loadedAt - startedAt));
+    }
+    return activity;
+  }
+
   const status = typeof candidate.status === "string" && ACTIVITY_STATUSES.has(candidate.status)
     ? candidate.status
     : null;
-  const startedAt = nonNegativeNumber(candidate.startedAt);
-  const durationMs = nonNegativeNumber(candidate.durationMs);
-  if (!id || round === undefined || !status) return null;
+  if (!status) return null;
 
   if (candidate.kind === "reasoning") {
     if (typeof candidate.content !== "string" || (status !== "running" && status !== "complete")) return null;
-    const activity: ChatAssistantActivity = {
+    const activity: Extract<ChatAssistantActivity, { kind: "reasoning" }> = {
       id,
       kind: "reasoning",
       round,
@@ -199,6 +257,8 @@ function normalizeActivity(value: unknown, loadedAt: number, freezeRunning: bool
     if (typeof candidate.summary === "string" && candidate.summary.trim()) activity.summary = candidate.summary.trim();
     const summaryRevision = finiteNumber(candidate.summaryRevision);
     if (summaryRevision !== undefined) activity.summaryRevision = summaryRevision;
+    const trace = normalizeChatResearchTrace(candidate.trace);
+    if (trace.length) activity.trace = trace;
     if (startedAt !== undefined) activity.startedAt = startedAt;
     if (durationMs !== undefined) activity.durationMs = durationMs;
     if (freezeRunning && activity.status === "running") {

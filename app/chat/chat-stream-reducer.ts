@@ -73,6 +73,7 @@ export function reduceChatStreamEvent(
       break;
     case "deep_research_plan":
     case "subagent_update":
+    case "deep_research_orchestrator_update":
       waiting = false;
       break;
     case "error":

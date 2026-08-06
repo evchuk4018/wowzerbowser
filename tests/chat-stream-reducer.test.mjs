@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createChatStreamState, reduceChatStreamEvent, reduceChatStreamEvents } from "../app/chat/chat-stream-reducer.ts";
+import { normalizeStoredMessage } from "../app/chat/conversation-storage.ts";
 
 const baseMessage = {
   id: "assistant-1",
@@ -174,4 +175,158 @@ test("phase summaries persist across tool-separated reasoning until replaced", (
     "Reviewing the new evidence",
     "Reviewing the new evidence",
   ]);
+});
+
+const researchPlan = {
+  id: "plan-1",
+  request: "Compare the evidence.",
+  items: [
+    { id: "scope", title: "Scope", question: "What is the scope?", focus: "Definitions" },
+    { id: "evidence", title: "Evidence", question: "What is the evidence?", focus: "Primary sources" },
+    { id: "uncertainty", title: "Uncertainty", question: "What remains uncertain?", focus: "Limitations" },
+  ],
+};
+
+test("deep research plans create every queued subagent card in plan order", () => {
+  const state = reduceChatStreamEvent(
+    createChatStreamState(baseMessage),
+    event(1, { type: "deep_research_plan", plan: researchPlan }),
+  );
+  assert.deepEqual(
+    state.message.activities?.map(({ kind, taskId, title, status }) => ({ kind, taskId, title, status })),
+    [
+      { kind: "subagent", taskId: "scope", title: "Scope", status: "queued" },
+      { kind: "subagent", taskId: "evidence", title: "Evidence", status: "queued" },
+      { kind: "subagent", taskId: "uncertainty", title: "Uncertainty", status: "queued" },
+    ],
+  );
+});
+
+test("subagent updates are idempotent and accumulate only new summary revisions and trace entries", () => {
+  let state = reduceChatStreamEvent(
+    createChatStreamState(baseMessage),
+    event(1, { type: "deep_research_plan", plan: researchPlan }),
+  );
+  const firstUpdate = {
+    type: "subagent_update",
+    taskId: "evidence",
+    title: "Evidence",
+    status: "running",
+    summary: "Collecting primary sources",
+    summaryRevision: 1,
+    trace: [{ id: "stage-1", kind: "stage", label: "Search", status: "running" }],
+  };
+  state = reduceChatStreamEvent(state, event(2, firstUpdate), { now: 100 });
+  state = reduceChatStreamEvent(state, event(3, firstUpdate), { now: 200 });
+  state = reduceChatStreamEvent(state, event(4, {
+    type: "subagent_update",
+    taskId: "evidence",
+    title: "Evidence",
+    status: "running",
+    summary: "Sources collected",
+    summaryRevision: 2,
+    trace: [
+      { id: "stage-1", kind: "stage", label: "Search", status: "completed" },
+      { id: "operation-1", kind: "operation", label: "Read source", status: "running", detail: "Primary source" },
+    ],
+  }), { now: 300 });
+  const subagents = state.message.activities?.filter(({ kind }) => kind === "subagent");
+  const evidence = subagents?.find(({ taskId }) => taskId === "evidence");
+
+  assert.equal(subagents?.length, 3);
+  assert.deepEqual(subagents?.map(({ taskId }) => taskId), ["scope", "evidence", "uncertainty"]);
+  assert.equal(evidence?.status, "running");
+  assert.deepEqual(evidence?.summaryHistory, [
+    { revision: 1, summary: "Collecting primary sources" },
+    { revision: 2, summary: "Sources collected" },
+  ]);
+  assert.deepEqual(evidence?.trace, [
+    { id: "stage-1", kind: "stage", label: "Search", status: "completed" },
+    { id: "operation-1", kind: "operation", label: "Read source", status: "running", detail: "Primary source" },
+  ]);
+  assert.equal(evidence?.startedAt, 100);
+});
+
+test("orchestrator updates create title-only reasoning without raw reasoning content", () => {
+  let state = createChatStreamState(baseMessage);
+  state = reduceChatStreamEvent(state, event(1, {
+    type: "deep_research_orchestrator_update",
+    status: "running",
+    summary: "Coordinating research",
+    summaryRevision: 1,
+    trace: [{ id: "orchestrator-stage", kind: "stage", label: "Coordinate", status: "running" }],
+  }), { now: 100 });
+  const orchestrator = state.message.activities?.find(({ id }) => id === "deep-research-orchestrator");
+  assert.equal(orchestrator?.kind, "reasoning");
+  assert.equal(orchestrator?.content, "");
+  assert.equal(orchestrator?.summary, "Coordinating research");
+  assert.deepEqual(orchestrator?.trace, [{ id: "orchestrator-stage", kind: "stage", label: "Coordinate", status: "running" }]);
+  assert.equal(state.message.reasoning, "");
+
+  state = reduceChatStreamEvent(state, event(2, {
+    type: "deep_research_orchestrator_update",
+    status: "completed",
+    summary: "Research coordinated",
+    summaryRevision: 2,
+  }), { now: 250 });
+  const reasoning = state.message.activities?.filter(({ kind }) => kind === "reasoning");
+  assert.equal(reasoning?.length, 1);
+  assert.equal(reasoning?.[0].content, "");
+  assert.equal(reasoning?.[0].status, "complete");
+  assert.equal(reasoning?.[0].summaryRevision, 2);
+});
+
+test("done, error, and cancellation finalize queued and running research activities", () => {
+  const researchEvents = [
+    event(1, { type: "deep_research_plan", plan: researchPlan }),
+    event(2, { type: "subagent_update", taskId: "scope", title: "Scope", status: "running" }),
+  ];
+  const done = reduceChatStreamEvents(createChatStreamState(baseMessage), [
+    ...researchEvents,
+    event(3, { type: "done", usage: null }),
+  ], { now: 500 });
+  assert.deepEqual(done.message.activities?.filter(({ kind }) => kind === "subagent").map(({ status }) => status), ["failed", "failed", "failed"]);
+
+  const errored = reduceChatStreamEvent(
+    reduceChatStreamEvents(createChatStreamState(baseMessage), researchEvents, { now: 100 }),
+    event(3, { type: "error", message: "Research failed" }),
+    { now: 400 },
+  );
+  assert.deepEqual(errored.message.activities?.filter(({ kind }) => kind === "subagent").map(({ status }) => status), ["failed", "failed", "failed"]);
+
+  const cancelled = reduceChatStreamEvent(
+    reduceChatStreamEvents(createChatStreamState(baseMessage), researchEvents, { now: 100 }),
+    event(3, { type: "cancelled" }),
+    { now: 400 },
+  );
+  assert.deepEqual(cancelled.message.activities?.filter(({ kind }) => kind === "subagent").map(({ status }) => status), ["failed", "failed", "failed"]);
+});
+
+test("replaying stored research activities freezes unfinished cards and bounds trace data", () => {
+  const normalized = normalizeStoredMessage({
+    role: "assistant",
+    id: "assistant-research",
+    content: "Report",
+    activities: [{
+      id: "subagent-scope",
+      kind: "subagent",
+      round: 1,
+      phase: 1,
+      taskId: "scope",
+      title: "Scope",
+      status: "running",
+      startedAt: 100,
+      trace: Array.from({ length: 140 }, (_, index) => ({
+        id: `operation-${index}`,
+        kind: "operation",
+        label: `Operation ${index}`,
+        status: "running",
+      })),
+    }],
+  }, { now: 1_000 });
+  const activity = normalized?.activities?.[0];
+  assert.equal(activity?.kind, "subagent");
+  assert.equal(activity?.status, "failed");
+  assert.equal(activity?.durationMs, 900);
+  assert.equal(activity?.trace?.length, 128);
 });

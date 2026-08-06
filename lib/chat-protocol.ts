@@ -48,6 +48,10 @@ export type ChatModelRef = { provider: ChatProvider; model: string };
 
 const MAX_PROMPT_LENGTH = 12000;
 const MAX_TRACE_LENGTH = 128 * 1024;
+export const CHAT_RESEARCH_TRACE_MAX_ENTRIES = 128;
+export const CHAT_RESEARCH_TRACE_ID_MAX_LENGTH = 128;
+export const CHAT_RESEARCH_TRACE_LABEL_MAX_LENGTH = 512;
+export const CHAT_RESEARCH_TRACE_DETAIL_MAX_LENGTH = 4_000;
 const MAX_MESSAGES = 100;
 const MAX_SERIALIZED_HISTORY_LENGTH = 1024 * 1024;
 
@@ -340,6 +344,14 @@ export type DeepResearchPlan = {
   items: DeepResearchPlanItem[];
 };
 
+export type ChatResearchTraceEntry = {
+  id: string;
+  kind: "stage" | "operation";
+  label: string;
+  status: "running" | "completed" | "failed";
+  detail?: string;
+};
+
 export type ChatModelPricing = {
   inputUsdPerMillion: number | null;
   cachedInputUsdPerMillion: number | null;
@@ -357,7 +369,22 @@ export type ChatRunCost = {
 export type ChatStreamEvent =
   | { type: "todo_update"; todos: TodoList }
   | { type: "deep_research_plan"; plan: DeepResearchPlan }
-  | { type: "subagent_update"; taskId: string; status: "queued" | "running" | "completed" | "failed"; title: string; summary?: string }
+  | {
+      type: "subagent_update";
+      taskId: string;
+      status: "queued" | "running" | "completed" | "failed";
+      title: string;
+      summary?: string;
+      summaryRevision?: number;
+      trace?: ChatResearchTraceEntry[];
+    }
+  | {
+      type: "deep_research_orchestrator_update";
+      status: "running" | "completed" | "failed";
+      summary?: string;
+      summaryRevision?: number;
+      trace?: ChatResearchTraceEntry[];
+    }
   | { type: "round"; round: number }
   | { type: "reasoning"; delta: string }
   | { type: "reasoning_details"; details: unknown[] }
@@ -391,6 +418,30 @@ export type ChatUsage = {
 };
 
 export class ChatRequestValidationError extends Error {}
+
+/**
+ * Keep research trace data safe to persist and replay. Stream events are
+ * provider data at this boundary, so malformed entries are discarded rather
+ * than allowed to escape into history state.
+ */
+export function normalizeChatResearchTrace(value: unknown): ChatResearchTraceEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, CHAT_RESEARCH_TRACE_MAX_ENTRIES).flatMap((candidate) => {
+    if (!isRecord(candidate)) return [];
+    if (typeof candidate.id !== "string" || !candidate.id.trim()) return [];
+    if (candidate.kind !== "stage" && candidate.kind !== "operation") return [];
+    if (candidate.status !== "running" && candidate.status !== "completed" && candidate.status !== "failed") return [];
+    if (typeof candidate.label !== "string" || !candidate.label.trim()) return [];
+    const id = candidate.id.trim().slice(0, CHAT_RESEARCH_TRACE_ID_MAX_LENGTH);
+    const label = candidate.label.trim().slice(0, CHAT_RESEARCH_TRACE_LABEL_MAX_LENGTH);
+    if (!id || !label) return [];
+    const entry: ChatResearchTraceEntry = { id, kind: candidate.kind, label, status: candidate.status };
+    if (typeof candidate.detail === "string") {
+      entry.detail = candidate.detail.slice(0, CHAT_RESEARCH_TRACE_DETAIL_MAX_LENGTH);
+    }
+    return [entry];
+  });
+}
 
 export const DEFAULT_CHAT_MODELS: ChatModelInfo[] = [
   {

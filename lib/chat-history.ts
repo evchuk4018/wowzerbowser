@@ -1,3 +1,4 @@
+import { CHAT_RESEARCH_TRACE_MAX_ENTRIES, normalizeChatResearchTrace } from "./chat-protocol";
 import type {
   ChatArtifact,
   ChatImageAttachment,
@@ -7,6 +8,7 @@ import type {
   ChatStreamEvent,
   ChatStreamMetrics,
   DeepResearchPlan,
+  ChatResearchTraceEntry,
 } from "./chat-protocol";
 import type { ChatCitation, ChatSource } from "./chat-citations";
 import type { TodoList } from "./todo-protocol";
@@ -22,6 +24,7 @@ export type ChatReasoningActivity = {
   content: string;
   summary?: string;
   summaryRevision?: number;
+  trace?: ChatResearchTraceEntry[];
   status: "running" | "complete";
   startedAt?: number;
   durationMs?: number;
@@ -64,7 +67,27 @@ export type ChatPythonActivity = Omit<ChatToolActivity, "kind"> & { kind: "pytho
 export type ChatWebActivity = Omit<ChatToolActivity, "kind"> & { kind: "web" };
 export type ChatImageActivity = Omit<ChatToolActivity, "kind"> & { kind: "image" };
 export type ChatDocumentActivity = Omit<ChatToolActivity, "kind"> & { kind: "document" };
-export type ChatAssistantActivity = ChatReasoningActivity | ChatOutputActivity | ChatPythonActivity | ChatWebActivity | ChatImageActivity | ChatDocumentActivity | ChatPhaseBreakActivity;
+export type ChatResearchSummaryRevision = {
+  revision: number;
+  summary: string;
+};
+
+export type ChatSubagentActivity = {
+  id: string;
+  kind: "subagent";
+  round: number;
+  phase: number;
+  taskId: string;
+  title: string;
+  status: "queued" | "running" | "completed" | "failed";
+  summary?: string;
+  summaryHistory?: ChatResearchSummaryRevision[];
+  trace?: ChatResearchTraceEntry[];
+  startedAt?: number;
+  durationMs?: number;
+};
+
+export type ChatAssistantActivity = ChatReasoningActivity | ChatOutputActivity | ChatPythonActivity | ChatWebActivity | ChatImageActivity | ChatDocumentActivity | ChatPhaseBreakActivity | ChatSubagentActivity;
 
 export type ChatHistoryMessage = {
   id: string;
@@ -167,6 +190,12 @@ const finishRunningActivities = (
   failRunningTools: boolean,
   finishedAt: number,
 ): ChatAssistantActivity[] | undefined => activities?.map((activity) => {
+  if (activity.kind === "subagent" && failRunningTools && (activity.status === "queued" || activity.status === "running")) {
+    const durationMs = activity.durationMs ?? (activity.startedAt === undefined
+      ? undefined
+      : Math.max(0, finishedAt - activity.startedAt));
+    return { ...activity, status: "failed", durationMs };
+  }
   if (activity.kind === "output" || activity.status !== "running") return activity;
   const durationMs = activity.durationMs ?? (activity.startedAt === undefined
     ? undefined
@@ -194,6 +223,183 @@ function legacyToolKind(call: ChatToolCall): "python" | "web" {
   return ({ kind: call.name === "run_python" ? "python" : "web" } as const).kind;
 }
 
+const ORCHESTRATOR_ACTIVITY_ID = "deep-research-orchestrator";
+const MAX_RESEARCH_SUMMARY_LENGTH = 4_000;
+const MAX_RESEARCH_SUMMARY_HISTORY = 128;
+
+function safeResearchText(value: string): string {
+  return value.slice(0, MAX_RESEARCH_SUMMARY_LENGTH);
+}
+
+function validResearchRevision(value: number | undefined): value is number {
+  return value !== undefined && Number.isInteger(value) && value >= 0;
+}
+
+function mergeResearchTrace(
+  current: ChatResearchTraceEntry[] | undefined,
+  incoming: unknown,
+): ChatResearchTraceEntry[] | undefined {
+  const existing = normalizeChatResearchTrace(current);
+  const additions = normalizeChatResearchTrace(incoming);
+  if (!additions.length) return existing.length ? existing : current;
+  const merged = existing.slice(0, CHAT_RESEARCH_TRACE_MAX_ENTRIES);
+  const positions = new Map(merged.map((entry, index) => [entry.id, index]));
+  for (const entry of additions) {
+    const position = positions.get(entry.id);
+    if (position === undefined) {
+      merged.push(entry);
+      positions.set(entry.id, merged.length - 1);
+      if (merged.length > CHAT_RESEARCH_TRACE_MAX_ENTRIES) {
+        const removed = merged.shift();
+        if (removed) positions.delete(removed.id);
+        for (const [id, index] of positions) positions.set(id, index - 1);
+      }
+    } else {
+      merged[position] = entry;
+    }
+  }
+  return merged;
+}
+
+function mergeSubagentSummary(
+  activity: ChatSubagentActivity,
+  summary: string | undefined,
+  revision: number | undefined,
+): ChatSubagentActivity {
+  if (summary === undefined) return activity;
+  const safeSummary = safeResearchText(summary);
+  if (!validResearchRevision(revision)) {
+    return activity.summary === safeSummary ? activity : { ...activity, summary: safeSummary };
+  }
+  const history = activity.summaryHistory ?? [];
+  const highestRevision = history.reduce((highest, item) => Math.max(highest, item.revision), -1);
+  if (history.some((item) => item.revision === revision) || revision <= highestRevision) return activity;
+  return {
+    ...activity,
+    summary: safeSummary,
+    summaryHistory: [...history, { revision, summary: safeSummary }].slice(-MAX_RESEARCH_SUMMARY_HISTORY),
+  };
+}
+
+function orderSubagentActivities(
+  activities: ChatAssistantActivity[],
+  plan: DeepResearchPlan | undefined,
+): ChatAssistantActivity[] {
+  if (!plan) return activities;
+  const planOrder = new Map(plan.items.map((item, index) => [item.id, index]));
+  const subagents = activities
+    .map((activity, index) => ({ activity, index }))
+    .filter((entry): entry is { activity: ChatSubagentActivity; index: number } => entry.activity.kind === "subagent")
+    .sort((left, right) => {
+      const leftOrder = planOrder.get(left.activity.taskId) ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = planOrder.get(right.activity.taskId) ?? Number.MAX_SAFE_INTEGER;
+      return leftOrder - rightOrder || left.index - right.index;
+    })
+    .map(({ activity }) => activity);
+  let subagentIndex = 0;
+  return activities.map((activity) => activity.kind === "subagent" ? subagents[subagentIndex++] : activity);
+}
+
+function queuedSubagentActivity(
+  taskId: string,
+  title: string,
+  round: number,
+  phase: number,
+): ChatSubagentActivity {
+  return {
+    id: `subagent-${taskId}`,
+    kind: "subagent",
+    round,
+    phase,
+    taskId,
+    title: safeResearchText(title),
+    status: "queued",
+  };
+}
+
+function applyResearchPlanActivities(
+  activities: ChatAssistantActivity[] | undefined,
+  plan: DeepResearchPlan,
+  round: number,
+  phase: number,
+): ChatAssistantActivity[] {
+  const next = [...(activities ?? [])];
+  for (const item of plan.items) {
+    if (!next.some((activity) => activity.kind === "subagent" && activity.taskId === item.id)) {
+      next.push(queuedSubagentActivity(item.id, item.title, round, phase));
+    }
+  }
+  return orderSubagentActivities(next, plan);
+}
+
+function applySubagentUpdate(
+  activities: ChatAssistantActivity[] | undefined,
+  event: Extract<ChatStreamEvent, { type: "subagent_update" }>,
+  round: number,
+  phase: number,
+  now: number,
+  plan: DeepResearchPlan | undefined,
+): ChatAssistantActivity[] {
+  const next = [...(activities ?? [])];
+  const index = next.findIndex((activity) => activity.kind === "subagent" && activity.taskId === event.taskId);
+  const previous = index >= 0 ? next[index] as ChatSubagentActivity : queuedSubagentActivity(event.taskId, event.title, round, phase);
+  let activity: ChatSubagentActivity = {
+    ...previous,
+    title: safeResearchText(event.title),
+    status: event.status,
+    ...(event.status === "running" && previous.startedAt === undefined ? { startedAt: now } : {}),
+    ...(event.status !== "running" && event.status !== "queued" && previous.durationMs === undefined && previous.startedAt !== undefined
+      ? { durationMs: Math.max(0, now - previous.startedAt) }
+      : {}),
+  };
+  activity = mergeSubagentSummary(activity, event.summary, event.summaryRevision);
+  const trace = mergeResearchTrace(activity.trace, event.trace);
+  if (trace) activity = { ...activity, trace };
+  if (index >= 0) next[index] = activity;
+  else next.push(activity);
+  return orderSubagentActivities(next, plan);
+}
+
+function applyOrchestratorUpdate(
+  activities: ChatAssistantActivity[] | undefined,
+  event: Extract<ChatStreamEvent, { type: "deep_research_orchestrator_update" }>,
+  round: number,
+  phase: number,
+  now: number,
+): ChatAssistantActivity[] {
+  const next = [...(activities ?? [])];
+  const index = next.findIndex((activity) => activity.kind === "reasoning" && activity.id === ORCHESTRATOR_ACTIVITY_ID);
+  const previous = index >= 0 ? next[index] as ChatReasoningActivity : undefined;
+  const summaryRevision = validResearchRevision(event.summaryRevision)
+    && (previous?.summaryRevision === undefined || event.summaryRevision > previous.summaryRevision)
+    ? event.summaryRevision
+    : previous?.summaryRevision;
+  const summary = event.summary !== undefined
+    && (event.summaryRevision === undefined || previous?.summaryRevision === undefined || event.summaryRevision > previous.summaryRevision)
+    ? safeResearchText(event.summary)
+    : previous?.summary;
+  const status = event.status === "running" ? "running" : "complete";
+  const activity: ChatReasoningActivity = {
+    id: ORCHESTRATOR_ACTIVITY_ID,
+    kind: "reasoning",
+    round: previous?.round ?? round,
+    phase: previous?.phase ?? phase,
+    content: "",
+    status,
+    ...(summary === undefined ? {} : { summary }),
+    ...(summaryRevision === undefined ? {} : { summaryRevision }),
+    ...(previous?.startedAt !== undefined || event.status === "running" ? { startedAt: previous?.startedAt ?? now } : {}),
+    ...(status === "complete" && previous?.startedAt !== undefined
+      ? { durationMs: previous.durationMs ?? Math.max(0, now - previous.startedAt) }
+      : previous?.durationMs === undefined ? {} : { durationMs: previous.durationMs }),
+  };
+  const trace = mergeResearchTrace(previous?.trace, event.trace);
+  if (trace) activity.trace = trace;
+  if (index >= 0) next[index] = activity;
+  else next.push(activity);
+  return next;
+}
+
 export function applyChatStreamEvent(
   message: ChatHistoryMessage,
   event: ChatStreamEvent,
@@ -212,7 +418,7 @@ export function applyChatStreamEvent(
     const latest = activities.at(-1);
     const round = next.traceRound ?? latest?.round ?? 1;
     const phase = next.tracePhase ?? 1;
-    if (latest?.kind === "reasoning" && latest.phase === phase && latest.status === "running") {
+    if (latest?.kind === "reasoning" && latest.id !== ORCHESTRATOR_ACTIVITY_ID && latest.phase === phase && latest.status === "running") {
       activities[activities.length - 1] = { ...latest, content: `${latest.content}${event.delta}` };
     } else {
       activities.push({
@@ -231,9 +437,32 @@ export function applyChatStreamEvent(
     next.todos = event.todos;
   } else if (event.type === "deep_research_plan") {
     next.deepResearchPlan = event.plan;
+    next.activities = applyResearchPlanActivities(
+      next.activities,
+      event.plan,
+      next.traceRound ?? 1,
+      next.tracePhase ?? 1,
+    );
+  } else if (event.type === "subagent_update") {
+    next.activities = applySubagentUpdate(
+      next.activities,
+      event,
+      next.traceRound ?? 1,
+      next.tracePhase ?? 1,
+      now,
+      next.deepResearchPlan,
+    );
+  } else if (event.type === "deep_research_orchestrator_update") {
+    next.activities = applyOrchestratorUpdate(
+      next.activities,
+      event,
+      next.traceRound ?? 1,
+      next.tracePhase ?? 1,
+      now,
+    );
   } else if (event.type === "phase_summary") {
     next.activities = next.activities?.map((activity) =>
-      activity.kind === "reasoning" && activity.phase === event.phase && (activity.summaryRevision ?? -1) <= event.revision
+      activity.kind === "reasoning" && activity.id !== ORCHESTRATOR_ACTIVITY_ID && activity.phase === event.phase && (activity.summaryRevision ?? -1) <= event.revision
         ? { ...activity, summary: event.summary, summaryRevision: event.revision }
         : activity,
     );
@@ -262,7 +491,7 @@ export function applyChatStreamEvent(
   } else if (event.type === "tool_result") {
     next.connectorApproval = undefined;
     next.activities = next.activities?.map((activity) =>
-      activity.kind !== "reasoning" && activity.kind !== "output" && activity.kind !== "phase_break" && activity.call.id === event.result.id
+      activity.kind !== "reasoning" && activity.kind !== "output" && activity.kind !== "phase_break" && activity.kind !== "subagent" && activity.call.id === event.result.id
         ? {
             ...activity,
             result: event.result,
