@@ -44,6 +44,7 @@ import {
   WORKSPACE_LIST_TOOL_NAME,
   WORKSPACE_WRITE_TOOL_NAME,
 } from "./workspace-tool-manifest";
+import { RUN_SUBAGENT_TOOL_NAME } from "./subagent-tool-manifest";
 
 export type ToolExecutionPolicy = "parallel-safe" | "serial";
 export type ToolExecutionMetadata = { executionPolicy: ToolExecutionPolicy };
@@ -69,6 +70,7 @@ export const TOOL_EXECUTION_METADATA: Readonly<Record<string, ToolExecutionMetad
   [LIST_PAGE_LINKS_TOOL_NAME]: { executionPolicy: "serial" },
   [FOLLOW_PAGE_LINK_TOOL_NAME]: { executionPolicy: "serial" },
   [DEEP_RESEARCH_SEARCH_TOOL_NAME]: { executionPolicy: "serial" },
+  [RUN_SUBAGENT_TOOL_NAME]: { executionPolicy: "parallel-safe" },
   [SEARCH_CHATS_TOOL_NAME]: { executionPolicy: "parallel-safe" },
   [BROWSE_USER_MEMORY_TOOL]: { executionPolicy: "parallel-safe" },
   [READ_USER_MEMORY_TOOL]: { executionPolicy: "parallel-safe" },

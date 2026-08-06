@@ -247,6 +247,14 @@ export type ChatToolResult = {
   image?: ChatImageToolResult;
   documentEdit?: ChatDocumentEditResult;
   research?: ChatResearchToolResult;
+  subagent?: ChatSubagentToolResult;
+};
+
+export type ChatSubagentToolResult = {
+  kind: "delegation";
+  taskId: string;
+  title: string;
+  sources: ChatSource[];
 };
 
 export type ChatRequest = {
@@ -755,6 +763,31 @@ function readResearchToolResult(value: unknown, field: string): ChatResearchTool
   return JSON.parse(serialized) as ChatResearchToolResult;
 }
 
+function readSubagentToolResult(value: unknown, field: string): ChatSubagentToolResult {
+  if (!isRecord(value) || value.kind !== "delegation") {
+    throw new ChatRequestValidationError(`${field} is invalid.`);
+  }
+  const sources = Array.isArray(value.sources)
+    ? value.sources.slice(0, 40).map((item, index) => {
+        if (!isRecord(item)) throw new ChatRequestValidationError(`${field}.sources[${index}] is invalid.`);
+        const url = readBoundedString(item.url, `${field}.sources[${index}].url`, 2_000);
+        const source = sourceForUrl({
+          title: readBoundedString(item.title, `${field}.sources[${index}].title`, 300),
+          url,
+          snippet: readBoundedString(item.snippet, `${field}.sources[${index}].snippet`, CHAT_SOURCE_SNIPPET_MAX_LENGTH),
+          ...(item.publishedAt === undefined ? {} : { publishedAt: readBoundedString(item.publishedAt, `${field}.sources[${index}].publishedAt`, 100) }),
+        });
+        return source;
+      })
+    : [];
+  return {
+    kind: "delegation",
+    taskId: readNonEmptyString(value.taskId, `${field}.taskId`),
+    title: readBoundedString(value.title, `${field}.title`, 120),
+    sources,
+  };
+}
+
 function readToolCalls(value: unknown, field: string): ChatToolCall[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value)) throw new ChatRequestValidationError(`${field} must be an array.`);
@@ -838,6 +871,9 @@ function readToolCalls(value: unknown, field: string): ChatToolCall[] | undefine
         ...(call.result.research === undefined
           ? {}
           : { research: readResearchToolResult(call.result.research, `${field}[${index}].result.research`) }),
+        ...(call.result.subagent === undefined
+          ? {}
+          : { subagent: readSubagentToolResult(call.result.subagent, `${field}[${index}].result.subagent`) }),
       };
     }
     return {

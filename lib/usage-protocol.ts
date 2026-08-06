@@ -19,6 +19,7 @@ export const USAGE_REQUEST_KINDS = [
   "dreaming",
   "todo_planner",
   "deep_research",
+  "subagent",
   "automation",
   "context_router",
 ] as const;

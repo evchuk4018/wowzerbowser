@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
-import type { ChatAssistantRound, ChatModelPricing, ChatRequest, ChatStreamEvent, ChatToolCall, ChatToolResult, ChatUsage, DeepResearchPlan } from "../../lib/chat-protocol";
+import type { ChatArtifact, ChatAssistantRound, ChatModelPricing, ChatRequest, ChatStreamEvent, ChatToolCall, ChatToolResult, ChatUsage, DeepResearchPlan } from "../../lib/chat-protocol";
 import { chatProviderAdapter } from "../server/chat/chat-provider-registry";
 import { authorizeAutomationModel, authorizeChatModel } from "../server/chat/chat-model-catalog-service";
 import { availableChatTools, executePythonTool } from "../server/agent/python-tool";
@@ -52,6 +52,9 @@ import { COMPLETE_AUTOMATION_RUN_TOOL_DEFINITION, COMPLETE_AUTOMATION_RUN_TOOL_N
 import { availableDeepResearchTools } from "../server/agent/deep-research-tool-manifest";
 import { executeDeepResearchTool } from "../server/agent/deep-research-tool";
 import { deepResearchInstructionsFor } from "../server/agent/deep-research-tool-instructions";
+import { RUN_SUBAGENT_TOOL_DEFINITION, RUN_SUBAGENT_TOOL_NAME } from "../server/agent/subagent-tool-manifest";
+import { executeSubagentTool } from "../server/agent/subagent-tool";
+import { SUBAGENT_CHILD_INSTRUCTIONS, SUBAGENT_TOOL_INSTRUCTIONS } from "../server/agent/subagent-tool-instructions";
 import type { ResearchRun } from "../server/research/research-types";
 import { compileFocusedContext, type FocusedContextPlan, type FocusedToolGroup } from "../server/chat/focused-context";
 import {
@@ -119,9 +122,10 @@ export async function generateChatResponse(
   persistEvent: (event: ChatStreamEvent) => Promise<void>,
   persistUsage?: (usage: ChatRoundUsage) => Promise<void>,
   persistSummaryUsage?: (usage: ChatSummaryUsage) => Promise<void>,
-  executionOptions: { profile?: "chat" | "automation"; onAutomationResult?: (result: AutomationRunResult) => void } = {},
+  executionOptions: { profile?: "chat" | "automation" | "subagent"; onAutomationResult?: (result: AutomationRunResult) => void; subagentDepth?: number } = {},
 ): Promise<{ awaitingApproval: boolean }> {
   const automationExecution = executionOptions.profile === "automation";
+  const subagentExecution = executionOptions.profile === "subagent" || (executionOptions.subagentDepth ?? 0) > 0;
   if (typeof chatRequest.model === "string") {
     chatRequest = { ...chatRequest, model: { provider: "deepseek", model: chatRequest.model } };
   }
@@ -146,7 +150,7 @@ export async function generateChatResponse(
     connectorCatalog,
   ] = await Promise.all([
     automationExecution ? Promise.resolve("") : getConsolidatedPrompt(ownerId).catch(() => "").then(formatConsolidatedPrompt),
-    automationExecution ? Promise.resolve({ revision: 0, items: [] }) : getTodoList(ownerId, conversationId).catch(() => ({ revision: 0, items: [] })),
+    automationExecution || subagentExecution ? Promise.resolve({ revision: 0, items: [] }) : getTodoList(ownerId, conversationId).catch(() => ({ revision: 0, items: [] })),
     isLocalPythonConfigured()
       ? listEnabledExecutableTools(ownerId).catch((error) => {
         console.warn({ event: "custom-tools-unavailable", ownerId, failure: error instanceof Error ? error.name : "UnknownError" });
@@ -184,8 +188,8 @@ export async function generateChatResponse(
   );
   const calendarKeywordUnlock = messageUnlocksCalendarTools(latestUserMessage?.content ?? "");
   const connectorDiscoveryAvailable = connectorCatalog.some((connector) => connector.installed && connector.connections.some((connection) => connection.status === "connected"));
-  const potentialDeepResearchTools = automationExecution ? [] : availableDeepResearchTools(true);
-  const potentialTodoTools = automationExecution ? [] : TODO_TOOL_DEFINITIONS;
+  const potentialDeepResearchTools = automationExecution || subagentExecution ? [] : availableDeepResearchTools(true);
+  const potentialTodoTools = automationExecution || subagentExecution ? [] : TODO_TOOL_DEFINITIONS;
   const toolGroups: FocusedToolGroup[] = [
     ...(pythonTools.length ? [{ id: "python", summary: "Run Python for computation, data processing, or generated files.", keywords: ["python", "calculate", "compute", "chart", "spreadsheet", "generate file"], fallback: true }] : []),
     ...(workspaceTools.length ? [{ id: "workspace", summary: "Inspect, create, edit, search, and run checks against persistent conversation files.", keywords: ["file", "files", "code", "html", "javascript", "typescript", "python", "edit", "create", "write", "workspace", "script"], fallback: true }] : []),
@@ -205,7 +209,7 @@ export async function generateChatResponse(
     ...(potentialTodoTools.length ? [{ id: "todos", summary: "Update the visible task todo list.", keywords: ["todo", "plan", "steps", "tasks"], required: true }] : []),
     ...(automationExecution ? [{ id: "automation-result", summary: "Complete the current automation run.", keywords: [], required: true }] : []),
   ];
-  const plannerPromise = automationExecution ? Promise.resolve({ list: null, plannedThisTurn: false }) : planTodos({
+  const plannerPromise = automationExecution || subagentExecution ? Promise.resolve({ list: null, plannedThisTurn: false }) : planTodos({
     ownerId,
     conversationId,
     userMessage: chatRequest.messages.at(-1)?.content ?? "",
@@ -229,7 +233,7 @@ export async function generateChatResponse(
       }).catch(() => undefined);
     },
   });
-  const focusedPlanPromise: Promise<FocusedContextPlan | null> = !automationExecution && chatRequest.contextMode === "focused"
+  const focusedPlanPromise: Promise<FocusedContextPlan | null> = !automationExecution && !subagentExecution && chatRequest.contextMode === "focused"
     ? compileFocusedContext({
       messages: chatRequest.messages,
       toolGroups,
@@ -270,7 +274,7 @@ export async function generateChatResponse(
     });
     chatRequest = { ...chatRequest, messages: focusedPlan.messages };
   }
-  const deepResearchTools = !automationExecution && planner.plannedThisTurn && Boolean(planner.list?.items.length)
+  const deepResearchTools = !automationExecution && !subagentExecution && planner.plannedThisTurn && Boolean(planner.list?.items.length)
     ? potentialDeepResearchTools
     : [];
   const selected = (group: string) => !focusedPlan || focusedPlan.selectedToolGroups.has(group);
@@ -303,7 +307,7 @@ export async function generateChatResponse(
   }));
   chatRequest = { ...chatRequest, messages: contextualMessages };
   const allowedProjectIds = new Set([...authoritativePdfs.values()].map((document) => document.projectId).filter((projectId): projectId is string => Boolean(projectId)));
-  const baseToolDefinitions = [...activePythonTools, ...activeWorkspaceTools, ...activeImageTools, ...activeWebTools, ...activeDeepResearchTools, ...pdfEditTools, ...activePhaseTools, ...customDefinitions, ...activeChatMemoryTools, ...activeUserMemoryTools, ...skillTools, ...todoTools, ...automationResultTools, ...contextTools, ...(connectorDiscoveryAvailable && selected("connectors") ? [SEARCH_CONNECTOR_TOOLS_DEFINITION] : [])];
+  const baseToolDefinitions = [...activePythonTools, ...activeWorkspaceTools, ...activeImageTools, ...activeWebTools, ...activeDeepResearchTools, ...pdfEditTools, ...activePhaseTools, ...customDefinitions, ...activeChatMemoryTools, ...activeUserMemoryTools, ...skillTools, ...todoTools, ...automationResultTools, ...contextTools, ...(connectorDiscoveryAvailable && selected("connectors") ? [SEARCH_CONNECTOR_TOOLS_DEFINITION] : []), ...(subagentExecution ? [] : [RUN_SUBAGENT_TOOL_DEFINITION])];
   const imageToolAdvertised = activeImageTools.some((tool) => tool.function.name === INSPECT_IMAGE_TOOL_NAME);
 
   const enqueue = async (event: ChatStreamEvent) => {
@@ -370,6 +374,7 @@ export async function generateChatResponse(
       let usageEstimator: ChatUsageEstimator | null = null;
       const roundUsages: Array<ReturnType<typeof latestNonNullUsage>> = [];
       const roundCostInputs: Array<ChatRunCostInput | null> = [];
+      const subagentCostInputs: ChatRunCostInput[] = [];
       let executor: LocalPythonExecutor | null = null;
       const recalledContexts = new Map<string, string>();
       let currentPhase = 1;
@@ -388,12 +393,149 @@ export async function generateChatResponse(
             : [];
           const dynamicConnectorTools = selected("connectors") ? connectorModelTools : [];
           const toolDefinitions = [...baseToolDefinitions, ...automationDefinitions, ...calendarDefinitions, ...dynamicPdfTools, ...dynamicConnectorTools];
+
+          const runDelegatedTask = async (
+            input: { task: string; context?: string; callId: string; signal: AbortSignal },
+            onEvent?: (event: ChatStreamEvent) => Promise<void> | void,
+          ) => {
+            const childJobId = `${responseId ?? `chat-${conversationId}`}:subagent:${input.callId}`;
+            const childSourceCatalog = new Map<string, ChatSource>();
+            const childArtifacts: ChatArtifact[] = [];
+            const childErrors: string[] = [];
+            let childOutput = "";
+
+            const recordChildRoundUsage = async (usage: ChatRoundUsage): Promise<void> => {
+              const recordedUsage = usage.usage ?? usage.estimatedUsage;
+              if (!recordedUsage) return;
+              subagentCostInputs.push({
+                usage: recordedUsage,
+                ...(usage.exactCostUsd === undefined ? {} : { exactCostUsd: usage.exactCostUsd }),
+                pricing: usage.pricing,
+              });
+              await recordPromptUsage({
+                ownerId,
+                provider: usage.provider,
+                model: usage.model,
+                requestKind: "subagent",
+                requestId: childJobId,
+                round: usage.round,
+                usage: recordedUsage,
+                source: usage.usage || usage.exactCostUsd !== undefined ? "exact" : "estimated",
+                exactCostUsd: usage.exactCostUsd,
+                pricingSnapshot: usage.pricing ? {
+                  provider: usage.provider,
+                  model: usage.model,
+                  label: usage.model,
+                  inputUsdPerMillion: usage.pricing.inputUsdPerMillion,
+                  cachedInputUsdPerMillion: usage.pricing.cachedInputUsdPerMillion,
+                  outputUsdPerMillion: usage.pricing.outputUsdPerMillion,
+                  requestUsd: usage.pricing.requestUsd,
+                  reasoningUsdPerMillion: usage.pricing.reasoningUsdPerMillion,
+                } : null,
+                unpriced: usage.exactCostUsd === undefined && (!usage.pricing || usage.pricing.inputUsdPerMillion === null || usage.pricing.outputUsdPerMillion === null || ((usage.usage?.reasoningTokens ?? usage.estimatedUsage?.reasoningTokens ?? 0) > 0 && usage.pricing.reasoningUsdPerMillion === null)),
+                conversationId,
+                jobId: responseId ?? childJobId,
+              }).catch(() => undefined);
+            };
+
+            const recordChildSummaryUsage = async (usage: ChatSummaryUsage): Promise<void> => {
+              const recordedUsage = usage.usage ?? usage.estimatedUsage;
+              if (!recordedUsage) return;
+              const round = 2_000_000 + usage.phase * 100_000 + usage.revision;
+              subagentCostInputs.push({
+                usage: recordedUsage,
+                ...(usage.exactCostUsd === undefined ? {} : { exactCostUsd: usage.exactCostUsd }),
+                pricing: null,
+              });
+              await recordPromptUsage({
+                ownerId,
+                provider: usage.provider,
+                model: usage.model,
+                requestKind: "subagent",
+                requestId: childJobId,
+                round,
+                usage: recordedUsage,
+                source: usage.usage || usage.exactCostUsd !== undefined ? "exact" : "estimated",
+                exactCostUsd: usage.exactCostUsd,
+                unpriced: usage.exactCostUsd === undefined,
+                conversationId,
+                jobId: responseId ?? childJobId,
+              }).catch(() => undefined);
+            };
+
+            const childRequest: ChatRequest = {
+              ...chatRequest,
+              messages: [
+                ...chatRequest.messages,
+                {
+                  role: "user",
+                  content: [
+                    "<delegated_task>",
+                    input.task,
+                    "</delegated_task>",
+                    ...(input.context ? ["<delegated_context>", input.context, "</delegated_context>"] : []),
+                    "Return concise findings for the parent agent, including relevant file paths, source links, uncertainty, and verified artifacts where applicable.",
+                  ].join("\n"),
+                },
+              ],
+              mode: "normal",
+              deepResearchPhase: undefined,
+              deepResearchPlan: undefined,
+              contextMode: "full",
+              conversationId,
+              jobId: childJobId,
+              idempotencyKey: childJobId,
+              persistence: undefined,
+            };
+
+            const rememberSources = (result: ChatToolResult): void => {
+              const web = result.web;
+              const webSources = web?.kind === "search" ? web.results : web?.kind === "page" ? [web.source] : [];
+              for (const source of webSources) childSourceCatalog.set(source.id, source);
+              const research = result.research;
+              const researchSources = research?.kind === "ledger"
+                ? research.sources
+                : research?.kind === "page"
+                  ? [research.page.source]
+                  : [];
+              for (const source of researchSources) childSourceCatalog.set(source.id, source);
+              for (const source of result.subagent?.sources ?? []) childSourceCatalog.set(source.id, source);
+            };
+
+            await generateChatResponse(
+              childRequest,
+              ownerId,
+              input.signal,
+              async (event) => {
+                if (event.type === "content") childOutput += event.delta;
+                if (event.type === "error") childErrors.push(event.message);
+                if (event.type === "tool_result") rememberSources(event.result);
+                if (event.type === "annotations") for (const source of event.sources) childSourceCatalog.set(source.id, source);
+                if (event.type === "artifact") childArtifacts.push(event.artifact);
+                await onEvent?.(event);
+              },
+              recordChildRoundUsage,
+              recordChildSummaryUsage,
+              { profile: "subagent", subagentDepth: (executionOptions.subagentDepth ?? 0) + 1 },
+            );
+
+            const stdout = childOutput.trim();
+            const stderr = childErrors.join("\n").slice(0, 4_000);
+            return {
+              ok: childErrors.length === 0,
+              stdout: stdout || (stderr ? "" : "Delegated task completed without a textual summary."),
+              ...(stderr ? { stderr } : {}),
+              ...(childArtifacts.length ? { artifacts: [...new Map(childArtifacts.map((artifact) => [artifact.id, artifact])).values()].slice(0, 20) } : {}),
+              sources: validCitationSources([...childSourceCatalog.values()]).slice(0, 40),
+            };
+          };
           await enqueue({ type: "round", round });
           const systemInstructions = [
             ...runPythonInstructionsFor(Boolean(activePythonTools.length)),
             ...(activeWorkspaceTools.length ? [WORKSPACE_TOOL_INSTRUCTIONS] : []),
             ...webToolInstructionsFor(Boolean(activeWebTools.length)),
             ...deepResearchInstructionsFor(Boolean(activeDeepResearchTools.length)),
+            ...(subagentExecution ? [SUBAGENT_CHILD_INSTRUCTIONS] : [SUBAGENT_TOOL_INSTRUCTIONS]),
             ...(pdfEditTools.length ? PDF_EDIT_TOOL_INSTRUCTIONS : []),
             ...(activePhaseTools.length ? [PHASE_BREAK_INSTRUCTIONS] : []),
             ...customToolInstructions(activeCustomTools),
@@ -522,6 +664,19 @@ export async function generateChatResponse(
                 responseDeadlineAt,
               });
             }
+            if (call.name === RUN_SUBAGENT_TOOL_NAME && !subagentExecution) {
+              return executeSubagentTool(call, {
+                signal: roundSignal,
+                run: runDelegatedTask,
+                onUpdate: async ({ taskId, title, status, summary }) => enqueue({
+                  type: "subagent_update",
+                  taskId,
+                  title,
+                  status,
+                  ...(summary ? { summary } : {}),
+                }),
+              });
+            }
             if (activeWebTools.some((tool) => tool.function.name === call.name)) return executeWebTool(call, roundSignal);
             if (activeDeepResearchTools.some((tool) => tool.function.name === call.name)) {
               const executed = await executeDeepResearchTool(call, {
@@ -638,6 +793,7 @@ export async function generateChatResponse(
             const web = result.web;
             const sources = web?.kind === "search" ? web.results : web?.kind === "page" ? [web.source] : [];
             for (const source of sources) sourceCatalog.set(source.id, source);
+            for (const source of result.subagent?.sources ?? []) sourceCatalog.set(source.id, source);
             const research = result.research;
             const researchSources = research?.kind === "ledger"
               ? research.sources
@@ -705,7 +861,10 @@ export async function generateChatResponse(
           await enqueue({
             type: "done",
             usage: sumRoundUsage(roundUsages),
-            runCost: calculateChatRunCost(roundCostInputs.flatMap((input) => input ? [input] : [])),
+            runCost: calculateChatRunCost([
+              ...roundCostInputs.flatMap((input) => input ? [input] : []),
+              ...subagentCostInputs,
+            ]),
           });
         }
       }
