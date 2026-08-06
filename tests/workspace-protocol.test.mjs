@@ -13,6 +13,18 @@ test("workspace metadata covers common code and document formats", () => {
   assert.equal(workspaceContentType("app.tsx"), "text/typescript; charset=utf-8");
   assert.equal(workspacePreview("README.md"), "markdown");
   assert.equal(workspacePreview("icon.svg"), "svg");
+  assert.equal(workspaceContentType("images/photo.webp"), "image/webp");
+  assert.equal(workspacePreview("images/photo.webp"), "image");
+  assert.deepEqual(workspaceFileFor("images/photo.webp", 12, "b".repeat(64)), {
+    path: "images/photo.webp",
+    name: "photo.webp",
+    size: 12,
+    contentType: "image/webp",
+    language: "plaintext",
+    editable: false,
+    preview: "image",
+    sha256: "b".repeat(64),
+  });
   assert.deepEqual(workspaceFileFor("src/app.py", 12, "a".repeat(64)), {
     path: "src/app.py",
     name: "app.py",

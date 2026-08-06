@@ -22,7 +22,7 @@ export type PreviewableArtifact = {
   content: string;
   contentType?: string;
   language?: string;
-  preview?: "html" | "markdown" | "svg" | "text" | "none";
+  preview?: "html" | "markdown" | "svg" | "image" | "text" | "none";
   workspacePath?: string;
   editable?: boolean;
 };
@@ -38,26 +38,48 @@ export type ArtifactPreviewPanelProps<TArtifact extends PreviewableArtifact = Pr
   errorMessage?: string;
   onRetry?: () => void;
   initialMode?: ArtifactPreviewMode;
+  workspaceAssetBaseUrl?: string;
 };
 
 function Icon({ children }: { children: React.ReactNode }) {
   return <svg viewBox="0 0 20 20" aria-hidden="true">{children}</svg>;
 }
 
-function previewKind(artifact: PreviewableArtifact): "html" | "markdown" | "svg" | "text" {
-  if (artifact.preview === "html" || artifact.preview === "markdown" || artifact.preview === "svg" || artifact.preview === "text") return artifact.preview;
+function previewKind(artifact: PreviewableArtifact): "html" | "markdown" | "svg" | "image" | "text" {
+  if (artifact.preview === "html" || artifact.preview === "markdown" || artifact.preview === "svg" || artifact.preview === "image" || artifact.preview === "text") return artifact.preview;
   const contentType = artifact.contentType?.split(";", 1)[0].trim().toLowerCase();
   if (contentType === "text/html") return "html";
   if (contentType === "text/markdown") return "markdown";
   if (contentType === "image/svg+xml") return "svg";
+  if (contentType?.startsWith("image/")) return "image";
   return "text";
 }
 
-function sandboxDocument(content: string, kind: "html" | "svg"): string {
+function encodeWorkspacePath(path: string): string {
+  return path.split("/").filter(Boolean).map((segment) => encodeURIComponent(segment)).join("/");
+}
+
+function workspaceAssetUrl(baseUrl: string | undefined, path: string | undefined): string | undefined {
+  if (!baseUrl || !path) return undefined;
+  return `${baseUrl.replace(/\/+$/u, "")}/${encodeWorkspacePath(path)}`;
+}
+
+function workspaceAssetDirectoryUrl(baseUrl: string | undefined, path: string | undefined): string | undefined {
+  if (!baseUrl || !path) return undefined;
+  const directory = path.slice(0, Math.max(0, path.lastIndexOf("/") + 1));
+  return `${baseUrl.replace(/\/+$/u, "")}/${encodeWorkspacePath(directory)}`;
+}
+
+function escapeAttribute(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function sandboxDocument(content: string, kind: "html" | "svg", baseHref?: string): string {
   const body = kind === "svg"
     ? `<div style="display:grid;place-items:center;min-height:100vh">${content}</div>`
     : content;
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; font-src data:;"><style>html,body{margin:0;min-height:100%;background:#fff}body{font-family:system-ui,sans-serif}</style></head><body>${body}</body></html>`;
+  const base = baseHref ? `<base href="${escapeAttribute(baseHref)}">` : "";
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; frame-src 'self'; connect-src 'none'; object-src 'none'; form-action 'none'; frame-ancestors 'self';">${base}<style>html,body{margin:0;min-height:100%;background:#fff}body{font-family:system-ui,sans-serif}</style></head><body>${body}</body></html>`;
 }
 
 export function ArtifactPreviewPanel<TArtifact extends PreviewableArtifact>({
@@ -71,6 +93,7 @@ export function ArtifactPreviewPanel<TArtifact extends PreviewableArtifact>({
   errorMessage = "This artifact could not be loaded.",
   onRetry,
   initialMode = "code",
+  workspaceAssetBaseUrl,
 }: ArtifactPreviewPanelProps<TArtifact>) {
   const [mode, setMode] = useState<ArtifactPreviewMode>(initialMode);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -132,6 +155,8 @@ export function ArtifactPreviewPanel<TArtifact extends PreviewableArtifact>({
   const disabled = loadState !== "ready";
   const editable = artifact.editable !== false && Boolean(artifact.workspacePath);
   const kind = previewKind(artifact);
+  const assetUrl = workspaceAssetUrl(workspaceAssetBaseUrl, artifact.workspacePath);
+  const assetDirectoryUrl = workspaceAssetDirectoryUrl(workspaceAssetBaseUrl, artifact.workspacePath);
 
   return (
     <aside
@@ -238,9 +263,19 @@ export function ArtifactPreviewPanel<TArtifact extends PreviewableArtifact>({
           <iframe
             className="artifact-preview-frame"
             title={`${artifact.name} preview`}
-            sandbox=""
-            srcDoc={sandboxDocument(artifact.content, kind)}
+            sandbox="allow-scripts"
+            srcDoc={sandboxDocument(artifact.content, kind, assetDirectoryUrl)}
           />
+        )}
+        {loadState === "ready" && mode === "preview" && kind === "image" && assetUrl && (
+          <div className="artifact-preview-image">
+            {/* Private workspace assets require the browser's session cookie and cannot use next/image optimization. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={assetUrl} alt={artifact.name} />
+          </div>
+        )}
+        {loadState === "ready" && mode === "preview" && kind === "image" && !assetUrl && (
+          <div className="artifact-preview-status" role="alert">This image is not backed by a workspace file.</div>
         )}
         {loadState === "ready" && mode === "preview" && kind === "markdown" && (
           <div className="artifact-preview-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{artifact.content}</ReactMarkdown></div>

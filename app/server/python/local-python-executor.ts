@@ -71,7 +71,7 @@ export type LocalCommandChangedFile = {
   contentType: string;
   language: string;
   editable: boolean;
-  preview: "html" | "markdown" | "svg" | "text" | "none";
+  preview: "html" | "markdown" | "svg" | "image" | "text" | "none";
   sha256?: string;
 };
 

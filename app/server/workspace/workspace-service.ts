@@ -72,6 +72,14 @@ export async function readWorkspaceFile(ownerId: string, conversationId: string,
   });
 }
 
+export async function readWorkspaceAsset(ownerId: string, conversationId: string, pathValue: string): Promise<{ file: WorkspaceFile; bytes: Uint8Array }> {
+  const path = workspacePath(pathValue);
+  return withWorkspace(ownerId, conversationId, async (executor) => {
+    const bytes = await executor.readWorkspaceFile(path);
+    return { file: metadata(path, bytes.byteLength, hash(bytes)), bytes };
+  });
+}
+
 export async function searchWorkspaceFiles(ownerId: string, conversationId: string, query: string, root = "", maxResults = 50): Promise<WorkspaceSearchMatch[]> {
   if (!query.trim() || query.length > WORKSPACE_LIMITS.maxSearchQueryLength) throw new WorkspaceRequestError(400, "Search query is invalid.");
   const normalizedRoot = root ? workspacePath(root) : "";

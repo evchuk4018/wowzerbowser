@@ -27,7 +27,11 @@ test("artifact panel exposes editing actions, states, accessible resizing, and s
   assert.match(panel, /ArrowLeft/);
   assert.match(panel, /role="tablist"/);
   assert.match(panel, /<textarea/);
-  assert.match(panel, /sandbox=""/);
+  assert.match(panel, /sandbox="allow-scripts"/);
+  assert.match(panel, /workspaceAssetBaseUrl/);
+  assert.match(panel, /<base href/);
+  assert.match(panel, /connect-src 'none'/);
+  assert.match(panel, /kind === "image"/);
   assert.match(panel, /navigator\.clipboard\.writeText/);
   assert.match(panel, /URL\.createObjectURL/);
   assert.match(panel, /Save failed/);

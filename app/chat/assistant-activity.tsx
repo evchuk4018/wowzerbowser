@@ -423,6 +423,7 @@ function ArtifactDownload({
     artifact.preview === "html"
     || artifact.preview === "markdown"
     || artifact.preview === "svg"
+    || artifact.preview === "image"
     || artifact.preview === "text"
     || artifact.contentType.startsWith("text/")
     || artifact.contentType === "application/json"

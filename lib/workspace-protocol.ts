@@ -21,7 +21,7 @@ export type WorkspaceFile = {
   contentType: string;
   language: string;
   editable: boolean;
-  preview: "html" | "markdown" | "svg" | "text" | "none";
+  preview: "html" | "markdown" | "svg" | "image" | "text" | "none";
   sha256?: string;
 };
 
@@ -105,7 +105,8 @@ export function workspaceContentType(path: string): string {
     jsx: "text/javascript; charset=utf-8", ts: "text/typescript; charset=utf-8", mts: "text/typescript; charset=utf-8",
     cts: "text/typescript; charset=utf-8", tsx: "text/typescript; charset=utf-8", md: "text/markdown; charset=utf-8",
     markdown: "text/markdown; charset=utf-8", json: "application/json", py: "text/x-python; charset=utf-8",
-    svg: "image/svg+xml", xml: "application/xml", yaml: "text/yaml; charset=utf-8", yml: "text/yaml; charset=utf-8",
+    svg: "image/svg+xml", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif", avif: "image/avif", ico: "image/x-icon",
+    xml: "application/xml", yaml: "text/yaml; charset=utf-8", yml: "text/yaml; charset=utf-8",
     sh: "text/x-shellscript; charset=utf-8", bash: "text/x-shellscript; charset=utf-8", txt: "text/plain; charset=utf-8",
   };
   return types[extension] ?? "text/plain; charset=utf-8";
@@ -115,6 +116,7 @@ export function workspacePreview(path: string, contentType = workspaceContentTyp
   if (contentType.startsWith("text/html")) return "html";
   if (contentType === "text/markdown; charset=utf-8") return "markdown";
   if (contentType === "image/svg+xml") return "svg";
+  if (contentType.startsWith("image/")) return "image";
   if (contentType.startsWith("text/") || contentType === "application/json" || contentType === "application/xml") return "text";
   return "none";
 }

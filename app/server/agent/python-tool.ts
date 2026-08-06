@@ -170,10 +170,8 @@ function contentTypeFor(path: string): string {
   const extension = path.toLowerCase().split(".").pop();
   if (extension === "json") return "application/json";
   if (extension === "csv") return "text/csv";
-  if (extension === "txt" || extension === "md" || extension === "py" || extension === "html" || extension === "htm" || extension === "css" || extension === "js" || extension === "mjs" || extension === "cjs" || extension === "jsx" || extension === "ts" || extension === "tsx" || extension === "json" || extension === "svg" || extension === "xml" || extension === "yaml" || extension === "yml") return workspaceContentType(path);
-  if (extension === "png") return "image/png";
+  if (extension === "txt" || extension === "md" || extension === "py" || extension === "html" || extension === "htm" || extension === "css" || extension === "js" || extension === "mjs" || extension === "cjs" || extension === "jsx" || extension === "ts" || extension === "tsx" || extension === "json" || extension === "svg" || extension === "xml" || extension === "yaml" || extension === "yml" || extension === "png" || extension === "jpg" || extension === "jpeg" || extension === "webp" || extension === "gif" || extension === "avif" || extension === "ico") return workspaceContentType(path);
   if (extension === "pdf") return "application/pdf";
   if (extension === "docx") return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-  if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
   return "application/octet-stream";
 }

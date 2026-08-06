@@ -120,7 +120,7 @@ function normalizeArtifact(value: unknown): ChatArtifact | null {
     ...(typeof candidate.sha256 === "string" && /^[0-9a-f]{64}$/i.test(candidate.sha256) ? { sha256: candidate.sha256.toLowerCase() } : {}),
     ...(typeof candidate.workspacePath === "string" ? { workspacePath: candidate.workspacePath } : {}),
     ...(typeof candidate.language === "string" ? { language: candidate.language } : {}),
-    ...(candidate.preview === "html" || candidate.preview === "markdown" || candidate.preview === "svg" || candidate.preview === "text" || candidate.preview === "none" ? { preview: candidate.preview } : {}),
+    ...(candidate.preview === "html" || candidate.preview === "markdown" || candidate.preview === "svg" || candidate.preview === "image" || candidate.preview === "text" || candidate.preview === "none" ? { preview: candidate.preview } : {}),
     ...(typeof candidate.projectId === "string" ? { projectId: candidate.projectId } : {}),
     ...(typeof candidate.revisionId === "string" ? { revisionId: candidate.revisionId } : {}),
     ...(candidate.parentRevisionId === null || typeof candidate.parentRevisionId === "string" ? { parentRevisionId: candidate.parentRevisionId as string | null } : {}),

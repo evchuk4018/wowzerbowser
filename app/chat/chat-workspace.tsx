@@ -491,9 +491,14 @@ export function ChatWorkspace({
     void (async () => {
       try {
         if (!(await hasSession())) throw new Error("Your session expired. Sign in and try again.");
-        let content: string;
+        const isWorkspaceImage = Boolean(artifact.workspacePath)
+          && (artifact.preview === "image" || artifact.contentType.split(";", 1)[0].trim().toLowerCase().startsWith("image/"))
+          && artifact.preview !== "svg";
+        let content = "";
         let currentArtifact: ChatArtifact & { content: string } = { ...artifact, content: "" };
-        if (artifact.workspacePath) {
+        if (isWorkspaceImage) {
+          currentArtifact = { ...artifact, content: "" };
+        } else if (artifact.workspacePath) {
           try {
             const workspace = await readWorkspaceFileContent(active.id, artifact.workspacePath);
             content = workspace.content;
@@ -1062,7 +1067,8 @@ export function ChatWorkspace({
           artifact={artifactPreview.artifact}
           loadState={artifactPreview.loadState}
           errorMessage={artifactPreview.errorMessage}
-          initialMode={artifactPreview.artifact.preview === "html" ? "preview" : "code"}
+          initialMode={artifactPreview.artifact.preview === "html" || artifactPreview.artifact.preview === "image" ? "preview" : "code"}
+          workspaceAssetBaseUrl={`/api/chat/workspace/${encodeURIComponent(active.id)}/asset`}
           width={artifactPreviewWidth}
           onWidthChange={setArtifactPreviewWidth}
           onChange={(content) => setArtifactPreview((current) => current ? { ...current, artifact: { ...current.artifact, content } } : current)}

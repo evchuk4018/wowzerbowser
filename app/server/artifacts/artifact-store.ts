@@ -16,7 +16,7 @@ export type ArtifactDescriptor = {
   sha256: string;
   workspacePath?: string;
   language?: string;
-  preview?: "html" | "markdown" | "svg" | "text" | "none";
+  preview?: "html" | "markdown" | "svg" | "image" | "text" | "none";
   projectId?: string;
   revisionId?: string;
   parentRevisionId?: string | null;
@@ -54,7 +54,7 @@ export async function registerArtifact(input: {
   parentRevisionId?: string | null;
   workspacePath?: string;
   language?: string;
-  preview?: "html" | "markdown" | "svg" | "text" | "none";
+  preview?: "html" | "markdown" | "svg" | "image" | "text" | "none";
   origin?: "generated" | "uploaded";
   editable?: boolean;
   sourceCompleteness?: "complete" | "entrypoint-only";

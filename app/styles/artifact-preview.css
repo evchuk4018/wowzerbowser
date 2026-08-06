@@ -124,6 +124,8 @@
 .artifact-preview-editor { resize: none; }
 .artifact-preview-editor:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
 .artifact-preview-frame { width: 100%; height: 100%; border: 0; background: #fff; }
+.artifact-preview-image { display: grid; min-height: 0; place-items: center; overflow: auto; padding: 24px; background: #fff; }
+.artifact-preview-image img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
 .artifact-preview-markdown {
   overflow: auto;
   padding: 18px 22px;
