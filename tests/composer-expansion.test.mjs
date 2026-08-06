@@ -18,3 +18,18 @@ test("expanded composer stays anchored to the chat column and grows upward", () 
     /\.composer--expanded\s*\{[^}]*width:\s*min\(100%, 860px\);[^}]*height:\s*min\(560px, 60dvh\);/s,
   );
 });
+
+test("todo-bearing expanded composer can shrink on narrow mobile widths", () => {
+  for (const selector of [
+    ".composer--expanded",
+    ".composer-todos",
+    ".composer-todos-trigger",
+    ".composer-todos-top",
+  ]) {
+    assert.match(composerStyles, new RegExp(`${selector}\\s*\\{[^}]*min-width:\\s*0;`, "s"));
+  }
+  assert.match(
+    composerStyles,
+    /\.composer-todos-top\s*\{[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s,
+  );
+});
