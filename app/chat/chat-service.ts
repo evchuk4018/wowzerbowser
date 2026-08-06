@@ -15,6 +15,7 @@ import { readChatLiveStream } from "./read-chat-live-stream";
 import { chatTerminalEvents } from "./chat-terminal-events";
 import { waitForChatRetry } from "./chat-retry-backoff";
 import { authFetch } from "../auth/auth-fetch";
+import type { WorkspaceFile, WorkspaceSearchMatch } from "../../lib/workspace-protocol";
 
 async function readError(response: Response): Promise<string> {
   const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
@@ -124,6 +125,59 @@ export async function watchChatJobCost(
 export async function cancelChatJob(conversationId: string, jobId: string) {
   const response = await authFetch(`/api/chat/jobs/${encodeURIComponent(conversationId)}/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
   if (!response.ok) throw new Error(await readError(response));
+}
+
+async function workspaceError(response: Response): Promise<Error> {
+  const body = await response.json().catch(() => null) as { error?: unknown } | null;
+  return new Error(typeof body?.error === "string" ? body.error : `Workspace request failed (${response.status}).`);
+}
+
+export async function fetchWorkspaceFiles(conversationId: string, path = ""): Promise<WorkspaceFile[]> {
+  const query = path ? `?path=${encodeURIComponent(path)}` : "";
+  const response = await authFetch(`/api/chat/workspace/${encodeURIComponent(conversationId)}${query}`);
+  if (!response.ok) throw await workspaceError(response);
+  const body = await response.json() as { files?: WorkspaceFile[] };
+  return body.files ?? [];
+}
+
+export async function readWorkspaceFileContent(conversationId: string, path: string): Promise<{ file: WorkspaceFile; content: string }> {
+  const response = await authFetch(`/api/chat/workspace/${encodeURIComponent(conversationId)}/read`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (!response.ok) throw await workspaceError(response);
+  return response.json() as Promise<{ file: WorkspaceFile; content: string }>;
+}
+
+export async function searchWorkspace(conversationId: string, query: string, path = ""): Promise<WorkspaceSearchMatch[]> {
+  const response = await authFetch(`/api/chat/workspace/${encodeURIComponent(conversationId)}/search`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ query, path }),
+  });
+  if (!response.ok) throw await workspaceError(response);
+  const body = await response.json() as { matches?: WorkspaceSearchMatch[] };
+  return body.matches ?? [];
+}
+
+export async function saveWorkspaceFile(conversationId: string, path: string, content: string, expectedSha256?: string): Promise<{ file: WorkspaceFile; content: string }> {
+  const response = await authFetch(`/api/chat/workspace/${encodeURIComponent(conversationId)}/file`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path, content, expectedSha256 }),
+  });
+  if (!response.ok) throw await workspaceError(response);
+  return response.json() as Promise<{ file: WorkspaceFile; content: string }>;
+}
+
+export async function deleteWorkspaceFile(conversationId: string, path: string): Promise<void> {
+  const response = await authFetch(`/api/chat/workspace/${encodeURIComponent(conversationId)}/file`, {
+    method: "DELETE",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (!response.ok) throw await workspaceError(response);
 }
 
 export async function resumeChatJob(conversationId: string, jobId: string): Promise<void> {

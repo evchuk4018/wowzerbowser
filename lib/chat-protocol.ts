@@ -110,6 +110,10 @@ export type ChatArtifact = {
   name: string;
   contentType: string;
   size: number;
+  sha256?: string;
+  workspacePath?: string;
+  language?: string;
+  preview?: "html" | "markdown" | "svg" | "text" | "none";
   projectId?: string;
   revisionId?: string;
   parentRevisionId?: string | null;
@@ -803,6 +807,10 @@ function readToolCalls(value: unknown, field: string): ChatToolCall[] | undefine
                     `${field}[${index}].result.artifacts[${artifactIndex}].contentType`,
                   ),
                   size,
+                  ...(typeof artifact.sha256 === "string" && /^[0-9a-f]{64}$/.test(artifact.sha256) ? { sha256: artifact.sha256 } : {}),
+                  ...(typeof artifact.workspacePath === "string" ? { workspacePath: artifact.workspacePath } : {}),
+                  ...(typeof artifact.language === "string" ? { language: artifact.language } : {}),
+                  ...(artifact.preview === "html" || artifact.preview === "markdown" || artifact.preview === "svg" || artifact.preview === "text" || artifact.preview === "none" ? { preview: artifact.preview } : {}),
                 };
               }),
             }

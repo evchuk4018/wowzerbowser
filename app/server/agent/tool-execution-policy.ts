@@ -35,6 +35,15 @@ import { AUTOMATION_TOOL_NAMES } from "./automation-tool-manifest";
 import { CALENDAR_TOOL_NAMES } from "./calendar-tool-manifest";
 import { GET_TODOS_TOOL_NAME } from "./todo-tool";
 import { SEARCH_CURRENT_CHAT_TOOL_NAME } from "./current-chat-context-tool-manifest";
+import {
+  RUN_COMMAND_TOOL_NAME,
+  WORKSPACE_DELETE_TOOL_NAME,
+  WORKSPACE_PATCH_TOOL_NAME,
+  WORKSPACE_READ_TOOL_NAME,
+  WORKSPACE_SEARCH_TOOL_NAME,
+  WORKSPACE_LIST_TOOL_NAME,
+  WORKSPACE_WRITE_TOOL_NAME,
+} from "./workspace-tool-manifest";
 
 export type ToolExecutionPolicy = "parallel-safe" | "serial";
 export type ToolExecutionMetadata = { executionPolicy: ToolExecutionPolicy };
@@ -70,6 +79,13 @@ export const TOOL_EXECUTION_METADATA: Readonly<Record<string, ToolExecutionMetad
   [CALENDAR_TOOL_NAMES.get]: { executionPolicy: "parallel-safe" },
   [GET_TODOS_TOOL_NAME]: { executionPolicy: "parallel-safe" },
   [SEARCH_CURRENT_CHAT_TOOL_NAME]: { executionPolicy: "parallel-safe" },
+  [WORKSPACE_LIST_TOOL_NAME]: { executionPolicy: "parallel-safe" },
+  [WORKSPACE_SEARCH_TOOL_NAME]: { executionPolicy: "parallel-safe" },
+  [WORKSPACE_READ_TOOL_NAME]: { executionPolicy: "parallel-safe" },
+  [RUN_COMMAND_TOOL_NAME]: { executionPolicy: "serial" },
+  [WORKSPACE_WRITE_TOOL_NAME]: { executionPolicy: "serial" },
+  [WORKSPACE_PATCH_TOOL_NAME]: { executionPolicy: "serial" },
+  [WORKSPACE_DELETE_TOOL_NAME]: { executionPolicy: "serial" },
   [EDIT_SOURCE_BACKED_DOCUMENT_TOOL_NAME]: { executionPolicy: "serial" },
   [EDIT_PDF_TOOL_NAME]: { executionPolicy: "serial" },
   [ADD_USER_MEMORY_TOOL]: { executionPolicy: "serial" },

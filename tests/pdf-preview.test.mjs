@@ -73,7 +73,7 @@ test("wires the PDF preview through the workspace and responsive shell", async (
   assert.match(workspace, /fetchChatArtifact\(artifact\)/);
   assert.match(workspace, /URL\.createObjectURL\(blob\)/);
   assert.match(workspace, /URL\.revokeObjectURL/);
-  assert.match(workspace, /onOpenArtifact=\{openPdfPreview\}/);
+  assert.match(workspace, /onOpenArtifact=\{openArtifactPreview\}/);
   assert.match(panel, /role="separator"/);
   assert.match(panel, /ArrowLeft/);
   assert.match(panel, /aria-label="Close PDF preview"/);
@@ -81,7 +81,7 @@ test("wires the PDF preview through the workspace and responsive shell", async (
   assert.match(panel, /Try again/);
   assert.match(response, /resolvePdfArtifact/);
   assert.match(response, /className="artifact-inline-pdf"/);
-  assert.match(activity, /isPdf \? onOpenArtifact\(artifact\)/);
+  assert.match(activity, /opensInPanel \? onOpenArtifact\(artifact\)/);
   assert.match(styles, /grid-template-columns:[\s\S]*?minmax\(360px, 1fr\)/);
   assert.match(styles, /@media \(max-width: 1019px\)/);
   assert.match(styles, /\.pdf-preview-panel[\s\S]*?position: fixed/);

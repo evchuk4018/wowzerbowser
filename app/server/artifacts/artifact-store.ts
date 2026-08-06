@@ -14,6 +14,9 @@ export type ArtifactDescriptor = {
   contentType: string;
   size: number;
   sha256: string;
+  workspacePath?: string;
+  language?: string;
+  preview?: "html" | "markdown" | "svg" | "text" | "none";
   projectId?: string;
   revisionId?: string;
   parentRevisionId?: string | null;
@@ -49,6 +52,9 @@ export async function registerArtifact(input: {
   projectId?: string;
   revisionId?: string;
   parentRevisionId?: string | null;
+  workspacePath?: string;
+  language?: string;
+  preview?: "html" | "markdown" | "svg" | "text" | "none";
   origin?: "generated" | "uploaded";
   editable?: boolean;
   sourceCompleteness?: "complete" | "entrypoint-only";
@@ -90,6 +96,9 @@ export async function registerArtifact(input: {
     contentType: object.contentType,
     size: object.size,
     sha256: object.sha256 ?? "",
+    ...(input.workspacePath ? { workspacePath: input.workspacePath } : {}),
+    ...(input.language ? { language: input.language } : {}),
+    ...(input.preview ? { preview: input.preview } : {}),
     ...(input.projectId ? { projectId: input.projectId } : {}),
     ...(input.revisionId ? { revisionId: input.revisionId } : {}),
     ...(input.parentRevisionId !== undefined ? { parentRevisionId: input.parentRevisionId } : {}),
@@ -104,6 +113,10 @@ export async function registerArtifact(input: {
     name: descriptor.name,
     contentType: descriptor.contentType,
     size: descriptor.size,
+    ...(descriptor.sha256 ? { sha256: descriptor.sha256 } : {}),
+    ...(descriptor.workspacePath ? { workspacePath: descriptor.workspacePath } : {}),
+    ...(descriptor.language ? { language: descriptor.language } : {}),
+    ...(descriptor.preview ? { preview: descriptor.preview } : {}),
     ...(descriptor.projectId ? { projectId: descriptor.projectId } : {}),
     ...(descriptor.revisionId ? { revisionId: descriptor.revisionId } : {}),
     ...(descriptor.parentRevisionId !== undefined ? { parentRevisionId: descriptor.parentRevisionId } : {}),

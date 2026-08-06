@@ -61,6 +61,9 @@ import { useChatStartupSnapshot } from "./use-chat-startup-snapshot";
 import { defaultPdfPreviewWidth, clampPdfPreviewWidth } from "./pdf-preview-layout";
 import { PdfPreviewPanel, type PdfPreviewLoadState } from "./pdf-preview-panel";
 import { parseChatModeCommand, type ChatMode } from "../../lib/chat-modes";
+import { ArtifactPreviewPanel } from "./artifact-preview-panel";
+import { defaultArtifactPreviewWidth, clampArtifactPreviewWidth } from "./artifact-preview-layout";
+import { readWorkspaceFileContent, saveWorkspaceFile } from "./chat-service";
 
 export type ChatWorkspaceProps = {
   user: AuthUser;
@@ -122,6 +125,12 @@ export function ChatWorkspace({
     loadState: PdfPreviewLoadState;
   } | null>(null);
   const [pdfPreviewWidth, setPdfPreviewWidth] = useState(360);
+  const [artifactPreview, setArtifactPreview] = useState<{
+    artifact: ChatArtifact & { content: string };
+    loadState: "loading" | "ready" | "error";
+    errorMessage?: string;
+  } | null>(null);
+  const [artifactPreviewWidth, setArtifactPreviewWidth] = useState(450);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
@@ -131,6 +140,7 @@ export function ChatWorkspace({
   const conversationLongPressTimerRef = useRef<number | null>(null);
   const pdfPreviewUrlRef = useRef<string | null>(null);
   const pdfPreviewRequestRef = useRef(0);
+  const artifactPreviewRequestRef = useRef(0);
   const conversationLoadRequestRef = useRef(0);
   const bootstrapRequestRef = useRef(0);
   const initialConversationIdRef = useRef(requestedConversationId);
@@ -430,6 +440,11 @@ export function ChatWorkspace({
     setPdfPreview(null);
   }, [releasePdfPreviewUrl]);
 
+  const closeArtifactPreview = useCallback(() => {
+    artifactPreviewRequestRef.current += 1;
+    setArtifactPreview(null);
+  }, []);
+
   const openPdfPreview = useCallback((artifact: ChatArtifact) => {
     const requestId = pdfPreviewRequestRef.current + 1;
     pdfPreviewRequestRef.current = requestId;
@@ -462,14 +477,60 @@ export function ChatWorkspace({
     })();
   }, [hasSession, releasePdfPreviewUrl]);
 
+  const openArtifactPreview = useCallback((artifact: ChatArtifact) => {
+    if (artifact.contentType === "application/pdf") {
+      closeArtifactPreview();
+      openPdfPreview(artifact);
+      return;
+    }
+    closePdfPreview();
+    const requestId = artifactPreviewRequestRef.current + 1;
+    artifactPreviewRequestRef.current = requestId;
+    setArtifactPreviewWidth(defaultArtifactPreviewWidth(window.innerWidth));
+    setArtifactPreview({ artifact: { ...artifact, content: "" }, loadState: "loading" });
+    void (async () => {
+      try {
+        if (!(await hasSession())) throw new Error("Your session expired. Sign in and try again.");
+        let content: string;
+        let currentArtifact: ChatArtifact & { content: string } = { ...artifact, content: "" };
+        if (artifact.workspacePath) {
+          try {
+            const workspace = await readWorkspaceFileContent(active.id, artifact.workspacePath);
+            content = workspace.content;
+            currentArtifact = { ...artifact, content, name: workspace.file.name, contentType: workspace.file.contentType, language: workspace.file.language, preview: workspace.file.preview, workspacePath: workspace.file.path, sha256: workspace.file.sha256, editable: workspace.file.editable };
+          } catch {
+            content = await (await fetchChatArtifact(artifact)).text();
+            currentArtifact = { ...artifact, content };
+          }
+        } else {
+          content = await (await fetchChatArtifact(artifact)).text();
+          currentArtifact = { ...artifact, content };
+        }
+        if (artifactPreviewRequestRef.current !== requestId) return;
+        setArtifactPreview({ artifact: currentArtifact, loadState: "ready" });
+      } catch (error) {
+        if (artifactPreviewRequestRef.current !== requestId) return;
+        setArtifactPreview({
+          artifact: { ...artifact, content: "" },
+          loadState: "error",
+          errorMessage: error instanceof Error ? error.message : "The file could not be loaded.",
+        });
+      }
+    })();
+  }, [active.id, closeArtifactPreview, closePdfPreview, hasSession, openPdfPreview]);
+
   useEffect(() => {
-    const frame = window.requestAnimationFrame(closePdfPreview);
+    const frame = window.requestAnimationFrame(() => {
+      closePdfPreview();
+      closeArtifactPreview();
+    });
     return () => window.cancelAnimationFrame(frame);
-  }, [closePdfPreview, state.activeId]);
+  }, [closeArtifactPreview, closePdfPreview, state.activeId]);
 
   useEffect(() => {
     const handleResize = () => {
       setPdfPreviewWidth((width) => clampPdfPreviewWidth(width, window.innerWidth));
+      setArtifactPreviewWidth((width) => clampArtifactPreviewWidth(width, window.innerWidth));
     };
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
@@ -477,6 +538,7 @@ export function ChatWorkspace({
 
   useEffect(() => () => {
     pdfPreviewRequestRef.current += 1;
+    artifactPreviewRequestRef.current += 1;
     releasePdfPreviewUrl();
   }, [releasePdfPreviewUrl]);
 
@@ -796,9 +858,10 @@ export function ChatWorkspace({
 
   return (
     <main
-      className={`app-shell ${pdfPreview ? "pdf-preview-open" : ""}`}
-      style={pdfPreview ? ({
-        "--pdf-preview-width": `${pdfPreviewWidth}px`,
+      className={`app-shell ${pdfPreview ? "pdf-preview-open" : ""} ${artifactPreview ? "artifact-preview-open" : ""}`}
+      style={(pdfPreview || artifactPreview) ? ({
+        ...(pdfPreview ? { "--pdf-preview-width": `${pdfPreviewWidth}px` } : {}),
+        ...(artifactPreview ? { "--artifact-preview-width": `${artifactPreviewWidth}px` } : {}),
       } as CSSProperties) : undefined}
       {...navigation}
     >
@@ -927,7 +990,7 @@ export function ChatWorkspace({
             onRetry={retryTurn}
             onEdit={editTurn}
             onShare={sharePrompt}
-            onOpenArtifact={openPdfPreview}
+            onOpenArtifact={openArtifactPreview}
           />
         )}
         {conversationLoadError && !loadingConversationId && (
@@ -992,6 +1055,23 @@ export function ChatWorkspace({
           onWidthChange={setPdfPreviewWidth}
           onRetry={() => openPdfPreview(pdfPreview.artifact)}
           onClose={closePdfPreview}
+        />
+      )}
+      {artifactPreview && (
+        <ArtifactPreviewPanel
+          artifact={artifactPreview.artifact}
+          loadState={artifactPreview.loadState}
+          errorMessage={artifactPreview.errorMessage}
+          initialMode={artifactPreview.artifact.preview === "html" ? "preview" : "code"}
+          width={artifactPreviewWidth}
+          onWidthChange={setArtifactPreviewWidth}
+          onChange={(content) => setArtifactPreview((current) => current ? { ...current, artifact: { ...current.artifact, content } } : current)}
+          onSave={async (artifact, content) => {
+            if (!artifact.workspacePath) throw new Error("This artifact is not backed by an editable workspace file.");
+            const saved = await saveWorkspaceFile(active.id, artifact.workspacePath, content, artifact.sha256);
+            setArtifactPreview((current) => current ? { ...current, artifact: { ...current.artifact, content: saved.content, name: saved.file.name, contentType: saved.file.contentType, language: saved.file.language, preview: saved.file.preview, sha256: saved.file.sha256, workspacePath: saved.file.path } } : current);
+          }}
+          onClose={closeArtifactPreview}
         />
       )}
     </main>

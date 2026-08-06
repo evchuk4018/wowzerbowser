@@ -611,13 +611,8 @@ def delete_workspace_entry(root: Path, relative: str) -> None:
             raise WorkerError(404, "Workspace entry not found.") from error
         if stat.S_ISREG(details.st_mode):
             os.unlink(parts[-1], dir_fd=parent_fd)
-        elif stat.S_ISDIR(details.st_mode):
-            try:
-                os.rmdir(parts[-1], dir_fd=parent_fd)
-            except OSError as error:
-                raise WorkerError(409, "Workspace directory is not empty.") from error
         else:
-            raise WorkerError(400, "Workspace entry must be a regular file or directory.")
+            raise WorkerError(400, "Workspace entry must be a regular file.")
     finally:
         os.close(parent_fd)
 

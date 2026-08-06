@@ -386,13 +386,23 @@ function ArtifactDownload({
     }
   };
   const isPdf = artifact.contentType === "application/pdf";
+  const isPreviewable = artifact.preview !== "none" && (
+    artifact.preview === "html"
+    || artifact.preview === "markdown"
+    || artifact.preview === "svg"
+    || artifact.preview === "text"
+    || artifact.contentType.startsWith("text/")
+    || artifact.contentType === "application/json"
+    || artifact.contentType === "application/xml"
+  );
+  const opensInPanel = isPdf || isPreviewable;
 
   return (
     <div className="artifact-download">
       <button
         type="button"
-        disabled={!isPdf && state === "downloading"}
-        onClick={() => isPdf ? onOpenArtifact(artifact) : void download()}
+        disabled={!opensInPanel && state === "downloading"}
+        onClick={() => opensInPanel ? onOpenArtifact(artifact) : void download()}
       >
         Created {artifact.name}
       </button>

@@ -5,6 +5,7 @@ import { readArtifactDescriptor, registerArtifact } from "../artifacts/artifact-
 import { isLocalPythonConfigured, LocalPythonExecutor } from "../python/local-python-executor";
 import { validatePythonToolInput } from "../../../lib/python-tool-policy";
 import { registerGeneratedDocumentProvenance } from "../documents/generated-document-provenance";
+import { workspaceContentType, workspaceFileFor } from "../../../lib/workspace-protocol";
 import {
   PYTHON_TOOL_DEFINITION,
   PYTHON_TOOL_NAME,
@@ -63,6 +64,7 @@ export async function executePythonTool(
     const artifactBytes = new Map<string, Uint8Array>();
     for (const item of result.artifacts ?? []) {
       const contentType = contentTypeFor(item.path);
+      const workspaceMetadata = workspaceFileFor(item.path, item.size, item.sha256);
       if (contentType === "application/pdf" || contentType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
         try {
           const provenance = await activeDependencies.registerProvenance({ ownerId, conversationId, jobId: call.id, pythonInput, executor, artifact: item });
@@ -72,6 +74,7 @@ export async function executePythonTool(
             bytes, contentType, storageKind: "document",
             projectId: provenance.projectId, revisionId: provenance.revisionId,
             parentRevisionId: provenance.manifest.parentRevisionId, origin: "generated", editable: true,
+            workspacePath: workspaceMetadata.path, language: workspaceMetadata.language, preview: "none",
             ...(provenance.sourceCompleteness === null ? {} : { sourceCompleteness: provenance.sourceCompleteness }),
           });
           artifacts.push(artifact);
@@ -95,6 +98,7 @@ export async function executePythonTool(
             storageKind: "document",
             origin: "generated",
             editable: false,
+            workspacePath: workspaceMetadata.path, language: workspaceMetadata.language, preview: "none",
           });
           artifacts.push(artifact);
           artifactBytes.set(artifact.id, bytes);
@@ -107,6 +111,10 @@ export async function executePythonTool(
           name: item.path.split("/").pop() || "artifact",
           bytes,
           contentType,
+          workspacePath: workspaceMetadata.path,
+          language: workspaceMetadata.language,
+          preview: workspaceMetadata.preview,
+          editable: workspaceMetadata.editable,
         });
         artifacts.push(artifact);
         artifactBytes.set(artifact.id, bytes);
@@ -162,7 +170,7 @@ function contentTypeFor(path: string): string {
   const extension = path.toLowerCase().split(".").pop();
   if (extension === "json") return "application/json";
   if (extension === "csv") return "text/csv";
-  if (extension === "txt" || extension === "md" || extension === "py") return "text/plain; charset=utf-8";
+  if (extension === "txt" || extension === "md" || extension === "py" || extension === "html" || extension === "htm" || extension === "css" || extension === "js" || extension === "mjs" || extension === "cjs" || extension === "jsx" || extension === "ts" || extension === "tsx" || extension === "json" || extension === "svg" || extension === "xml" || extension === "yaml" || extension === "yml") return workspaceContentType(path);
   if (extension === "png") return "image/png";
   if (extension === "pdf") return "application/pdf";
   if (extension === "docx") return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
