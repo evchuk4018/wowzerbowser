@@ -18,6 +18,7 @@ import { DocumentEditActivity } from "./document-edit-activity";
 import { fetchChatArtifact } from "./chat-service";
 import { formatDuration } from "./format-duration";
 import type { ChatCitation, ChatSource } from "../../lib/chat-citations";
+import { SubagentDisclosure, type SubagentActivity } from "./subagent-activity";
 
 export type {
   AssistantActivity,
@@ -154,10 +155,13 @@ function ImageDisclosure({ activity }: { activity: ImageActivity }) {
     </div>
   );
 }
-function ReasoningCard({ activity, phaseActivities }: { activity: ReasoningActivity; phaseActivities: AssistantActivity[] }) {
+type RenderableActivity = AssistantActivity | SubagentActivity;
+
+function ReasoningCard({ activity, phaseActivities }: { activity: ReasoningActivity; phaseActivities: RenderableActivity[] }) {
   const [open, setOpen] = useState(false);
   const liveDuration = useLiveDuration(activity.startedAt, activity.status === "running");
   const duration = activity.durationMs ?? liveDuration;
+  const subagents = phaseActivities.filter((item): item is SubagentActivity => item.kind === "subagent");
 
   return (
     <section className={`reasoning-block ${open ? "reasoning-open" : ""}`}>
@@ -183,6 +187,11 @@ function ReasoningCard({ activity, phaseActivities }: { activity: ReasoningActiv
             if (item.kind === "document") return <DocumentEditActivity key={item.id} activity={item} />;
             return null;
           })}
+        </div>
+      )}
+      {subagents.length > 0 && (
+        <div className="reasoning-subagent-list" aria-label="Deep research agents">
+          {subagents.map((item) => <SubagentDisclosure key={item.id} activity={item} />)}
         </div>
       )}
     </section>
@@ -219,12 +228,12 @@ function OutputBubble({
 }
 
 type PhaseSegment =
-  | { kind: "reasoning"; activities: AssistantActivity[] }
+  | { kind: "reasoning"; activities: RenderableActivity[] }
   | { kind: "output"; activity: OutputActivity };
 
-function phaseSegments(activities: AssistantActivity[]): PhaseSegment[] {
+function phaseSegments(activities: RenderableActivity[]): PhaseSegment[] {
   const segments: PhaseSegment[] = [];
-  let reasoningActivities: AssistantActivity[] = [];
+  let reasoningActivities: RenderableActivity[] = [];
   const flushReasoning = () => {
     if (reasoningActivities.length) segments.push({ kind: "reasoning", activities: reasoningActivities });
     reasoningActivities = [];
@@ -242,7 +251,7 @@ function phaseSegments(activities: AssistantActivity[]): PhaseSegment[] {
   return segments;
 }
 
-function reasoningForActivities(phase: number, activities: AssistantActivity[]): ReasoningActivity {
+function reasoningForActivities(phase: number, activities: RenderableActivity[]): ReasoningActivity {
   const reasoningItems = activities.filter((item): item is ReasoningActivity => item.kind === "reasoning");
   const latestReasoning = reasoningItems.at(-1);
   const latestSummary = reasoningItems.reduce<ReasoningActivity | undefined>((current, item) => {
@@ -361,7 +370,8 @@ function AssistantActivityTimelineInner({
   onOpenArtifact,
   streaming = false,
 }: AssistantActivityTimelineProps) {
-  const phases = activities.reduce<Map<number, { activities: AssistantActivity[]; phaseBreak?: PhaseBreakActivity }>>((grouped, activity) => {
+  const renderableActivities = activities as RenderableActivity[];
+  const phases = renderableActivities.reduce<Map<number, { activities: RenderableActivity[]; phaseBreak?: PhaseBreakActivity }>>((grouped, activity) => {
     const phase = grouped.get(activity.phase) ?? { activities: [] };
     phase.activities.push(activity);
     if (activity.kind === "phase_break") phase.phaseBreak = activity;

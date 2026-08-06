@@ -219,3 +219,52 @@
 .document-edit-summary { font-weight: 600; }
 .document-edit-details { margin-top: .35rem; opacity: .8; }
 .document-edit-error { margin-top: .35rem; color: var(--error, #b42318); }
+
+.subagent-activity {
+  overflow: hidden;
+  min-width: 0;
+  border: 1px solid #3d3f39;
+  border-radius: 12px;
+  background: #20211f;
+  white-space: normal;
+}
+
+.subagent-activity-running { border-color: #5a604b; }
+.subagent-activity-failed { border-color: rgba(255, 156, 145, .45); }
+
+.subagent-activity-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  width: 100%;
+  min-height: 52px;
+  border: 0;
+  background: transparent;
+  padding: 8px 12px;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.subagent-activity-summary:hover { background: rgba(255, 255, 255, .035); }
+.subagent-activity-summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.subagent-activity-heading { display: grid; min-width: 0; gap: 1px; }
+.subagent-activity-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 650; }
+.subagent-activity-agent { overflow: hidden; color: var(--quiet); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+
+.subagent-activity-details { border-top: 1px solid #353631; background: #181918; }
+.subagent-activity-section { padding: 10px 12px; }
+.subagent-activity-section + .subagent-activity-section { border-top: 1px solid #292a27; }
+.subagent-activity-section-title { color: var(--quiet); font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
+.subagent-summary-history, .subagent-trace { display: grid; gap: 7px; margin: 8px 0 0; padding-left: 20px; color: #c9cac2; font-size: 12px; line-height: 1.45; }
+.subagent-trace li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; }
+.subagent-trace-meta { color: var(--quiet); font-size: 11px; font-variant-numeric: tabular-nums; }
+.subagent-activity-empty { margin: 8px 0 0; color: var(--quiet); font-size: 12px; }
+
+@media (max-width: 560px) {
+  .subagent-activity-summary { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .subagent-activity-summary .python-activity-duration { display: none; }
+  .subagent-trace li { grid-template-columns: minmax(0, 1fr) auto; }
+  .subagent-trace-meta + .subagent-trace-meta { display: none; }
+}
