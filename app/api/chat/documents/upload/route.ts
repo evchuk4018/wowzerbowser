@@ -4,6 +4,7 @@ import { ChatDocumentError, DOCUMENT_CONTENT_TYPES, MAX_PDF_BYTES } from "../../
 import { createDocumentStorageUpload, ensureChatDocumentConversation } from "../../../../server/chat/chat-document-store";
 import { ensureChatDocumentSchema } from "../../../../server/chat/chat-document-schema";
 import { deleteOwnedStorageObject, writePendingStorageObject } from "../../../../server/storage/storage-service";
+import { ensureProjectConversation } from "../../../../server/projects/project-service";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -38,16 +39,18 @@ export function createUploadHandler(dependencies = {
 
   const conversationId = request.headers.get("x-conversation-id")?.trim() ?? "";
   const documentId = request.headers.get("x-document-id")?.trim() ?? "";
+  const projectId = request.headers.get("x-project-id")?.trim() ?? "";
   const contentType = request.headers.get("content-type")?.split(";", 1)[0]?.trim() ?? "";
-  if (!ID_PATTERN.test(conversationId) || !ID_PATTERN.test(documentId) || !DOCUMENT_CONTENT_TYPES.includes(contentType as never) || !request.body) {
+  if (!ID_PATTERN.test(conversationId) || !ID_PATTERN.test(documentId) || (projectId && !ID_PATTERN.test(projectId)) || !DOCUMENT_CONTENT_TYPES.includes(contentType as never) || !request.body) {
     return NextResponse.json({ error: "Invalid document upload." }, { status: 400 });
   }
 
   try {
     const declaredSize = contentLength(request);
     await dependencies.ensureChatDocumentSchema();
-    await dependencies.ensureChatDocumentConversation(owner.id, conversationId);
-    const pending = await dependencies.createDocumentStorageUpload({ ownerId: owner.id, conversationId, documentId, filename: safeFilename(request.headers.get("x-file-name")), contentType: contentType as (typeof DOCUMENT_CONTENT_TYPES)[number] });
+    if (projectId) await ensureProjectConversation(owner.id, projectId, conversationId);
+    else await dependencies.ensureChatDocumentConversation(owner.id, conversationId);
+    const pending = await dependencies.createDocumentStorageUpload({ ownerId: owner.id, conversationId, documentId, chatProjectId: projectId || undefined, filename: safeFilename(request.headers.get("x-file-name")), contentType: contentType as (typeof DOCUMENT_CONTENT_TYPES)[number] });
     const stored = await dependencies.writePendingStorageObject({ ownerId: owner.id, object: pending, source: request.body, maxBytes: MAX_PDF_BYTES });
     if (declaredSize !== null && declaredSize !== stored.size) {
       await dependencies.deleteOwnedStorageObject({ ownerId: owner.id, objectId: stored.objectId }).catch(() => undefined);

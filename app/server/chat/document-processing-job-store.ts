@@ -41,6 +41,7 @@ export type DocumentProcessingJobClaim = DocumentProcessingJob & {
     contentType: ChatDocumentAttachment["contentType"];
     userMessageId: string | null;
     sourceJobId: string | null;
+    chatProjectId?: string;
   };
 };
 
@@ -106,6 +107,7 @@ function claimFromResult(value: unknown): DocumentProcessingJobClaim | null {
       contentType: input.contentType as ChatDocumentAttachment["contentType"],
       userMessageId: typeof input.userMessageId === "string" ? input.userMessageId : null,
       sourceJobId: typeof input.sourceJobId === "string" ? input.sourceJobId : null,
+      ...(typeof input.chatProjectId === "string" ? { chatProjectId: input.chatProjectId } : {}),
     },
   };
 }
@@ -119,6 +121,7 @@ export async function enqueueDocumentProcessingJob(input: {
   contentType: ChatDocumentAttachment["contentType"];
   userMessageId: string;
   sourceJobId: string;
+  chatProjectId?: string;
 }): Promise<DocumentProcessingJob> {
   const object = await getStorageObjectById({
     ownerId: input.ownerId,
@@ -126,7 +129,8 @@ export async function enqueueDocumentProcessingJob(input: {
     conversationId: input.conversationId,
     state: "complete",
   });
-  if (!object || object.kind !== "document" || object.documentId !== input.documentId || object.contentType !== input.contentType) {
+  if (!object || object.kind !== "document" || object.documentId !== input.documentId || object.contentType !== input.contentType
+    || (input.chatProjectId !== undefined && object.chatProjectId !== input.chatProjectId)) {
     throw new ChatDocumentError("document_storage_invalid", "The uploaded document object is invalid.", 409);
   }
   if (object.size > MAX_PDF_BYTES) throw new ChatDocumentError("document_too_large", "Documents must be 25 MiB or smaller.", 413);
@@ -140,6 +144,7 @@ export async function enqueueDocumentProcessingJob(input: {
     contentType: input.contentType,
     userMessageId: input.userMessageId,
     sourceJobId: input.sourceJobId,
+    ...(input.chatProjectId ? { chatProjectId: input.chatProjectId } : {}),
   };
   const [row] = await withChatPersistenceRetry(() => query<RpcRow>(
     "select enqueue_document_processing_job($1,$2,$3,$4,$5,$6::uuid,$7::jsonb) as result",

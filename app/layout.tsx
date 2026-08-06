@@ -19,6 +19,7 @@ import "./styles/pdf-preview.css";
 import "./styles/artifact-preview.css";
 import "./styles/composer.css";
 import "./styles/chat-search.css";
+import "./styles/projects.css";
 import "./styles/responsive.css";
 import "./styles/reduced-motion.css";
 import { ServiceWorkerRegistration } from "./pwa/service-worker-registration";

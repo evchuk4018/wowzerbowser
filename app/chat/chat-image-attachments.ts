@@ -12,7 +12,7 @@ export const ACCEPTED_CHAT_IMAGE_TYPES = CHAT_IMAGE_CONTENT_TYPES;
 export const MAX_CHAT_IMAGES_PER_TURN = CHAT_IMAGE_MAX_COUNT;
 export const MAX_CHAT_IMAGE_BYTES = CHAT_IMAGE_MAX_BYTES;
 
-export type ChatImageUploadContext = { conversationId: string; userMessageId: string; jobId: string };
+export type ChatImageUploadContext = { conversationId: string; userMessageId: string; jobId: string; projectId?: string };
 export type PendingChatImage = {
   id: string;
   file: File;
@@ -74,6 +74,7 @@ async function waitForImageJob(input: { conversationId: string; jobId: string; s
 
 export async function uploadChatImages(input: {
   conversationId: string;
+  projectId?: string;
   userMessageId: string;
   jobId: string;
   images: readonly Pick<PendingChatImage, "id" | "file">[];
@@ -83,6 +84,7 @@ export async function uploadChatImages(input: {
   formData.set("conversationId", input.conversationId);
   formData.set("userMessageId", input.userMessageId);
   formData.set("jobId", input.jobId);
+  if (input.projectId) formData.set("projectId", input.projectId);
   for (const image of input.images) {
     formData.append("imageIds", image.id);
     formData.append("images", image.file, image.file.name);

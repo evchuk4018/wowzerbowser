@@ -130,10 +130,14 @@ export function createChatImageUploadHandler(dependencies = {
       const rawConversationId = form.get("conversationId");
       const userMessageId = form.get("userMessageId");
       const jobId = form.get("jobId");
+      const projectId = form.get("projectId");
       const ids = form.getAll("imageIds");
       const files = form.getAll("images");
       if (!isValidChatImageId(rawConversationId) || !isValidChatImageId(userMessageId) || !isValidChatImageId(jobId)) {
         return NextResponse.json({ error: "Invalid image upload identifiers." }, { status: 400 });
+      }
+      if (projectId !== null && !isValidChatImageId(projectId)) {
+        return NextResponse.json({ error: "Invalid project identifier." }, { status: 400 });
       }
       conversationId = rawConversationId;
       const activeConversationId = rawConversationId;
@@ -170,6 +174,7 @@ export function createChatImageUploadHandler(dependencies = {
         userMessageId,
         chatJobId: jobId,
         uploads,
+        ...(typeof projectId === "string" ? { projectId } : {}),
         signal: request.signal,
       });
       if (dependencies.cleanupExpiredChatImageUploads) {

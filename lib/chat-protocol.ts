@@ -270,6 +270,8 @@ export type ChatRequest = {
   deepResearchPlan?: DeepResearchPlan;
   /** Stable client-generated id used to persist the execution volume. */
   conversationId?: string;
+  /** Optional user-facing project whose instructions and workspace scope this chat uses. */
+  projectId?: string;
   /** Client-generated response identifier and idempotency key. */
   jobId?: string;
   idempotencyKey?: string;
@@ -1013,6 +1015,13 @@ export function parseChatRequest(value: unknown): ChatRequest {
     }
     conversationId = value.conversationId;
   }
+  let projectId: string | undefined;
+  if (value.projectId !== undefined) {
+    if (typeof value.projectId !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(value.projectId)) {
+      throw new ChatRequestValidationError("projectId is invalid.");
+    }
+    projectId = value.projectId;
+  }
   const readJobKey = (input: unknown, field: string) => {
     if (input === undefined) return undefined;
     if (typeof input !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(input)) {
@@ -1062,6 +1071,7 @@ export function parseChatRequest(value: unknown): ChatRequest {
     ...(deepResearchPhase === undefined ? {} : { deepResearchPhase }),
     ...(deepResearchPlan === undefined ? {} : { deepResearchPlan }),
     conversationId,
+    projectId,
     jobId,
     idempotencyKey,
     persistence,

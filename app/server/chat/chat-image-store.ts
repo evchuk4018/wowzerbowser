@@ -22,6 +22,7 @@ const STORAGE_PAGE_SIZE = 1_000;
 export type ChatImageUploadRecord = {
   ownerId: string;
   conversationId: string;
+  projectId?: string;
   imageId: string;
   userMessageId: string;
   jobId: string | null;
@@ -57,6 +58,7 @@ function recordFromRow(row: Record<string, unknown>, storageOwnerId: string): Ch
   return {
     ownerId: storageOwnerId,
     conversationId: String(row.conversation_id),
+    ...(typeof row.project_id === "string" ? { projectId: row.project_id } : {}),
     imageId: String(row.image_id),
     userMessageId: String(row.user_message_id),
     jobId: typeof row.job_id === "string" ? row.job_id : null,
@@ -132,10 +134,40 @@ export async function getChatImageUploadRecord(ownerId: string, conversationId: 
   assertId(imageId, "imageId");
   try {
     const [data] = await query<Record<string, unknown>>("select * from chat_image_uploads where owner_id=$1 and conversation_id=$2 and image_id=$3", [databaseOwnerId(ownerId), conversationId, imageId]);
-    return data ? recordFromRow(data, ownerId) : null;
+    if (data) return recordFromRow(data, ownerId);
+    const [projectImage] = await query<Record<string, unknown>>(
+      `select images.project_id,images.conversation_id,images.image_id,images.user_message_id,images.job_id,
+              images.storage_path,images.storage_object_id,images.name,images.content_type,images.size,
+              images.content_hash,images.status,images.analysis,images.error,images.created_at,images.updated_at
+         from chat_project_images images
+         join chat_conversations current
+           on current.owner_id=images.owner_id and current.project_id=images.project_id
+        where images.owner_id=$1 and current.conversation_id=$2 and images.image_id=$3
+          and images.status='complete'`,
+      [databaseOwnerId(ownerId), conversationId, imageId],
+    );
+    return projectImage ? recordFromRow(projectImage, ownerId) : null;
   } catch {
     throw new ChatImageError("storage", "Image upload metadata is unavailable.", 503);
   }
+}
+
+export async function listAuthorizedProjectImages(ownerId: string, conversationId: string): Promise<ChatImageAttachment[]> {
+  const rows = await query<Record<string, unknown>>(
+    `select images.project_id,images.conversation_id,images.image_id,images.user_message_id,images.job_id,
+            images.storage_path,images.storage_object_id,images.name,images.content_type,images.size,
+            images.content_hash,images.status,images.analysis,images.error,images.created_at,images.updated_at
+       from chat_project_images images
+       join chat_conversations current
+         on current.owner_id=images.owner_id and current.project_id=images.project_id
+      where images.owner_id=$1 and current.conversation_id=$2 and images.status='complete'
+      order by images.updated_at desc,images.image_id
+      limit 100`,
+    [databaseOwnerId(ownerId), conversationId],
+  );
+  return rows.map((row) => attachmentFromUploadRecord(recordFromRow(row, ownerId))).filter(
+    (attachment): attachment is ChatImageAttachment => Boolean(attachment),
+  );
 }
 
 export async function listChatImageUploadRecords(input: {
@@ -145,6 +177,7 @@ export async function listChatImageUploadRecords(input: {
   jobId: string;
   imageIds?: readonly string[];
   status?: ChatImageUploadRecord["status"];
+  projectId?: string;
 }): Promise<ChatImageUploadRecord[]> {
   assertId(input.conversationId, "conversationId");
   assertId(input.userMessageId, "userMessageId");
@@ -161,7 +194,19 @@ export async function listChatImageUploadRecords(input: {
   }
   try {
     const data = await query<Record<string, unknown>>(statement, parameters);
-    return data.map((row) => recordFromRow(row, input.ownerId));
+    const records = data.map((row) => recordFromRow(row, input.ownerId));
+    if (!input.projectId || !input.imageIds?.length) return records;
+    const missingImageIds = input.imageIds.filter((imageId) => !records.some((record) => record.imageId === imageId));
+    if (!missingImageIds.length) return records;
+    const projectRows = await query<Record<string, unknown>>(
+      `select project_id,conversation_id,image_id,user_message_id,job_id,storage_path,storage_object_id,
+              name,content_type,size,content_hash,status,analysis,error,created_at,updated_at
+         from chat_project_images
+        where owner_id=$1 and project_id=$2 and image_id=any($3::text[])
+          and status=$4`,
+      [databaseOwnerId(input.ownerId), input.projectId, missingImageIds, input.status ?? "complete"],
+    );
+    return [...records, ...projectRows.map((row) => recordFromRow(row, input.ownerId))];
   } catch {
     throw new ChatImageError("storage", "Image upload metadata is unavailable.", 503);
   }
@@ -237,6 +282,29 @@ export async function claimChatImageUpload(input: {
   return { record: recordFromRow(reclaimed, input.ownerId), claimed: true };
 }
 
+async function mirrorProjectImage(ownerId: string, conversationId: string, imageId: string): Promise<void> {
+  await query(
+    `insert into chat_project_images(
+       owner_id,project_id,image_id,conversation_id,user_message_id,job_id,storage_path,storage_object_id,
+       name,content_type,size,content_hash,status,analysis,error,created_at,updated_at
+     )
+     select uploads.owner_id,objects.chat_project_id,uploads.image_id,uploads.conversation_id,
+            uploads.user_message_id,uploads.job_id,uploads.storage_path,uploads.storage_object_id,
+            uploads.name,uploads.content_type,uploads.size,uploads.content_hash,uploads.status,
+            uploads.analysis,uploads.error,uploads.created_at,uploads.updated_at
+       from chat_image_uploads uploads
+       join app_storage_objects objects on objects.owner_id=uploads.owner_id and objects.object_id=uploads.storage_object_id
+      where uploads.owner_id=$1 and uploads.conversation_id=$2 and uploads.image_id=$3
+        and objects.chat_project_id is not null
+     on conflict (owner_id,project_id,image_id) do update set
+       conversation_id=excluded.conversation_id,user_message_id=excluded.user_message_id,job_id=excluded.job_id,
+       storage_path=excluded.storage_path,storage_object_id=excluded.storage_object_id,name=excluded.name,
+       content_type=excluded.content_type,size=excluded.size,content_hash=excluded.content_hash,
+       status=excluded.status,analysis=excluded.analysis,error=excluded.error,updated_at=excluded.updated_at`,
+    [databaseOwnerId(ownerId), conversationId, imageId],
+  );
+}
+
 export async function completeChatImageUpload(
   ownerId: string,
   conversationId: string,
@@ -246,9 +314,16 @@ export async function completeChatImageUpload(
 ): Promise<ChatImageUploadRecord> {
   const [updated] = await query<Record<string, unknown>>(`update chat_image_uploads set status='complete',analysis=$1::jsonb,error=null,claim_token=null,claim_expires_at=null,updated_at=$2
     where owner_id=$3 and conversation_id=$4 and image_id=$5 and status='processing' and claim_token=$6::uuid returning *`, [jsonb(analysis), new Date().toISOString(), databaseOwnerId(ownerId), conversationId, imageId, claimToken]);
-  if (updated) return recordFromRow(updated, ownerId);
+  if (updated) {
+    const record = recordFromRow(updated, ownerId);
+    await mirrorProjectImage(ownerId, record.conversationId, record.imageId);
+    return record;
+  }
   const current = await getChatImageUploadRecord(ownerId, conversationId, imageId);
-  if (current?.status === "complete") return current;
+  if (current?.status === "complete") {
+    await mirrorProjectImage(ownerId, current.conversationId, current.imageId);
+    return current;
+  }
   throw new ChatImageError("storage", "Image analysis metadata could not be saved.", 503);
 }
 
@@ -275,9 +350,16 @@ export async function completeQueuedChatImageUpload(
      where owner_id=$3 and conversation_id=$4 and image_id=$5 and status='processing' returning *`,
     [jsonb(analysis), new Date().toISOString(), databaseOwnerId(ownerId), conversationId, imageId],
   );
-  if (updated) return recordFromRow(updated, ownerId);
+  if (updated) {
+    const record = recordFromRow(updated, ownerId);
+    await mirrorProjectImage(ownerId, record.conversationId, record.imageId);
+    return record;
+  }
   const current = await getChatImageUploadRecord(ownerId, conversationId, imageId);
-  if (current?.status === "complete") return current;
+  if (current?.status === "complete") {
+    await mirrorProjectImage(ownerId, current.conversationId, current.imageId);
+    return current;
+  }
   throw new ChatImageError("storage", "Image analysis metadata could not be saved.", 503);
 }
 
@@ -290,6 +372,7 @@ export async function failQueuedChatImageUpload(ownerId: string, conversationId:
 }
 
 async function isActiveChatImageUpload(record: ChatImageUploadRecord): Promise<boolean> {
+  if (record.projectId) return true;
   if (!record.jobId) return false;
   try {
     const owner = databaseOwnerId(record.ownerId);
@@ -359,7 +442,10 @@ export async function cleanupExpiredChatImageUploads(
   for (const row of data) {
     const record = recordFromRow(row, ownerId);
     if (await isActiveChatImageUpload(record)) continue;
-    if (record.storageObjectId) await deleteOwnedStorageObject({ ownerId, objectId: record.storageObjectId });
+    const object = record.storageObjectId
+      ? await getStorageObjectById({ ownerId, objectId: record.storageObjectId })
+      : null;
+    if (record.storageObjectId && !object?.chatProjectId) await deleteOwnedStorageObject({ ownerId, objectId: record.storageObjectId });
     try {
       await query("delete from chat_image_uploads where owner_id=$1 and conversation_id=$2 and image_id=$3", [databaseOwnerId(ownerId), conversationId, record.imageId]);
     } catch {
@@ -437,8 +523,8 @@ export async function downloadChatImageObject(ownerId: string, conversationId: s
   if (!record || record.storagePath !== image.storagePath) {
     throw new ChatImageError("unauthorized_image", "That image is not available in this conversation.", 403);
   }
-  const object = await getStorageObjectById({ ownerId, objectId: record.storageObjectId, conversationId, state: "complete" });
-  if (!object || object.kind !== "image" || object.objectKey !== image.storagePath || object.contentType !== image.contentType || object.size !== image.size || (object.messageId !== null && object.messageId !== record.userMessageId)) throw new ChatImageError("storage_read_failed", "The image could not be read.", 503);
+  const object = await getStorageObjectById({ ownerId, objectId: record.storageObjectId, ...(record.projectId ? {} : { conversationId }), state: "complete" });
+  if (!object || object.kind !== "image" || object.objectKey !== image.storagePath || object.contentType !== image.contentType || object.size !== image.size || (record.projectId && object.chatProjectId !== record.projectId) || (object.messageId !== null && object.messageId !== record.userMessageId)) throw new ChatImageError("storage_read_failed", "The image could not be read.", 503);
   const bytes = await localFilesystemStorageProvider.readObjectBytes(object);
   validateChatImageBytes(bytes, image.contentType);
   return bytes;
@@ -447,8 +533,8 @@ export async function downloadChatImageObject(ownerId: string, conversationId: s
 export async function openChatImageObject(ownerId: string, conversationId: string, image: ChatImageAttachment): Promise<{ stream: ReadableStream<Uint8Array>; size: number }> {
   const record = await getChatImageUploadRecord(ownerId, conversationId, image.id);
   if (!record || record.storagePath !== image.storagePath) throw new ChatImageError("unauthorized_image", "That image is not available in this conversation.", 403);
-  const object = await getStorageObjectById({ ownerId, objectId: record.storageObjectId, conversationId, state: "complete" });
-  if (!object || object.kind !== "image" || object.objectKey !== image.storagePath || object.contentType !== image.contentType || object.size !== image.size || (object.messageId !== null && object.messageId !== record.userMessageId)) throw new ChatImageError("storage_read_failed", "The image could not be read.", 503);
+  const object = await getStorageObjectById({ ownerId, objectId: record.storageObjectId, ...(record.projectId ? {} : { conversationId }), state: "complete" });
+  if (!object || object.kind !== "image" || object.objectKey !== image.storagePath || object.contentType !== image.contentType || object.size !== image.size || (record.projectId && object.chatProjectId !== record.projectId) || (object.messageId !== null && object.messageId !== record.userMessageId)) throw new ChatImageError("storage_read_failed", "The image could not be read.", 503);
   const opened = await localFilesystemStorageProvider.readObject(object);
   if (opened.size !== object.size) throw new ChatImageError("storage_read_failed", "The image could not be read.", 503);
   return opened;

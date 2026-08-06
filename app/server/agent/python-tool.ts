@@ -44,6 +44,7 @@ export async function executePythonTool(
   conversationId: string,
   onDocumentArtifact?: (artifact: ChatArtifact, bytes: Uint8Array, storageObjectId: string) => Promise<void>,
   dependencies: Partial<PythonToolDependencies> = {},
+  chatProjectId?: string,
 ): Promise<ChatToolResult> {
   const activeDependencies: PythonToolDependencies = { ...DEFAULT_DEPENDENCIES, ...dependencies };
   const startedAt = Date.now();
@@ -72,6 +73,7 @@ export async function executePythonTool(
           const artifact = await activeDependencies.registerArtifact({
             ownerId, conversationId, name: item.path.split("/").pop() || "artifact",
             bytes, contentType, storageKind: "document",
+            chatProjectId,
             projectId: provenance.projectId, revisionId: provenance.revisionId,
             parentRevisionId: provenance.manifest.parentRevisionId, origin: "generated", editable: true,
             workspacePath: workspaceMetadata.path, language: workspaceMetadata.language, preview: "none",
@@ -92,6 +94,7 @@ export async function executePythonTool(
           const artifact = await activeDependencies.registerArtifact({
             ownerId,
             conversationId,
+            chatProjectId,
             name: item.path.split("/").pop() || "artifact",
             bytes,
             contentType,
@@ -108,6 +111,7 @@ export async function executePythonTool(
         const artifact = await activeDependencies.registerArtifact({
           ownerId,
           conversationId,
+          chatProjectId,
           name: item.path.split("/").pop() || "artifact",
           bytes,
           contentType,

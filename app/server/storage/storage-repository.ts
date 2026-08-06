@@ -16,6 +16,7 @@ function storageObjectFromRow(row: Record<string, unknown>): StorageObject {
     documentId: nullableString(row.document_id),
     messageId: nullableString(row.message_id),
     projectId: nullableString(row.project_id),
+    chatProjectId: nullableString(row.chat_project_id),
     revisionId: nullableString(row.revision_id),
     kind: row.kind as StorageObjectKind,
     objectKey: String(row.object_key),
@@ -34,10 +35,10 @@ export async function createStorageObject(input: StorageObjectInput): Promise<St
   const objectKey = `objects/${objectId}`;
   const [row] = await query<Record<string, unknown>>(
     `insert into app_storage_objects
-      (object_id,owner_id,conversation_id,document_id,message_id,project_id,revision_id,kind,object_key,original_filename,content_type,size,state)
-     values($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,0,'uploading')
+      (object_id,owner_id,conversation_id,document_id,message_id,project_id,chat_project_id,revision_id,kind,object_key,original_filename,content_type,size,state)
+     values($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,0,'uploading')
      returning *`,
-    [objectId, databaseOwnerId(input.ownerId), input.conversationId ?? null, input.documentId ?? null, input.messageId ?? null, input.projectId ?? null, input.revisionId ?? null, input.kind, objectKey, input.originalFilename ?? null, input.contentType],
+    [objectId, databaseOwnerId(input.ownerId), input.conversationId ?? null, input.documentId ?? null, input.messageId ?? null, input.projectId ?? null, input.chatProjectId ?? null, input.revisionId ?? null, input.kind, objectKey, input.originalFilename ?? null, input.contentType],
   );
   if (!row) throw new Error("Storage object metadata could not be created.");
   return storageObjectFromRow(row);
@@ -97,7 +98,7 @@ export async function failStorageObject(input: { ownerId: string; objectId: stri
   await query("update app_storage_objects set state='failed' where owner_id=$1 and object_id=$2::uuid and state <> 'complete'", [databaseOwnerId(input.ownerId), input.objectId]);
 }
 
-export async function attachStorageObject(input: { ownerId: string; objectId: string; kind?: StorageObjectKind; conversationId?: string; documentId?: string | null; messageId?: string | null; projectId?: string | null; revisionId?: string | null }): Promise<StorageObject | null> {
+export async function attachStorageObject(input: { ownerId: string; objectId: string; kind?: StorageObjectKind; conversationId?: string; documentId?: string | null; messageId?: string | null; projectId?: string | null; chatProjectId?: string | null; revisionId?: string | null }): Promise<StorageObject | null> {
   if (!isStorageObjectId(input.objectId)) return null;
   const values: unknown[] = [databaseOwnerId(input.ownerId), input.objectId];
   const updates: string[] = [];
@@ -107,6 +108,7 @@ export async function attachStorageObject(input: { ownerId: string; objectId: st
   if (input.documentId !== undefined) add("document_id", input.documentId);
   if (input.messageId !== undefined) add("message_id", input.messageId);
   if (input.projectId !== undefined) add("project_id", input.projectId);
+  if (input.chatProjectId !== undefined) add("chat_project_id", input.chatProjectId);
   if (input.revisionId !== undefined) add("revision_id", input.revisionId);
   if (!updates.length) return getStorageObjectById({ ownerId: input.ownerId, objectId: input.objectId });
   const [row] = await query<Record<string, unknown>>(`update app_storage_objects set ${updates.join(",")} where owner_id=$1 and object_id=$2::uuid returning *`, values);
@@ -133,11 +135,16 @@ export async function getImageStorageObject(input: { ownerId: string; conversati
   return row ? storageObjectFromRow(row) : null;
 }
 
-export async function listStorageObjectsForConversation(ownerId: string, conversationId: string, limit = 1000): Promise<StorageObject[]> {
-  const rows = await query<Record<string, unknown>>(
-    "select * from app_storage_objects where owner_id=$1 and conversation_id=$2 order by created_at limit $3",
-    [databaseOwnerId(ownerId), conversationId, Math.max(1, Math.min(limit, 1000))],
-  );
+export async function listStorageObjectsForConversation(ownerId: string, conversationId: string, limit = 1000, excludeChatProjectId?: string): Promise<StorageObject[]> {
+  const values: unknown[] = [databaseOwnerId(ownerId), conversationId];
+  let statement = "select * from app_storage_objects where owner_id=$1 and conversation_id=$2";
+  if (excludeChatProjectId !== undefined) {
+    values.push(excludeChatProjectId);
+    statement += ` and (chat_project_id is null or chat_project_id <> $${values.length})`;
+  }
+  values.push(Math.max(1, Math.min(limit, 1000)));
+  statement += ` order by created_at limit $${values.length}`;
+  const rows = await query<Record<string, unknown>>(statement, values);
   return rows.map(storageObjectFromRow);
 }
 

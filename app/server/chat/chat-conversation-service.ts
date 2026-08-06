@@ -15,6 +15,7 @@ import { deleteConversationWorkspace } from "../python/local-python-conversation
 import { deleteChatImagesForConversation } from "./chat-image-store";
 import { deleteChatDocumentsForConversation } from "./chat-document-store";
 import { deleteStorageObjectsForConversation } from "../storage/storage-service";
+import { getConversationProjectId } from "../projects/project-repository";
 
 export const CHAT_EMPTY_CONVERSATION_RETENTION_MS = 24 * 60 * 60 * 1_000;
 export const CHAT_EMPTY_CONVERSATION_CLEANUP_LIMIT = 50;
@@ -27,12 +28,22 @@ export const CHAT_EMPTY_CONVERSATION_CLEANUP_LIMIT = 50;
 export async function deleteChatConversation(ownerId: string, conversationId: string): Promise<void> {
   if (!(await chatConversationExists(ownerId, conversationId))) return;
 
+  const projectId = await getConversationProjectId(ownerId, conversationId);
   await cancelChatJobsForConversation(ownerId, conversationId);
-  await deleteConversationWorkspace(ownerId, conversationId);
-  await deleteStorageObjectsForConversation(ownerId, conversationId);
-  await deleteChatImagesForConversation(ownerId, conversationId);
-  await deleteChatDocumentsForConversation(ownerId, conversationId);
-  await deleteChatConversationRecord(ownerId, conversationId);
+  if (projectId) {
+    // Project chats share their worker workspace and storage objects with
+    // every other chat in the project. Keep those resources when removing
+    // just one conversation; remove only conversation-owned objects outside
+    // the project before the conversation row is cascaded.
+    await deleteStorageObjectsForConversation(ownerId, conversationId, projectId);
+    await deleteChatConversationRecord(ownerId, conversationId);
+  } else {
+    await deleteConversationWorkspace(ownerId, conversationId);
+    await deleteStorageObjectsForConversation(ownerId, conversationId);
+    await deleteChatImagesForConversation(ownerId, conversationId);
+    await deleteChatDocumentsForConversation(ownerId, conversationId);
+    await deleteChatConversationRecord(ownerId, conversationId);
+  }
   await deleteChatModelPreference(ownerId, conversationId);
   await deleteChatJobsForConversation(ownerId, conversationId);
 }

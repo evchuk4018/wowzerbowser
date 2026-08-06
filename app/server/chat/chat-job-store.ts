@@ -7,6 +7,8 @@ import { createAsyncBatchWriter, type AsyncBatchWriter } from "./chat-event-writ
 import { authoritativeAttachmentsForSubmission } from "./chat-history-store";
 import { CHAT_JOB_LEASE_MS, CHAT_JOB_MAX_ATTEMPTS } from "./chat-job-lease";
 import { withChatPersistenceRetry } from "./chat-persistence-retry";
+import { getConversationProjectId } from "../projects/project-repository";
+import { ensureProjectConversation } from "../projects/project-service";
 
 const CHAT_EVENT_BATCH_SIZE = 32;
 const CHAT_EVENT_FLUSH_INTERVAL_MS = 16;
@@ -30,6 +32,18 @@ export type ChatJobClaim = {
 };
 
 export async function createOrGetChatJob(ownerId: string, request: ChatRequest) {
+  if (request.conversationId) {
+    const associatedProjectId = await getConversationProjectId(ownerId, request.conversationId);
+    if (associatedProjectId && request.projectId && associatedProjectId !== request.projectId) {
+      throw new Error("The conversation belongs to a different project.");
+    }
+    if (associatedProjectId && !request.projectId) {
+      request = { ...request, projectId: associatedProjectId };
+    }
+  }
+  if (request.projectId && request.conversationId) {
+    await ensureProjectConversation(ownerId, request.projectId, request.conversationId);
+  }
   const requestedAttachments = request.messages.at(-1)?.attachments?.length
     ? await authoritativeAttachmentsForSubmission(ownerId, request)
     : [];

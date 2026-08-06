@@ -50,6 +50,7 @@ export async function registerArtifact(input: {
   documentId?: string;
   messageId?: string;
   projectId?: string;
+  chatProjectId?: string;
   revisionId?: string;
   parentRevisionId?: string | null;
   workspacePath?: string;
@@ -69,6 +70,7 @@ export async function registerArtifact(input: {
           documentId: input.documentId,
           messageId: input.messageId,
           projectId: input.projectId,
+          chatProjectId: input.chatProjectId,
           revisionId: input.revisionId,
           kind: input.storageKind ?? "artifact",
           originalFilename: safeName(input.name),
@@ -84,6 +86,7 @@ export async function registerArtifact(input: {
   const associationsMatch = (input.documentId === undefined || object.documentId === input.documentId)
     && (input.messageId === undefined || object.messageId === input.messageId)
     && (input.projectId === undefined || object.projectId === input.projectId)
+    && (input.chatProjectId === undefined || object.chatProjectId === input.chatProjectId)
     && (input.revisionId === undefined || object.revisionId === input.revisionId);
   if (object.ownerId !== input.ownerId || object.conversationId !== input.conversationId || !kindMatches || !associationsMatch || object.contentType !== expectedContentType || !isStorageObjectId(object.objectId)) {
     throw new Error("The artifact storage object is not available to this owner.");

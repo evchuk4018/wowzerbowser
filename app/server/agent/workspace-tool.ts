@@ -20,6 +20,7 @@ export { WORKSPACE_TOOL_DEFINITIONS } from "./workspace-tool-manifest";
 type WorkspaceToolContext = {
   ownerId: string;
   conversationId: string;
+  projectId?: string;
   executor: LocalPythonExecutor;
 };
 
@@ -87,6 +88,7 @@ async function artifactFor(
   return dependencies.registerArtifact({
     ownerId: context.ownerId,
     conversationId: context.conversationId,
+    chatProjectId: context.projectId,
     name: metadata.name,
     contentType: metadata.contentType,
     bytes: content,

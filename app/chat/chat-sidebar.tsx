@@ -21,6 +21,7 @@ export type ChatSidebarProps = {
   onCloseSidebar: () => void;
   onStartNewChat: () => void;
   onOpenSearch: () => void;
+  onOpenProjects?: () => void;
   onSelectConversation: (conversationId: string) => void;
   onOpenConversationActions: (conversationId: string) => void;
   onCloseConversationActions: () => void;
@@ -45,6 +46,7 @@ export function ChatSidebar({
   onCloseSidebar,
   onStartNewChat,
   onOpenSearch,
+  onOpenProjects,
   onSelectConversation,
   onOpenConversationActions,
   onCloseConversationActions,
@@ -99,6 +101,13 @@ export function ChatSidebar({
         <button type="button" className="search-chat-button" onClick={onOpenSearch}>
           <span className="sidebar-search-icon" aria-hidden="true" />
           <span>Search chats</span>
+        </button>
+
+        <button type="button" className="search-chat-button" onClick={onOpenProjects}>
+          <svg className="settings-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3.5 6.5h6l1.8 2h9.2v9.75a1.75 1.75 0 0 1-1.75 1.75H5.25a1.75 1.75 0 0 1-1.75-1.75V6.5Z" />
+          </svg>
+          <span>Projects</span>
         </button>
 
         <div className="history-label">Recent</div>

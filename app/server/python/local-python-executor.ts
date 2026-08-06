@@ -190,7 +190,13 @@ export class LocalPythonExecutor {
     private readonly ownerId: string,
     private readonly conversationId: string,
     private readonly responseDeadlineAt = Date.now() + PYTHON_TOOL_LIMITS.responseTimeoutMs,
+    private workspaceId = conversationId,
   ) {}
+
+  withWorkspaceId(workspaceId: string): this {
+    this.workspaceId = workspaceId;
+    return this;
+  }
 
   private async ensureSession(deadlineAt: number): Promise<string> {
     if (this.session) return this.session;
@@ -198,6 +204,7 @@ export class LocalPythonExecutor {
       this.sessionPromise = requestJson<{ session: string }>("/v1/sessions/open", {
         ownerId: this.ownerId,
         conversationId: this.conversationId,
+        workspaceId: this.workspaceId,
       }, deadlineAt).then((result) => {
         if (!result.session) throw new Error("The local Python worker did not return a session.");
         this.session = result.session;

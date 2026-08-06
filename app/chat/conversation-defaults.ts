@@ -16,10 +16,11 @@ export function makeId(): string {
   return crypto.randomUUID();
 }
 
-export function createConversation(): Conversation {
+export function createConversation(projectId?: string | null): Conversation {
   return {
     id: makeId(),
     title: "New conversation",
+    ...(projectId ? { projectId } : {}),
     turns: [],
   };
 }

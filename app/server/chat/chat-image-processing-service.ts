@@ -26,6 +26,7 @@ import {
   getChatImageProcessingJobForImage,
   type ChatImageProcessingJob,
 } from "./chat-image-processing-job-store";
+import { ensureProjectConversation } from "../projects/project-service";
 
 export type ChatImageUpload = {
   id: string;
@@ -72,6 +73,7 @@ async function enqueueExistingImage(input: {
   chatJobId: string;
   imageId: string;
   signal?: AbortSignal;
+  projectId?: string;
 }): Promise<QueuedChatImage> {
   const record = await getChatImageUploadRecord(input.ownerId, input.conversationId, input.imageId);
   if (!record) throw new ChatImageError("storage", "The image upload metadata could not be loaded.", 503);
@@ -105,6 +107,7 @@ async function queueOneChatImage(input: {
   contentType: ChatImageContentType;
   contentHash: string;
   signal?: AbortSignal;
+  projectId?: string;
 }): Promise<QueuedChatImage> {
   const existing = await getChatImageUploadRecord(input.ownerId, input.conversationId, input.upload.id);
   const existingAttachment = existing && attachmentFromUploadRecord(existing);
@@ -115,6 +118,7 @@ async function queueOneChatImage(input: {
     ownerId: input.ownerId,
     conversationId: input.conversationId,
     messageId: input.userMessageId,
+    chatProjectId: input.projectId,
     kind: "image",
     originalFilename: sanitizeChatImageName(input.upload.name),
     contentType: input.contentType,
@@ -171,6 +175,7 @@ export async function queueChatImageProcessing(input: {
   chatJobId: string;
   uploads: ChatImageUpload[];
   signal?: AbortSignal;
+  projectId?: string;
 }): Promise<QueuedChatImage[]> {
   if (input.uploads.length < 1 || input.uploads.length > MAX_CHAT_IMAGES_PER_TURN) {
     throw new ChatImageError("image_count", `Attach between 1 and ${MAX_CHAT_IMAGES_PER_TURN} images.`);
@@ -183,7 +188,8 @@ export async function queueChatImageProcessing(input: {
     const contentType = validateChatImageBytes(upload.bytes, upload.declaredType ?? undefined);
     return { upload, contentType, contentHash: hashImageBytes(upload.bytes) };
   });
-  await ensureChatImageConversation(input.ownerId, input.conversationId);
+  if (input.projectId) await ensureProjectConversation(input.ownerId, input.projectId, input.conversationId);
+  else await ensureChatImageConversation(input.ownerId, input.conversationId);
   const queued: QueuedChatImage[] = [];
   for (const item of prepared) {
     queued.push(await queueOneChatImage({

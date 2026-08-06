@@ -5,7 +5,7 @@ import Credentials from "next-auth/providers/credentials";
 import { advanceOwnerSessionVersion, getOwnerCredentialsById, ownerIdFromEnvironment } from "./app/server/auth/owner-auth-repository.mjs";
 import { authenticateOwner, normalizedOwnerEmail } from "./app/server/auth/owner-credential-service";
 
-const SITE_PATHS = ["/", "/chat", "/login"];
+const SITE_PATHS = ["/", "/chat", "/login", "/projects"];
 
 function configuredSiteOrigin(): string | null {
   const value = process.env.NEXT_PUBLIC_SITE_URL?.trim();
@@ -18,7 +18,7 @@ function configuredSiteOrigin(): string | null {
 }
 
 function allowedRedirectPath(pathname: string): boolean {
-  return SITE_PATHS.includes(pathname) || pathname.startsWith("/chat/");
+  return SITE_PATHS.includes(pathname) || pathname.startsWith("/chat/") || pathname.startsWith("/projects/");
 }
 
 function safeRedirect(url: string, baseUrl: string): string {

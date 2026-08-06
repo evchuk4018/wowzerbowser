@@ -65,6 +65,7 @@ function normalizeSummary(value: unknown): ChatConversationSummary | null {
     updatedAt: candidate.updatedAt,
     hasMessages: candidate.hasMessages,
     isStreaming: candidate.isStreaming,
+    ...(typeof candidate.projectId === "string" ? { projectId: candidate.projectId } : {}),
   };
 }
 
@@ -111,7 +112,12 @@ function normalizeConversation(value: unknown): ChatConversation | null {
     if (activeVersion < 0 || activeVersion >= versions.length) return null;
     turns.push({ id: turn.id as string, versions, activeVersion });
   }
-  return { id, title: candidate.title, turns };
+  return {
+    id,
+    title: candidate.title,
+    ...(typeof candidate.projectId === "string" ? { projectId: candidate.projectId } : {}),
+    turns,
+  };
 }
 
 export function resolveChatBootstrapSelection(

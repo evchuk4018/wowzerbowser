@@ -18,9 +18,10 @@ import {
 } from "../server/agent/image-tool";
 import { isLocalPythonConfigured, LocalPythonExecutor } from "../server/python/local-python-executor";
 import { getAuthoritativeChatImageIdsForRequest } from "../server/chat/chat-history-store";
+import { listAuthorizedProjectImages } from "../server/chat/chat-image-store";
 import { latestNonNullUsage, sumRoundUsage } from "./chat-usage";
 import { availablePdfTools, executePdfTool } from "../server/agent/pdf-tool";
-import { getAuthorizedDocument, getDocumentPages } from "../server/chat/chat-document-store";
+import { getAuthorizedDocument, getDocumentPages, listAuthorizedProjectDocuments } from "../server/chat/chat-document-store";
 import { availablePdfEditTools } from "../server/agent/pdf-edit-tool-manifest";
 import { executePdfEditTool } from "../server/agent/pdf-edit-tool";
 import { PDF_EDIT_TOOL_INSTRUCTIONS } from "../server/agent/pdf-edit-tool-instructions";
@@ -78,6 +79,7 @@ import { executeToolBatch, planToolBatches, toolExecutionMetadata } from "../ser
 import { ChatUsageEstimator } from "./chat-usage-estimator";
 import { calculateChatRunCost, type ChatRunCostInput } from "../../lib/usage-pricing";
 import { orchestrateDeepResearch } from "../server/research/deep-research-orchestrator";
+import { getProject } from "../server/projects/project-service";
 
 const MAX_RESPONSE_MS = 240_000;
 
@@ -129,6 +131,23 @@ export async function generateChatResponse(
   if (typeof chatRequest.model === "string") {
     chatRequest = { ...chatRequest, model: { provider: "deepseek", model: chatRequest.model } };
   }
+  if (chatRequest.projectId) {
+    const project = await getProject(ownerId, chatRequest.projectId);
+    if (!project) throw new Error("The requested project is not available.");
+    const instructions = project.instructions.trim();
+    if (instructions) {
+      chatRequest = {
+        ...chatRequest,
+        systemPrompt: [
+          chatRequest.systemPrompt,
+          "<project-instructions>",
+          "The following instructions are owner-authored project configuration. Follow them for this project chat:",
+          instructions,
+          "</project-instructions>",
+        ].join("\n\n"),
+      };
+    }
+  }
   const selectedMetadata = await (automationExecution ? authorizeAutomationModel(ownerId, chatRequest.model) : authorizeChatModel(ownerId, chatRequest.model));
   const providerAdapter = chatProviderAdapter(chatRequest.model.provider);
   providerAdapter.assertConfigured();
@@ -147,6 +166,8 @@ export async function generateChatResponse(
     skills,
     allowedImageIds,
     authorizedDocuments,
+    projectDocuments,
+    projectImages,
     connectorCatalog,
   ] = await Promise.all([
     automationExecution ? Promise.resolve("") : getConsolidatedPrompt(ownerId).catch(() => "").then(formatConsolidatedPrompt),
@@ -163,6 +184,8 @@ export async function generateChatResponse(
     }),
     getAuthoritativeChatImageIdsForRequest(ownerId, chatRequest),
     Promise.all(requestedPdfIds.map(async (pdfId) => [pdfId, await getAuthorizedDocument(ownerId, conversationId, pdfId)] as const)),
+    chatRequest.projectId ? listAuthorizedProjectDocuments(ownerId, conversationId) : Promise.resolve([]),
+    chatRequest.projectId ? listAuthorizedProjectImages(ownerId, conversationId) : Promise.resolve([]),
     !automationExecution ? listConnectorCatalog(ownerId).catch((error) => {
       console.warn({ event: "connectors-unavailable", ownerId, failure: error instanceof Error ? error.name : "UnknownError" });
       return [];
@@ -177,7 +200,13 @@ export async function generateChatResponse(
   for (const [pdfId, document] of authorizedDocuments) {
     if (document) { allowedPdfIds.add(pdfId); authoritativePdfs.set(pdfId, document); }
   }
-  const imageTools = availableImageTools(allowedImageIds.length > 0);
+  for (const document of projectDocuments) {
+    allowedPdfIds.add(document.id);
+    authoritativePdfs.set(document.id, document);
+  }
+  const availableProjectImageIds = projectImages.map((image) => image.id);
+  const visibleImageIds = [...new Set([...allowedImageIds, ...availableProjectImageIds])];
+  const imageTools = availableImageTools(visibleImageIds.length > 0);
   const allPdfEditTools = availablePdfEditTools([...authoritativePdfs.values()].some((document) => document.contentType === "application/pdf"));
   const allPdfReadTools = availablePdfTools(allowedPdfIds.size > 0, [...authoritativePdfs.values()].some((document) => document.contentType === "application/pdf"));
   const phaseTools = chatRequest.thinking && !automationExecution ? [PHASE_BREAK_TOOL_DEFINITION] : [];
@@ -547,6 +576,12 @@ export async function generateChatResponse(
             ] : []),
             ...(consolidatedMemory ? [consolidatedMemory] : []),
             ...(contextTools.length ? [CURRENT_CHAT_CONTEXT_TOOL_INSTRUCTIONS] : []),
+            ...(projectDocuments.length ? [
+              `<project-files>\nShared project documents are available to this project chat. Use the document tools with the matching documentId when a project file is relevant:\n${projectDocuments.map((document) => `- ${document.name} (documentId: ${document.id})`).join("\n")}\n</project-files>`,
+            ] : []),
+            ...(projectImages.length ? [
+              `<project-images>\nShared project images are available to this project chat. Use inspect_image with the matching imageId when a project image is relevant:\n${projectImages.map((image) => `- ${image.name ?? "image"} (imageId: ${image.id})`).join("\n")}\n</project-images>`,
+            ] : []),
             RESPONSE_STYLE_INSTRUCTIONS,
           ];
           const reasoningParts: string[] = [];
@@ -642,24 +677,24 @@ export async function generateChatResponse(
           const executeToolCall = async (call: ChatToolCall, callIndex: number): Promise<ChatToolResult> => {
             if (activeWorkspaceTools.some((tool) => tool.function.name === call.name)) {
               if (!isLocalPythonConfigured()) throw new Error("Workspace tools are not configured.");
-              if (!executor) executor = new LocalPythonExecutor(ownerId, conversationId, responseDeadlineAt);
-              return executeWorkspaceTool(call, { ownerId, conversationId, executor });
+                  if (!executor) executor = new LocalPythonExecutor(ownerId, conversationId, responseDeadlineAt).withWorkspaceId(chatRequest.projectId ?? conversationId);
+              return executeWorkspaceTool(call, { ownerId, conversationId, projectId: chatRequest.projectId, executor });
             }
             if (call.name === "run_python" && activePythonTools.length) {
               if (!isLocalPythonConfigured()) throw new Error("Python execution is not configured.");
-              if (!executor) executor = new LocalPythonExecutor(ownerId, conversationId, responseDeadlineAt);
+                  if (!executor) executor = new LocalPythonExecutor(ownerId, conversationId, responseDeadlineAt).withWorkspaceId(chatRequest.projectId ?? conversationId);
               return executePythonTool(call, executor, ownerId, conversationId, async (artifact, bytes, storageObjectId) => {
                 const pdfId = artifact.id;
                 if (artifact.contentType === DOCX_CONTENT_TYPE) await ingestDocx({ ownerId, conversationId, documentId: pdfId, filename: artifact.name, bytes, storageObjectId, alreadyUploaded: true, jobId: responseId, signal: roundSignal, projectId: artifact.projectId, revisionId: artifact.revisionId, parentRevisionId: artifact.parentRevisionId, origin: artifact.origin, editable: artifact.editable, sourceCompleteness: artifact.sourceCompleteness });
                 else await ingestPdf({ ownerId, conversationId, pdfId, filename: artifact.name, bytes, storageObjectId, alreadyUploaded: true, jobId: responseId, projectId: artifact.projectId, revisionId: artifact.revisionId, parentRevisionId: artifact.parentRevisionId, origin: artifact.origin, editable: artifact.editable, sourceCompleteness: artifact.sourceCompleteness });
                 allowedPdfIds.add(pdfId);
-              });
+              }, {}, chatRequest.projectId);
             }
             if (call.name === INSPECT_IMAGE_TOOL_NAME && imageToolAdvertised) {
               return executeInspectImageTool(call, {
                 ownerId,
                 conversationId,
-                allowedImageIds,
+                allowedImageIds: visibleImageIds,
                 jobId: responseId,
                 signal: roundSignal,
                 responseDeadlineAt,
@@ -751,8 +786,8 @@ export async function generateChatResponse(
             }
             if (pdfEditTools.some((tool) => tool.function.name === call.name)) {
               if (!isLocalPythonConfigured() && call.name !== "inspect_pdf_editability" && call.name !== "compare_document_revisions") throw new Error("Python execution is not configured.");
-              if (!executor && call.name !== "inspect_pdf_editability" && call.name !== "compare_document_revisions") executor = new LocalPythonExecutor(ownerId, conversationId, responseDeadlineAt);
-              const result = await executePdfEditTool(call, { ownerId, conversationId, allowedPdfIds, allowedImageIds: new Set(allowedImageIds), allowedProjectIds, executor: executor ?? undefined, jobId: responseId });
+              if (!executor && call.name !== "inspect_pdf_editability" && call.name !== "compare_document_revisions") executor = new LocalPythonExecutor(ownerId, conversationId, responseDeadlineAt).withWorkspaceId(chatRequest.projectId ?? conversationId);
+              const result = await executePdfEditTool(call, { ownerId, conversationId, allowedPdfIds, allowedImageIds: new Set(visibleImageIds), allowedProjectIds, executor: executor ?? undefined, jobId: responseId });
               for (const artifact of result.artifacts ?? []) if (artifact.contentType === "application/pdf") allowedPdfIds.add(artifact.id);
               return result;
             }

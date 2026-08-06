@@ -6,6 +6,7 @@ import { databaseOwnerId, jsonb, query } from "../database/database";
 import { localFilesystemStorageProvider } from "../storage/local-filesystem-storage";
 import { attachStorageObject, createStorageObject, getStorageObjectById } from "../storage/storage-repository";
 import { deleteOwnedStorageObject, storeStorageObject } from "../storage/storage-service";
+import { ensureProjectLibraryConversation } from "../projects/project-repository";
 import { DOCUMENT_INGESTION_STAGES, type DocumentIngestionTiming } from "./document-ingestion-timing";
 import { withChatPersistenceRetry } from "./chat-persistence-retry";
 
@@ -60,11 +61,13 @@ export async function createDocumentStorageUpload(input: {
   documentId: string;
   filename: string;
   contentType: ChatDocumentAttachment["contentType"];
+  chatProjectId?: string;
 }): Promise<StorageObject> {
   return createStorageObject({
     ownerId: input.ownerId,
     conversationId: input.conversationId,
     documentId: input.documentId,
+    chatProjectId: input.chatProjectId,
     kind: "document",
     originalFilename: input.filename,
     contentType: input.contentType,
@@ -99,15 +102,18 @@ export async function registerDocument(input: {
     if (!object || object.kind !== "document" || (object.documentId !== null && object.documentId !== input.document.id) || object.contentType !== input.document.contentType || object.size !== input.document.size) {
       throw new ChatDocumentError("document_storage_invalid", "The document storage object is invalid.", 409);
     }
+    const documentConversationId = object.chatProjectId
+      ? await ensureProjectLibraryConversation({ ownerId: input.ownerId, projectId: object.chatProjectId })
+      : input.conversationId;
     const pageImages = input.pages.flatMap((page) => page.images ?? []);
     const images = input.images ?? pageImages;
     const document = images.length ? { ...input.document, images } : input.images ? { ...input.document, images: [] } : input.document;
     await withChatPersistenceRetry(async () => {
       await query(
         "select register_chat_document($1,$2,$3::jsonb,$4,$5,$6::jsonb,$7) as result",
-        [databaseOwnerId(input.ownerId), input.conversationId, jsonb(document), input.userMessageId, input.jobId, jsonb(input.pages), documentStoragePath(object.objectKey)],
+        [databaseOwnerId(input.ownerId), documentConversationId, jsonb(document), input.userMessageId, input.jobId, jsonb(input.pages), documentStoragePath(object.objectKey)],
       );
-      await query("update chat_documents set storage_object_id=$1::uuid where owner_id=$2 and conversation_id=$3 and document_id=$4", [object.objectId, databaseOwnerId(input.ownerId), input.conversationId, input.document.id]);
+      await query("update chat_documents set storage_object_id=$1::uuid,chat_project_id=(select project_id from chat_conversations where owner_id=$2 and conversation_id=$3) where owner_id=$2 and conversation_id=$3 and document_id=$4", [object.objectId, databaseOwnerId(input.ownerId), documentConversationId, input.document.id]);
     });
     await attachStorageObject({ ownerId: input.ownerId, objectId: object.objectId, conversationId: input.conversationId, documentId: input.document.id, kind: "document", messageId: input.userMessageId });
   };
@@ -115,10 +121,32 @@ export async function registerDocument(input: {
   else await register();
 }
 
-export async function getAuthorizedDocument(ownerId: string, conversationId: string, pdfId: string): Promise<ChatDocumentAttachment | null> {
-  const [data] = await query<Record<string, unknown>>("select document_id,filename,content_type,size,page_count,token_estimate,has_images,image_count,analyzed_image_count,image_analyses,provider_metadata,project_id,revision_id,parent_revision_id,origin,editable,source_completeness from chat_documents where owner_id=$1 and conversation_id=$2 and document_id=$3 and status='complete'", [databaseOwnerId(ownerId), conversationId, pdfId]);
-  if (!data) return null;
-  const images = await getAuthorizedDocumentImages(ownerId, conversationId, pdfId);
+type AuthorizedDocumentRow = Record<string, unknown> & { source_conversation_id: string };
+
+async function authorizedDocumentRow(ownerId: string, conversationId: string, documentId: string): Promise<AuthorizedDocumentRow | null> {
+  const [data] = await query<AuthorizedDocumentRow>(
+    `select documents.conversation_id as source_conversation_id,documents.document_id,documents.filename,
+            documents.content_type,documents.size,documents.page_count,documents.token_estimate,
+            documents.has_images,documents.image_count,documents.analyzed_image_count,documents.image_analyses,
+            documents.provider_metadata,documents.project_id,documents.revision_id,documents.parent_revision_id,
+            documents.origin,documents.editable,documents.source_completeness,documents.chat_project_id,
+            documents.storage_object_id
+       from chat_documents documents
+      where documents.owner_id=$1 and documents.document_id=$3 and documents.status='complete'
+        and (documents.conversation_id=$2 or exists (
+          select 1 from chat_conversations current
+           where current.owner_id=$1 and current.conversation_id=$2
+             and current.project_id is not null
+             and current.project_id=documents.chat_project_id
+        ))
+      order by case when documents.conversation_id=$2 then 0 else 1 end, documents.created_at desc
+      limit 1`,
+    [databaseOwnerId(ownerId), conversationId, documentId],
+  );
+  return data ?? null;
+}
+
+function documentAttachment(data: AuthorizedDocumentRow, images: ChatDocumentImage[]): ChatDocumentAttachment {
   return {
     id: String(data.document_id),
     name: String(data.filename),
@@ -136,7 +164,14 @@ export async function getAuthorizedDocument(ownerId: string, conversationId: str
   };
 }
 
-export async function getAuthorizedDocumentImages(ownerId: string, conversationId: string, documentId: string): Promise<ChatDocumentImage[]> {
+export async function getAuthorizedDocument(ownerId: string, conversationId: string, pdfId: string): Promise<ChatDocumentAttachment | null> {
+  const data = await authorizedDocumentRow(ownerId, conversationId, pdfId);
+  if (!data) return null;
+  const images = await getDocumentImagesForConversation(ownerId, data.source_conversation_id, pdfId);
+  return documentAttachment(data, images);
+}
+
+async function getDocumentImagesForConversation(ownerId: string, conversationId: string, documentId: string): Promise<ChatDocumentImage[]> {
   const rows = await query<Record<string, unknown>>(
     `select images.image_id,images.page_number,images.storage_object_id,images.storage_path,
             images.content_type,images.provider_metadata
@@ -153,6 +188,11 @@ export async function getAuthorizedDocumentImages(ownerId: string, conversationI
   return rows.map(storedDocumentImage);
 }
 
+export async function getAuthorizedDocumentImages(ownerId: string, conversationId: string, documentId: string): Promise<ChatDocumentImage[]> {
+  const document = await authorizedDocumentRow(ownerId, conversationId, documentId);
+  return document ? getDocumentImagesForConversation(ownerId, document.source_conversation_id, documentId) : [];
+}
+
 export async function getAuthorizedDocumentImage(ownerId: string, conversationId: string, documentId: string, imageId: string): Promise<ChatDocumentImage | null> {
   const images = await getAuthorizedDocumentImages(ownerId, conversationId, documentId);
   return images.find((image) => image.imageId === imageId) ?? null;
@@ -161,7 +201,7 @@ export async function getAuthorizedDocumentImage(ownerId: string, conversationId
 export async function openAuthorizedDocumentImage(ownerId: string, conversationId: string, documentId: string, imageId: string): Promise<{ object: StorageObject; stream: ReadableStream<Uint8Array>; size: number } | null> {
   const image = await getAuthorizedDocumentImage(ownerId, conversationId, documentId, imageId);
   if (!image?.storageObjectId || !image.storagePath || !image.contentType) return null;
-  const object = await getStorageObjectById({ ownerId, objectId: image.storageObjectId, conversationId, state: "complete" });
+  const object = await getStorageObjectById({ ownerId, objectId: image.storageObjectId, state: "complete" });
   if (!object || object.kind !== "document-image" || object.documentId !== documentId || object.objectKey !== image.storagePath || object.contentType !== image.contentType) return null;
   const opened = await localFilesystemStorageProvider.readObject(object);
   if (opened.size !== object.size) throw new ChatDocumentError("document_storage_changed", "The document image has changed since it was stored.", 409);
@@ -169,10 +209,10 @@ export async function openAuthorizedDocumentImage(ownerId: string, conversationI
 }
 
 export async function getAuthorizedDocumentStorageObject(ownerId: string, conversationId: string, documentId: string): Promise<StorageObject | null> {
-  const [row] = await query<{ storage_object_id: string | null; content_type: string }>("select storage_object_id,content_type from chat_documents where owner_id=$1 and conversation_id=$2 and document_id=$3 and status='complete'", [databaseOwnerId(ownerId), conversationId, documentId]);
+  const row = await authorizedDocumentRow(ownerId, conversationId, documentId);
   if (!row?.storage_object_id) return null;
-  const object = await getStorageObjectById({ ownerId, objectId: row.storage_object_id, conversationId, state: "complete" });
-  if (!object || object.kind !== "document" || object.documentId !== documentId || object.contentType !== row.content_type) return null;
+  const object = await getStorageObjectById({ ownerId, objectId: String(row.storage_object_id), state: "complete" });
+  if (!object || object.kind !== "document" || object.documentId !== documentId || object.contentType !== row.content_type || (row.chat_project_id && object.chatProjectId !== row.chat_project_id)) return null;
   return object;
 }
 
@@ -193,7 +233,9 @@ export async function downloadAuthorizedDocumentBytes(ownerId: string, conversat
 }
 
 export async function getDocumentPages(ownerId: string, conversationId: string, pdfId: string, start = 1, end = 100000): Promise<ChatDocumentPage[]> {
-  const data = await query<{ page_number: number; text: string; markdown: string | null; extraction_method: unknown; failure: unknown; provider_metadata: unknown }>("select page_number,text,markdown,extraction_method,failure,provider_metadata from chat_document_pages where owner_id=$1 and conversation_id=$2 and document_id=$3 and page_number >= $4 and page_number <= $5 order by page_number", [databaseOwnerId(ownerId), conversationId, pdfId, start, end]);
+  const document = await authorizedDocumentRow(ownerId, conversationId, pdfId);
+  if (!document) return [];
+  const data = await query<{ page_number: number; text: string; markdown: string | null; extraction_method: unknown; failure: unknown; provider_metadata: unknown }>("select page_number,text,markdown,extraction_method,failure,provider_metadata from chat_document_pages where owner_id=$1 and conversation_id=$2 and document_id=$3 and page_number >= $4 and page_number <= $5 order by page_number", [databaseOwnerId(ownerId), document.source_conversation_id, pdfId, start, end]);
   return data.map((page) => ({
     pageNumber: Number(page.page_number),
     text: page.text,
@@ -202,6 +244,43 @@ export async function getDocumentPages(ownerId: string, conversationId: string, 
     extractionMethod: storedPageMethod(page.extraction_method, page.text),
     ...(storedPageFailure(page.failure) ? { failure: storedPageFailure(page.failure) } : {}),
   }));
+}
+
+/** Return the completed document library visible to a project conversation. */
+export async function listAuthorizedProjectDocuments(ownerId: string, conversationId: string): Promise<ChatDocumentAttachment[]> {
+  const rows = await query<{ document_id: string }>(
+    `select distinct on (documents.document_id) documents.document_id
+       from chat_documents documents
+       join chat_conversations current
+         on current.owner_id=documents.owner_id
+        and current.project_id=documents.chat_project_id
+      where documents.owner_id=$1 and current.conversation_id=$2
+        and documents.status='complete'
+      order by documents.document_id,documents.created_at desc
+      limit 100`,
+    [databaseOwnerId(ownerId), conversationId],
+  );
+  const documents = await Promise.all(rows.map((row) => getAuthorizedDocument(ownerId, conversationId, row.document_id)));
+  return documents.filter((document): document is ChatDocumentAttachment => Boolean(document));
+}
+
+/** Remove parsed project documents and their derived image objects before the project row is deleted. */
+export async function deleteChatProjectDocuments(ownerId: string, projectId: string): Promise<void> {
+  const rows = await query<{ storage_object_id: string | null }>(
+    `select storage_object_id from chat_documents
+      where owner_id=$1 and chat_project_id=$2
+     union
+     select images.storage_object_id
+       from chat_document_images images
+       join chat_documents documents
+         on documents.owner_id=images.owner_id
+        and documents.conversation_id=images.conversation_id
+        and documents.document_id=images.document_id
+      where documents.owner_id=$1 and documents.chat_project_id=$2`,
+    [databaseOwnerId(ownerId), projectId],
+  );
+  for (const row of rows) if (row.storage_object_id) await deleteOwnedStorageObject({ ownerId, objectId: row.storage_object_id });
+  await query("delete from chat_documents where owner_id=$1 and chat_project_id=$2", [databaseOwnerId(ownerId), projectId]);
 }
 
 export async function uploadDocumentBytes(input: {

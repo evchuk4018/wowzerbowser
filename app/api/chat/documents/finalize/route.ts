@@ -3,6 +3,7 @@ import { authorizeOwnerSession } from "../../../../auth/owner-auth-service";
 import { ChatDocumentError, DOCUMENT_CONTENT_TYPES, MAX_PDF_BYTES } from "../../../../../lib/chat-document";
 import { ensureChatDocumentSchema } from "../../../../server/chat/chat-document-schema";
 import { enqueueDocumentProcessingJob } from "../../../../server/chat/document-processing-job-store";
+import { ensureProjectConversation } from "../../../../server/projects/project-service";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -26,11 +27,13 @@ export function createFinalizeHandler(dependencies = {
       || typeof body.storageObjectId !== "string" || !UUID_PATTERN.test(body.storageObjectId)
       || typeof body.userMessageId !== "string" || !ID_PATTERN.test(body.userMessageId)
       || typeof body.jobId !== "string" || !ID_PATTERN.test(body.jobId)
+      || (body.projectId !== undefined && (typeof body.projectId !== "string" || !ID_PATTERN.test(body.projectId)))
       || !DOCUMENT_CONTENT_TYPES.includes(body.contentType as never)
     ) return NextResponse.json({ error: "Invalid document metadata." }, { status: 400 });
 
     try {
       await dependencies.ensureChatDocumentSchema();
+      if (typeof body.projectId === "string") await ensureProjectConversation(owner.id, body.projectId, body.conversationId);
       const job = await dependencies.enqueueDocumentProcessingJob({
         ownerId: owner.id,
         conversationId: body.conversationId,
@@ -40,6 +43,7 @@ export function createFinalizeHandler(dependencies = {
         contentType: body.contentType as (typeof DOCUMENT_CONTENT_TYPES)[number],
         userMessageId: body.userMessageId,
         sourceJobId: body.jobId,
+        chatProjectId: typeof body.projectId === "string" ? body.projectId : undefined,
       });
       if (job.document && job.document.size > MAX_PDF_BYTES) return NextResponse.json({ error: "Documents must be 25 MiB or smaller." }, { status: 413 });
       return NextResponse.json({

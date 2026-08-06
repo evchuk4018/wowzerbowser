@@ -617,10 +617,10 @@ def delete_workspace_entry(root: Path, relative: str) -> None:
         os.close(parent_fd)
 
 
-def workspace_key(owner_id: str, conversation_id: str) -> str:
-    if SAFE_IDENTIFIER.fullmatch(owner_id) is None or SAFE_IDENTIFIER.fullmatch(conversation_id) is None:
+def workspace_key(owner_id: str, workspace_id: str) -> str:
+    if SAFE_IDENTIFIER.fullmatch(owner_id) is None or SAFE_IDENTIFIER.fullmatch(workspace_id) is None:
         raise WorkerError(400, "Invalid workspace identity.")
-    return hashlib.sha256(f"{owner_id}:{conversation_id}".encode("utf-8")).hexdigest()[:32]
+    return hashlib.sha256(f"{owner_id}:{workspace_id}".encode("utf-8")).hexdigest()[:32]
 
 
 def workspace_for(key: str) -> Path:
@@ -1005,7 +1005,8 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
         if path == "/v1/sessions/open" and method == "POST":
             owner_id = body.get("ownerId")
             conversation_id = body.get("conversationId")
-            key = workspace_key(owner_id, conversation_id)
+            workspace_id = body.get("workspaceId", conversation_id)
+            key = workspace_key(owner_id, workspace_id)
             with STATE_LOCK:
                 cleanup_sessions()
                 token = secrets.token_urlsafe(24)
@@ -1104,7 +1105,8 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
                 with execution_slot(time.time() + WORKSPACE_OPERATION_TIMEOUT_SECONDS):
                     delete_workspace_entry(session.workspace, relative)
                 return 200, {"deleted": True}, "json"
-            key = workspace_key(body.get("ownerId"), body.get("conversationId"))
+            workspace_id = body.get("workspaceId", body.get("conversationId"))
+            key = workspace_key(body.get("ownerId"), workspace_id)
             with STATE_LOCK:
                 tokens = TOKENS_BY_KEY.pop(key, set())
                 for token in tokens:

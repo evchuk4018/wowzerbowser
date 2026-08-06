@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { isValidConversationId } from "../../../lib/chat-conversation-id";
 import { WORKSPACE_LIMITS, workspaceFileFor, workspacePath, type WorkspaceFile, type WorkspaceSearchMatch } from "../../../lib/workspace-protocol";
 import { LocalPythonExecutor } from "../python/local-python-executor";
+import { query } from "../database/database";
 
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
@@ -32,9 +33,23 @@ function lineRange(startLine: number | undefined, endLine: number | undefined): 
   return { ...(startLine === undefined ? {} : { start: startLine }), ...(endLine === undefined ? {} : { end: endLine }) };
 }
 
-async function withWorkspace<T>(ownerId: string, conversationId: string, callback: (executor: LocalPythonExecutor) => Promise<T>): Promise<T> {
+async function workspaceIdForConversation(ownerId: string, conversationId: string): Promise<string> {
+  try {
+    const [row] = await query<{ project_id: string | null }>(
+      "select project_id from chat_conversations where owner_id=$1 and conversation_id=$2",
+      [ownerId, conversationId],
+    );
+    return row?.project_id ?? conversationId;
+  } catch {
+    return conversationId;
+  }
+}
+
+async function withWorkspace<T>(ownerId: string, conversationId: string, callback: (executor: LocalPythonExecutor) => Promise<T>, workspaceId?: string): Promise<T> {
   validateConversationId(conversationId);
-  const executor = new LocalPythonExecutor(ownerId, conversationId, Date.now() + 60_000);
+  const resolvedWorkspaceId = workspaceId ?? await workspaceIdForConversation(ownerId, conversationId);
+  validateConversationId(resolvedWorkspaceId);
+  const executor = new LocalPythonExecutor(ownerId, conversationId, Date.now() + 60_000, resolvedWorkspaceId);
   try {
     return await callback(executor);
   } catch (error) {

@@ -7,6 +7,7 @@ export type ChatDocumentUploadContext = {
  conversationId: string;
  userMessageId: string;
  jobId: string;
+ projectId?: string;
 };
 
 export type ChatDocumentPreparationStatus = "uploading" | "parsing" | "ready" | "error" | "cancelled";
@@ -60,6 +61,7 @@ async function waitForDocumentJob(milliseconds: number, signal: AbortSignal): Pr
 
 export async function uploadChatDocument(input: {
  conversationId:string;
+ projectId?: string;
  userMessageId:string;
  jobId:string;
  document:PendingChatDocument;
@@ -72,9 +74,9 @@ export async function uploadChatDocument(input: {
  const headers={"content-type":"application/json"};
  try {
   input.onStageChange?.("uploading");
-  const uploaded=await timing.measure(DOCUMENT_INGESTION_STAGES.APPLICATION_UPLOAD,async()=>{const response=await authFetch("/api/chat/documents/upload",{method:"POST",headers:{"content-type":contentType,"x-conversation-id":input.conversationId,"x-document-id":input.document.id,"x-file-name":input.document.file.name},signal:input.signal,body:input.document.file}); if(!response.ok)throw await errorFor(response); return await response.json() as {storageObjectId:string};});
+  const uploaded=await timing.measure(DOCUMENT_INGESTION_STAGES.APPLICATION_UPLOAD,async()=>{const response=await authFetch("/api/chat/documents/upload",{method:"POST",headers:{"content-type":contentType,"x-conversation-id":input.conversationId,"x-document-id":input.document.id,"x-file-name":input.document.file.name,...(input.projectId ? {"x-project-id": input.projectId} : {})},signal:input.signal,body:input.document.file}); if(!response.ok)throw await errorFor(response); return await response.json() as {storageObjectId:string};});
   input.onStageChange?.("parsing");
-   const queued=await timing.measure(DOCUMENT_INGESTION_STAGES.FINALIZE_REQUEST,async()=>{const response=await authFetch("/api/chat/documents/finalize",{method:"POST",headers,signal:input.signal,body:JSON.stringify({conversationId:input.conversationId,documentId:input.document.id,storageObjectId:uploaded.storageObjectId,userMessageId:input.userMessageId,jobId:input.jobId,contentType,filename:input.document.file.name})}); if(!response.ok)throw await errorFor(response); return await response.json() as {processingJobId:string;status:string;document?:ChatDocumentAttachment};});
+   const queued=await timing.measure(DOCUMENT_INGESTION_STAGES.FINALIZE_REQUEST,async()=>{const response=await authFetch("/api/chat/documents/finalize",{method:"POST",headers,signal:input.signal,body:JSON.stringify({conversationId:input.conversationId,documentId:input.document.id,storageObjectId:uploaded.storageObjectId,userMessageId:input.userMessageId,jobId:input.jobId,contentType,filename:input.document.file.name,...(input.projectId ? {projectId: input.projectId} : {})})}); if(!response.ok)throw await errorFor(response); return await response.json() as {processingJobId:string;status:string;document?:ChatDocumentAttachment};});
    let document=queued.document;
    let pollDelay=250;
    while (!document) {

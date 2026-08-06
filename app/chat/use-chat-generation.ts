@@ -154,6 +154,7 @@ export function buildChatGenerationRequest(input: {
   mode: ChatMode;
   attachments?: UploadedChatImage[];
   documents?: ChatDocumentAttachment[];
+  projectId?: string | null;
 }): ChatRequest {
   const activeTurns = getActiveConversationTurns(input.conversation);
   const targetTurnIndex = input.editingTurnIndex >= 0
@@ -187,6 +188,7 @@ export function buildChatGenerationRequest(input: {
     ...(input.mode === "deep_research" ? { deepResearchPhase: "plan" as const } : {}),
     contextMode: input.settings.focusedContextEnabled ? "focused" : "full",
     conversationId: input.conversation.id,
+    ...(input.projectId ? { projectId: input.projectId } : {}),
     jobId: input.jobId,
     idempotencyKey: input.jobId,
     persistence: {
@@ -316,6 +318,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         } else {
           uploadedImages = [...preservedAttachments, ...(await uploadChatImages({
             conversationId: conversation.id,
+            projectId: conversation.projectId ?? undefined,
             userMessageId,
             jobId: effectiveJobId,
             images: pendingImages,
@@ -338,6 +341,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         if (!sessionReady) throw new Error("Your session expired. Please sign in again.");
         const prepared = pendingDocuments.map((document) => document.preparationPromise ?? uploadChatDocument({
           conversationId: conversation.id,
+          projectId: conversation.projectId ?? undefined,
           userMessageId,
           jobId: effectiveJobId,
           document,
@@ -478,6 +482,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         reasoningEffort: input.reasoningEffort,
         attachments: uploadedImages,
         documents: uploadedDocuments,
+        projectId: conversation.projectId,
       });
       let submissionAccepted = false;
       for await (const event of streamChatResponse(request, controller.signal)) {
@@ -558,12 +563,13 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
       ? existing.context
       : documentDraft?.conversationId === conversation.id
         ? documentDraft.context
-        : { conversationId: conversation.id, userMessageId: makeId(), jobId: makeId() };
+        : { conversationId: conversation.id, userMessageId: makeId(), jobId: makeId(), ...(conversation.projectId ? { projectId: conversation.projectId } : {}) };
     imageDraftRef.current = { conversationId: conversation.id, context };
     documentDraftRef.current = { conversationId: conversation.id, context };
     setPreparingImageCount((count) => count + images.length);
     const uploadPromise = uploadChatImages({
       conversationId: conversation.id,
+      projectId: conversation.projectId ?? undefined,
       userMessageId: context.userMessageId,
       jobId: context.jobId,
       images,
@@ -595,7 +601,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
       ? existingImage.context
       : existingDocument?.conversationId === conversation.id
         ? existingDocument.context
-        : { conversationId: conversation.id, userMessageId: makeId(), jobId: makeId() };
+        : { conversationId: conversation.id, userMessageId: makeId(), jobId: makeId(), ...(conversation.projectId ? { projectId: conversation.projectId } : {}) };
     imageDraftRef.current = { conversationId: conversation.id, context };
     documentDraftRef.current = { conversationId: conversation.id, context };
 
@@ -620,6 +626,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         if (!sessionReady) throw new Error("Your session expired. Please sign in again.");
         return uploadChatDocument({
           conversationId: conversation.id,
+          projectId: conversation.projectId ?? undefined,
           userMessageId: context.userMessageId,
           jobId: context.jobId,
           document: prepared,

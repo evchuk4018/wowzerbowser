@@ -26,6 +26,7 @@ export type StorageObject = {
   documentId: string | null;
   messageId: string | null;
   projectId: string | null;
+  chatProjectId: string | null;
   revisionId: string | null;
   kind: StorageObjectKind;
   objectKey: string;
@@ -44,6 +45,7 @@ export type StorageObjectInput = {
   documentId?: string | null;
   messageId?: string | null;
   projectId?: string | null;
+  chatProjectId?: string | null;
   revisionId?: string | null;
   kind: StorageObjectKind;
   originalFilename?: string | null;

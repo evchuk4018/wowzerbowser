@@ -227,6 +227,7 @@ export async function authoritativeAttachmentsForSubmission(
     jobId: request.jobId,
     imageIds,
     status: "complete",
+    ...(request.projectId ? { projectId: request.projectId } : {}),
   });
   for (const record of currentRecords) {
     const attachment = attachmentFromUploadRecord(record);
@@ -249,6 +250,7 @@ export async function authoritativeAttachmentsForSubmission(
         jobId: previous.jobId,
         imageIds: missingIds,
         status: "complete",
+        ...(request.projectId ? { projectId: request.projectId } : {}),
       });
       for (const record of previousRecords) {
         const attachment = attachmentFromUploadRecord(record);
@@ -405,6 +407,7 @@ export async function getAuthoritativeChatImageIdsForRequest(ownerId: string, re
       jobId: active.jobId,
       imageIds,
       status: "complete",
+      ...(request.projectId ? { projectId: request.projectId } : {}),
     });
     const recordsById = new Map(records.map((record) => [record.imageId, record]));
     for (const imageId of imageIds) {
@@ -450,6 +453,7 @@ export async function ensureChatSubmission(ownerId: string, request: ChatRequest
   await insertIfAbsent("chat_conversations", {
     owner_id: owner,
     conversation_id: conversationId,
+    project_id: request.projectId ?? null,
     title: "New conversation",
     updated_at: now,
   });
@@ -523,6 +527,7 @@ export type ChatConversationIndexRow = {
   updated_at: string;
   has_messages: boolean;
   is_streaming: boolean;
+  project_id?: string | null;
 };
 
 export function mapChatConversationSummaryRows(rows: ChatConversationIndexRow[]): ChatConversationSummary[] {
@@ -532,11 +537,12 @@ export function mapChatConversationSummaryRows(rows: ChatConversationIndexRow[])
     updatedAt: row.updated_at,
     hasMessages: row.has_messages,
     isStreaming: row.is_streaming,
+    ...(typeof row.project_id === "string" ? { projectId: row.project_id } : {}),
   }));
 }
 
 export async function listChatConversations(ownerId: string): Promise<ChatConversationSummary[]> {
-  const rows = await query<ChatConversationIndexRow>("select conversation_id,title,updated_at,has_messages,is_streaming from list_chat_conversations_fast($1)", [databaseOwnerId(ownerId)]);
+  const rows = await query<ChatConversationIndexRow>("select conversation_id,title,updated_at,has_messages,is_streaming,project_id from list_chat_conversations_fast($1)", [databaseOwnerId(ownerId)]);
   return mapChatConversationSummaryRows(rows.map((row) => ({ ...row, updated_at: isoTimestamp(row.updated_at) })));
 }
 
@@ -558,7 +564,7 @@ export async function searchChatConversations(ownerId: string, searchTerm: strin
 export async function getChatConversation(ownerId: string, conversationId: string): Promise<ChatConversation | null> {
   const owner = databaseOwnerId(ownerId);
   const [conversationResult, turnsResult, versionsResult, messagesResult] = await Promise.all([
-    query<{ conversation_id: string; title: string }>("select conversation_id,title from chat_conversations where owner_id=$1 and conversation_id=$2", [owner, conversationId]),
+    query<{ conversation_id: string; title: string; project_id: string | null }>("select conversation_id,title,project_id from chat_conversations where owner_id=$1 and conversation_id=$2", [owner, conversationId]),
     query<{ turn_id: string; position: number; active_version: number }>("select turn_id,position,active_version from chat_turns where owner_id=$1 and conversation_id=$2 order by position", [owner, conversationId]),
     query<{ turn_id: string; version_id: string; version_index: number; parent_version_id: string | null }>("select turn_id,version_id,version_index,parent_version_id from chat_message_versions where owner_id=$1 and conversation_id=$2 order by version_index", [owner, conversationId]),
     query<MessageRow>("select * from chat_messages where owner_id=$1 and conversation_id=$2", [owner, conversationId]),
@@ -622,6 +628,7 @@ export async function getChatConversation(ownerId: string, conversationId: strin
   return {
     id: conversation.conversation_id,
     title: conversation.title,
+    ...(conversation.project_id ? { projectId: conversation.project_id } : {}),
     turns: turnsResult.map((turn) => ({
       id: turn.turn_id,
       activeVersion: turn.active_version,

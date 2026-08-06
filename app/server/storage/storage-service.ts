@@ -70,10 +70,10 @@ export async function deleteOwnedStorageObject(input: { ownerId: string; objectI
   await deleteStorageObjectMetadata(input);
 }
 
-export async function deleteStorageObjectsForConversation(ownerId: string, conversationId: string): Promise<number> {
+export async function deleteStorageObjectsForConversation(ownerId: string, conversationId: string, excludeChatProjectId?: string): Promise<number> {
   let deleted = 0;
   while (true) {
-    const objects = await listStorageObjectsForConversation(ownerId, conversationId, 1_000);
+    const objects = await listStorageObjectsForConversation(ownerId, conversationId, 1_000, excludeChatProjectId);
     if (!objects.length) return deleted;
     for (const object of objects) {
       await localFilesystemStorageProvider.deleteObjectFile(object);

@@ -435,11 +435,12 @@ export function normalizeConversation(
   const id = nonEmptyString(candidate.id);
   const title = typeof candidate.title === "string" ? candidate.title : null;
   if (!id || title === null) return null;
+  const projectId = typeof candidate.projectId === "string" && candidate.projectId.length > 0 ? candidate.projectId : undefined;
   if (Array.isArray(candidate.turns)) {
     const turns = candidate.turns
       .map((turn) => normalizeTurn(turn, options))
       .filter((turn): turn is ConversationTurn => turn !== null);
-    return { id, title, turns };
+    return { id, title, ...(projectId ? { projectId } : {}), turns };
   }
   // The first client stored a flat alternating messages array. Convert pairs
   // without ever reading from or writing to browser storage.
@@ -456,7 +457,7 @@ export function normalizeConversation(
       activeVersion: 0,
     });
   }
-  return { id, title, turns };
+  return { id, title, ...(projectId ? { projectId } : {}), turns };
 }
 
 /** Backward-compatible name for callers migrating old flat conversations. */
@@ -471,6 +472,7 @@ function validSummary(value: unknown): ChatConversationSummary | null {
   return {
     id,
     title,
+    ...(typeof candidate?.projectId === "string" ? { projectId: candidate.projectId } : {}),
     updatedAt,
     hasMessages: candidate?.hasMessages === true,
     isStreaming: candidate?.isStreaming === true,

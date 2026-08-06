@@ -133,6 +133,7 @@ export type ChatConversationTurn = {
 export type ChatConversation = {
   id: string;
   title: string;
+  projectId?: string | null;
   turns: ChatConversationTurn[];
   todos?: TodoList;
 };
@@ -176,6 +177,7 @@ export function getActiveConversationTurns(
 export type ChatConversationSummary = {
   id: string;
   title: string;
+  projectId?: string | null;
   updatedAt: string;
   hasMessages: boolean;
   isStreaming: boolean;

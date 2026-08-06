@@ -887,6 +887,11 @@ export function ChatWorkspace({
           setOpenConversationActions(null);
           setSearchOpen(true);
         }}
+        onOpenProjects={() => {
+          setSidebarOpen(false);
+          setOpenConversationActions(null);
+          router.push("/projects");
+        }}
         onSelectConversation={selectConversation}
         onOpenConversationActions={setOpenConversationActions}
         onCloseConversationActions={() => setOpenConversationActions(null)}

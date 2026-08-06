@@ -3,7 +3,7 @@ import "server-only";
 import { isLocalPythonConfigured, PYTHON_WORKER_URL } from "./local-python-executor";
 
 /** Remove the private local worker workspace associated with one conversation. */
-export async function deleteConversationWorkspace(ownerId: string, conversationId: string): Promise<void> {
+export async function deleteConversationWorkspace(ownerId: string, conversationId: string, workspaceId = conversationId): Promise<void> {
   if (!isLocalPythonConfigured()) return;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
@@ -14,7 +14,7 @@ export async function deleteConversationWorkspace(ownerId: string, conversationI
         "content-type": "application/json",
         "x-python-worker-secret": process.env.PYTHON_WORKER_SECRET?.trim() ?? "",
       },
-      body: JSON.stringify({ ownerId, conversationId }),
+      body: JSON.stringify({ ownerId, conversationId, workspaceId }),
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`Local Python workspace cleanup failed with status ${response.status}.`);
