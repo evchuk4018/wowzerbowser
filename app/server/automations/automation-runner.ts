@@ -115,7 +115,6 @@ export async function runClaimedAutomation(
     const preferences = await dependencies.getPreferences(run.owner_id);
     const jobId = randomUUID();
     let content = "";
-    let reasoning = "";
     let generationError = "";
     let structuredAnswer: AutomationRunResult | null = null;
     await dependencies.generate({
@@ -131,14 +130,13 @@ export async function runClaimedAutomation(
       userPresence: "",
       messages: [{ role: "user", content: automation.instructions }],
       model: preferences.automationModel!,
-      thinking: Boolean(preferences.automationThinking),
+      thinking: true,
       reasoningEffort: "medium",
       contextMode: "full",
       conversationId: `automation-${automation.id}`,
       jobId,
     }, run.owner_id, dependencies.createSignal(), async (event: ChatStreamEvent) => {
       if (event.type === "content") content += event.delta;
-      if (event.type === "reasoning") reasoning += event.delta;
       if (event.type === "error") generationError = event.message;
     }, async ({ round, usage, estimatedUsage, provider, model, exactCostUsd, pricing }) => {
       const recordedUsage = usage ?? estimatedUsage;
@@ -167,8 +165,6 @@ export async function runClaimedAutomation(
     // deployments may inject a deterministic adapter at this boundary.
     const { conversationId } = await dependencies.deliver.deliver({
       ownerId: run.owner_id, runId: run.id, title: answer.title || automation.name, prompt: automation.instructions, message: answer.message,
-      thinkingEnabled: preferences.automationThinking,
-      ...(preferences.automationThinking && reasoning ? { reasoning } : {}),
     });
     if (conversationId) {
       await dependencies.queueDiscord({

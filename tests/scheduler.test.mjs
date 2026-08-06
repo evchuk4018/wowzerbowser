@@ -52,7 +52,7 @@ test("paused or deleted automations finish without invoking a provider", async (
   const finished = [];
   let generated = 0;
   const dependencies = {
-    getPreferences: async () => ({ automationModel: { provider: "openrouter", model: "test" }, automationThinking: false }),
+    getPreferences: async () => ({ automationModel: { provider: "openrouter", model: "test" } }),
     generate: async () => { generated += 1; },
     recordUsage: async () => undefined,
     heartbeat: async () => true,
@@ -75,7 +75,7 @@ test("failed automation attempts are persisted by the runner and can trigger aut
   let status = "active";
   const dependencies = {
     getAutomation: async () => ({ ...automation(), status }),
-    getPreferences: async () => ({ automationModel: { provider: "openrouter", model: "test" }, automationThinking: false }),
+    getPreferences: async () => ({ automationModel: { provider: "openrouter", model: "test" } }),
     generate: async () => { throw new Error("provider unavailable"); },
     recordUsage: async () => undefined,
     heartbeat: async () => true,
@@ -96,6 +96,38 @@ test("failed automation attempts are persisted by the runner and can trigger aut
   }
   assert.equal(failures, 3);
   assert.equal(status, "paused");
+});
+
+test("automation runs force medium thinking without delivering the private trace", async () => {
+  let request;
+  let delivered;
+  let finished;
+  const dependencies = {
+    getAutomation: async () => automation(),
+    getPreferences: async () => ({ automationModel: { provider: "openrouter", model: "test" }, automationThinking: false }),
+    generate: async (input, _ownerId, _signal, onEvent, _onUsage, _onSummaryUsage, options) => {
+      request = input;
+      await onEvent({ type: "reasoning", delta: "private reasoning" });
+      await onEvent({ type: "content", delta: "ignored prose" });
+      options.onAutomationResult({ matched: true, title: "Report", message: "Delivered result" });
+    },
+    recordUsage: async () => undefined,
+    heartbeat: async () => true,
+    finish: async (_id, input) => { finished = input; return true; },
+    deliver: { deliver: async (input) => { delivered = input; return { conversationId: "conversation-1" }; } },
+    queueDiscord: async () => undefined,
+    createSignal: () => new AbortController().signal,
+    now: () => new Date("2026-08-01T00:01:00.000Z"),
+  };
+
+  const result = await runClaimedAutomation(run, dependencies);
+  assert.equal(result.outcome, "notified");
+  assert.equal(request.thinking, true);
+  assert.equal(request.reasoningEffort, "medium");
+  assert.equal(delivered.message, "Delivered result");
+  assert.equal("reasoning" in delivered, false);
+  assert.equal("thinkingEnabled" in delivered, false);
+  assert.equal(finished.outcome, "notified");
 });
 
 test("one scheduler loop failure does not stop chat processing or another loop", async () => {

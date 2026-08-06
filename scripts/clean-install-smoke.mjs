@@ -440,7 +440,7 @@ async function smoke() {
     await jsonRequest(baseUrl, jar, "/api/chat/user-preferences", {
       method: "PUT",
       headers: jsonHeaders(),
-      body: JSON.stringify({ userPresence: "clean-install-owner", visionModel: null, automationModel: { provider: "openrouter", model: "qwen/qwen3.7-flash" }, focusedContextEnabled: true, automationThinking: false }),
+      body: JSON.stringify({ userPresence: "clean-install-owner", visionModel: null, automationModel: { provider: "openrouter", model: "qwen/qwen3.7-flash" }, focusedContextEnabled: true }),
     }, 204);
     const memory = await jsonRequest(baseUrl, jar, "/api/memory", {}, 200);
     assert.ok(Array.isArray(memory.value?.profile?.folders));

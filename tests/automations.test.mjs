@@ -79,25 +79,30 @@ test("automation answers prefer structured results and retain JSON compatibility
   );
 });
 
-test("automation reasoning preference defaults off and preserves an explicit toggle", () => {
-  assert.equal(parseChatUserPreferences({ userPresence: "" }).automationThinking, false);
-  assert.equal(parseChatUserPreferences({ userPresence: "", automationThinking: true }).automationThinking, true);
-  assert.equal(parseChatUserPreferences({ userPresence: "", automationThinking: false }).automationThinking, false);
-  assert.equal(parseChatUserPreferences({ userPresence: "", automationThinking: "yes" }), null);
+test("legacy automation reasoning preferences are ignored", () => {
+  for (const value of [undefined, true, false, "yes"]) {
+    const parsed = parseChatUserPreferences({ userPresence: "", automationThinking: value });
+    assert.ok(parsed);
+    assert.equal("automationThinking" in parsed, false);
+  }
 });
 
-test("automation delivery gates persisted reasoning on the configured toggle", async () => {
-  const [runner, delivery, history] = await Promise.all([
+test("automation always uses medium private reasoning and delivers only the result", async () => {
+  const [runner, delivery, history, settings] = await Promise.all([
     source("app/server/automations/automation-runner.ts"),
     source("app/server/automations/automation-delivery.ts"),
     source("app/server/chat/chat-history-store.ts"),
+    source("app/settings/configurables-settings.tsx"),
   ]);
-  assert.match(runner, /thinking: Boolean\(preferences\.automationThinking\)/);
-  assert.match(runner, /thinkingEnabled: preferences\.automationThinking/);
-  assert.match(runner, /preferences\.automationThinking && reasoning/);
-  assert.match(delivery, /thinkingEnabled\?: boolean/);
-  assert.match(history, /input\.thinkingEnabled !== undefined/);
-  assert.match(history, /input\.reasoning/);
+  assert.match(runner, /thinking: true/);
+  assert.match(runner, /reasoningEffort: "medium"/);
+  assert.doesNotMatch(runner, /preferences\.automationThinking|thinkingEnabled/);
+  assert.doesNotMatch(delivery, /reasoning|thinkingEnabled/);
+  assert.doesNotMatch(settings, /Automation reasoning|automationThinking/);
+  const start = history.indexOf("export async function createCompletedAutomationConversation");
+  const end = history.indexOf("\n/**", start);
+  const automationConversation = history.slice(start, end);
+  assert.doesNotMatch(automationConversation, /reasoning|thinkingEnabled/);
 });
 
 test("ordinary automation prose becomes a safe non-matching fallback", () => {

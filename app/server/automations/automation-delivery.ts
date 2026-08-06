@@ -7,8 +7,6 @@ export type AutomationDelivery = {
   title: string;
   prompt: string;
   message: string;
-  reasoning?: string;
-  thinkingEnabled?: boolean;
 };
 
 export interface AutomationDeliveryAdapter {
@@ -24,8 +22,6 @@ export const chatAutomationDelivery: AutomationDeliveryAdapter = {
         title: input.title,
         prompt: input.prompt,
         output: input.message,
-        ...(input.reasoning ? { reasoning: input.reasoning } : {}),
-        ...(input.thinkingEnabled !== undefined ? { thinkingEnabled: input.thinkingEnabled } : {}),
       }),
     };
   },
