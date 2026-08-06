@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { closeDatabase, databaseOwnerId, jsonb, query } from "../app/server/database/database.ts";
+import { resumeChatJobAfterApproval, setChatJobAwaitingApproval } from "../app/server/chat/chat-job-store.ts";
 import { claimNextChatSummaryTask, completeChatSummaryTask, enqueueChatSummaryTask, replaceChatSummaryIfCurrent } from "../app/server/chat/chat-summary-store.ts";
 import { claimDueAutomationRuns, finishAutomationRun } from "../app/server/automations/automation-repository.ts";
 import { nextFutureAutomationRun } from "../app/server/automations/automation-schedule.ts";
@@ -122,7 +123,7 @@ test("Discord messages are idempotent and recover a preparation lease", async ()
 
 test("local migrations, atomic chat jobs, document registration, and leased summaries work against real PostgreSQL", async () => {
   const migrationRows = await query("select version from schema_migrations order by version");
-  assert.deepEqual(migrationRows.map((row) => row.version), ["001_initial_schema", "002_seed_catalog", "003_atomic_functions", "004_owner_auth", "005_local_filesystem_storage", "006_durable_worker_queue", "007_durable_image_processing_queue", "008_background_scheduler", "009_local_integration_state", "010_open_data_loader_pdf", "011_chat_live_notifications", "012_chat_response_metrics", "013_prompt_cost_accounting"]);
+  assert.deepEqual(migrationRows.map((row) => row.version), ["001_initial_schema", "002_seed_catalog", "003_atomic_functions", "004_owner_auth", "005_local_filesystem_storage", "006_durable_worker_queue", "007_durable_image_processing_queue", "008_background_scheduler", "009_local_integration_state", "010_open_data_loader_pdf", "011_chat_live_notifications", "012_chat_response_metrics", "013_prompt_cost_accounting", "014_chat_approval_queue"]);
 
   const conversationId = `${testPrefix}-chat`;
   const jobId = `${testPrefix}-job`;
@@ -155,6 +156,31 @@ test("local migrations, atomic chat jobs, document registration, and leased summ
   assert.equal(finished.result.applied, true);
   const [assistant] = await query("select status,content from chat_messages where owner_id=$1 and conversation_id=$2 and job_id=$3 and role='assistant'", [owner, conversationId, jobId]);
   assert.deepEqual(assistant, { status: "complete", content: "hello world" });
+
+  const approvalConversation = `${testPrefix}-approval`;
+  const approvalJob = `${testPrefix}-approval-job`;
+  await submit({ ...requestFor(approvalConversation, approvalJob), mode: "deep_research", deepResearchPhase: "plan" });
+  const approvalClaim = await claim(approvalConversation, approvalJob, randomUUID());
+  assert.equal(approvalClaim.claimed, true);
+  assert.equal(approvalClaim.status, "running");
+  await setChatJobAwaitingApproval(authOwnerId, approvalConversation, approvalJob, approvalClaim.leaseToken);
+
+  const pausedDirectClaim = await claim(approvalConversation, approvalJob, randomUUID());
+  assert.deepEqual(pausedDirectClaim, { claimed: false, status: "awaiting_approval" });
+  const [pausedNextClaim] = await query("select claim_next_chat_job($1,$2::uuid,$3,$4) as result", [owner, randomUUID(), 6_000, 3]);
+  assert.deepEqual(pausedNextClaim.result, { claimed: false, status: "empty" });
+  const [pausedJob] = await query("select status,attempt_count from chat_jobs where owner_id=$1 and conversation_id=$2 and job_id=$3", [owner, approvalConversation, approvalJob]);
+  assert.deepEqual(pausedJob, { status: "awaiting_approval", attempt_count: 1 });
+
+  await resumeChatJobAfterApproval(authOwnerId, approvalConversation, approvalJob);
+  const [resumedJob] = await query("select status,request->>'deepResearchPhase' as deep_research_phase from chat_jobs where owner_id=$1 and conversation_id=$2 and job_id=$3", [owner, approvalConversation, approvalJob]);
+  assert.deepEqual(resumedJob, { status: "queued", deep_research_phase: "execute" });
+  const [resumedClaim] = await query("select claim_next_chat_job($1,$2::uuid,$3,$4) as result", [owner, randomUUID(), 6_000, 3]);
+  assert.equal(resumedClaim.result.claimed, true);
+  assert.equal(resumedClaim.result.status, "running");
+  assert.equal(resumedClaim.result.request.deepResearchPhase, "execute");
+  assert.equal(resumedClaim.result.attemptCount, 2);
+  await query("select cancel_chat_job_and_finalize_message($1,$2,$3) as result", [owner, approvalConversation, approvalJob]);
 
   const concurrentConversation = `${testPrefix}-concurrent`;
   const concurrentJob = `${testPrefix}-concurrent-job`;
