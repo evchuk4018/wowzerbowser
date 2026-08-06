@@ -239,7 +239,7 @@ function ResearchActivityDisclosure({
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
       >
-        <span className="reasoning-chevron" aria-hidden="true">â€º</span>
+        <span className="reasoning-chevron" aria-hidden="true">›</span>
         <span className="research-activity-heading">
           <span className="research-activity-title">Deep research</span>
           <span className="research-activity-current">{activity.summary ?? "Coordinating research"}</span>

@@ -22,7 +22,7 @@ export function ReasoningBlock({ message, liveDurationMs }: ReasoningBlockProps)
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
       >
-        <span className="reasoning-chevron" aria-hidden="true">â€º</span>
+        <span className="reasoning-chevron" aria-hidden="true">›</span>
         <span>{isThinking ? "Thinking" : "Thought process"}</span>
         {duration !== undefined && <span className="reasoning-duration">{formatDuration(duration)}</span>}
       </button>

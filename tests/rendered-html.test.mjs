@@ -503,6 +503,19 @@ test("shows call activity without a generic generation indicator", async () => {
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.call-activity-indicator > span \{[\s\S]*?animation: none;/);
 });
 
+test("keeps activity symbols as valid Unicode instead of mojibake", async () => {
+  const [reasoning, activity, indicator] = await Promise.all([
+    readFile(new URL("../app/chat/reasoning-block.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/assistant-activity.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/call-activity-indicator.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.ok(reasoning.includes(">\u203A</span>"));
+  assert.ok(activity.includes(">\u203A</span>"));
+  assert.ok(indicator.includes(">\u2726</span>"));
+  assert.doesNotMatch(`${reasoning}\n${activity}\n${indicator}`, /\u00e2\u20ac\u00ba|\u00e2\u0153\u00a6/);
+});
+
 test("keeps mobile prompt actions prominent and ephemeral", async () => {
   const [page, workspace, transcript, turn, actions, styles] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
