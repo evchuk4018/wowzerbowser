@@ -1,3 +1,5 @@
+export const CHAT_SOURCE_SNIPPET_MAX_LENGTH = 1_500;
+
 export type ChatSource = {
   id: string;
   title: string;
@@ -102,7 +104,7 @@ export function sourceForUrl(input: { title?: string; url: string; snippet?: str
     id: stableSourceId(input.url),
     title: input.title?.trim() || input.url,
     url: canonicalSourceUrl(input.url),
-    snippet: input.snippet?.trim() || "",
+    snippet: input.snippet?.trim().slice(0, CHAT_SOURCE_SNIPPET_MAX_LENGTH) || "",
     publisher: publisherForUrl(input.url),
     ...(input.publishedAt?.trim() ? { publishedAt: input.publishedAt.trim() } : {}),
   };

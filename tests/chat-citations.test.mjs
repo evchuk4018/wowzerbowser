@@ -1,9 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { IncrementalCitationFilter, parseCitationMarkup, sourceForUrl, stableSourceId } from "../lib/chat-citations.ts";
+import { CHAT_SOURCE_SNIPPET_MAX_LENGTH, IncrementalCitationFilter, parseCitationMarkup, sourceForUrl, stableSourceId } from "../lib/chat-citations.ts";
 
 test("source ids are stable across equivalent URLs", () => {
   assert.equal(stableSourceId("https://Example.com/story/#top"), stableSourceId("https://example.com/story"));
+});
+
+test("source snippets normalize to the shared maximum", () => {
+  const source = sourceForUrl({
+    url: "https://example.com/long",
+    snippet: "x".repeat(CHAT_SOURCE_SNIPPET_MAX_LENGTH + 100),
+  });
+  assert.equal(source.snippet.length, CHAT_SOURCE_SNIPPET_MAX_LENGTH);
 });
 
 test("citation markup becomes clean content with multiple supporting sources", () => {

@@ -1,5 +1,5 @@
 import "server-only";
-import { canonicalSourceUrl, sourceForUrl } from "../../../lib/chat-citations";
+import { CHAT_SOURCE_SNIPPET_MAX_LENGTH, canonicalSourceUrl, sourceForUrl } from "../../../lib/chat-citations";
 import { extractFirecrawl, type ExtractedPage } from "../../providers/research/research-page-adapters";
 import { readResearchPageCache, saveResearchPageCache } from "./research-cache-repository";
 import type { FetchedResearchPage } from "./research-types";
@@ -18,7 +18,7 @@ function materialize(extracted: ExtractedPage): FetchedResearchPage {
   const id = pageId(extracted.contentHash);
   return {
     id,
-    source: sourceForUrl({ title: extracted.title, url: extracted.finalUrl, snippet: extracted.markdown.slice(0, 1_200), publishedAt: extracted.publishedAt }),
+    source: sourceForUrl({ title: extracted.title, url: extracted.finalUrl, snippet: extracted.markdown.slice(0, CHAT_SOURCE_SNIPPET_MAX_LENGTH), publishedAt: extracted.publishedAt }),
     markdown: extracted.markdown,
     links: extracted.links.map((link, index) => ({ ...link, id: linkId(id, index) })),
     extractor: extracted.extractor,

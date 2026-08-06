@@ -31,6 +31,7 @@ import {
 } from "../app/server/agent/image-tool.ts";
 import { executePythonTool } from "../app/server/agent/python-tool.ts";
 import { generateChatResponse } from "../app/chat/chat-server-service.ts";
+import { CHAT_SOURCE_SNIPPET_MAX_LENGTH } from "../lib/chat-citations.ts";
 import { parseChatRequest } from "../lib/chat-protocol.ts";
 import { applyChatStreamEvent } from "../lib/chat-history.ts";
 
@@ -211,6 +212,59 @@ test("web search queries every self-hosted provider and caps higher counts", asy
     const capped = await executeWebTool({ id: "search-2", name: "web_search", arguments: '{"query":"current date","count":21}' });
     assert.equal(capped.ok, true);
     assert.equal(requestedUrls.length, 8);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalStack === undefined) delete process.env.SEARCH_STACK_ENABLED; else process.env.SEARCH_STACK_ENABLED = originalStack;
+  }
+});
+
+test("web search snippets survive assistant-round replay at the shared boundary", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalStack = process.env.SEARCH_STACK_ENABLED;
+  process.env.SEARCH_STACK_ENABLED = "true";
+  const snippet = "x".repeat(CHAT_SOURCE_SNIPPET_MAX_LENGTH);
+  globalThis.fetch = async (url) => {
+    const value = String(url);
+    if (value.includes("searxng")) return Response.json({ results: [{ title: "Long result", url: "https://example.com/long", content: snippet }] });
+    if (value.includes("wikipedia")) return Response.json({ query: { pages: {} } });
+    if (value.includes("miniflux")) return Response.json({ entries: [] });
+    return new Response("<html><body>No Reddit results</body></html>", { headers: { "content-type": "text/html" } });
+  };
+
+  function followUpRequest(result) {
+    return request({
+      messages: [
+        {
+          role: "assistant",
+          content: "I checked the web.",
+          rounds: [{
+            content: "",
+            toolCalls: [{ id: result.id, name: result.name, arguments: '{"query":"long"}', result }],
+          }],
+        },
+        { role: "user", content: "What did you find?" },
+      ],
+    });
+  }
+
+  try {
+    const result = await executeWebTool({ id: "search-long", name: "web_search", arguments: '{"query":"long"}' });
+    assert.equal(result.ok, true);
+    assert.equal(result.web?.kind, "search");
+    assert.equal(result.web?.results[0]?.snippet.length, CHAT_SOURCE_SNIPPET_MAX_LENGTH);
+
+    const parsed = parseChatRequest(followUpRequest(result));
+    assert.equal(
+      parsed.messages[0].rounds?.[0].toolCalls?.[0].result?.web?.kind === "search"
+        ? parsed.messages[0].rounds[0].toolCalls[0].result.web.results[0].snippet.length
+        : 0,
+      CHAT_SOURCE_SNIPPET_MAX_LENGTH,
+    );
+
+    const oversized = structuredClone(result);
+    if (oversized.web?.kind !== "search") throw new Error("Expected a search result.");
+    oversized.web.results[0].snippet += "x";
+    assert.throws(() => parseChatRequest(followUpRequest(oversized)), /web snippet is too long/i);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalStack === undefined) delete process.env.SEARCH_STACK_ENABLED; else process.env.SEARCH_STACK_ENABLED = originalStack;

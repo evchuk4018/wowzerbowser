@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { ChatToolCall, ChatToolResult } from "../../../lib/chat-protocol";
-import { sourceForUrl } from "../../../lib/chat-citations";
+import { CHAT_SOURCE_SNIPPET_MAX_LENGTH, sourceForUrl } from "../../../lib/chat-citations";
 import { isSearchFocus, type SearchFocus } from "../../../lib/search-protocol";
 import { SearchUnavailableError, searchSelfHosted } from "../search/search-service";
 import { fetchResearchPage } from "../research/research-page-service";
@@ -12,7 +12,7 @@ export const CHECK_TIME_TOOL_NAME = "check_time";
 export const CHECK_DATE_TOOL_NAME = "check_date";
 export const CHECK_LOCATION_TOOL_NAME = "check_location";
 const MAX_RESULTS = 20;
-const MAX_SNIPPET = 1_200;
+const MAX_SNIPPET = CHAT_SOURCE_SNIPPET_MAX_LENGTH;
 const MAX_MARKDOWN = 24_000;
 const MAX_TIME_ZONE = 100;
 const MAX_LOCATION = 300;

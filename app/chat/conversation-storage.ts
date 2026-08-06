@@ -10,7 +10,7 @@ import type {
   ChatConversationSummary,
 } from "../../lib/chat-history";
 import { DOCUMENT_CONTENT_TYPES, type ChatDocumentAttachment } from "../../lib/chat-document";
-import { sourceForUrl } from "../../lib/chat-citations";
+import { CHAT_SOURCE_SNIPPET_MAX_LENGTH, sourceForUrl } from "../../lib/chat-citations";
 import { normalizeTodoList } from "../../lib/todo-protocol";
 import {
   deleteChatConversation,
@@ -163,7 +163,7 @@ function normalizeToolResult(value: unknown): ChatToolResult | undefined {
   if (candidate.web && typeof candidate.web === "object") {
     const web = candidate.web as Record<string, unknown>;
     if (web.kind === "page" && typeof web.url === "string" && typeof web.markdown === "string") {
-      result.web = { kind: "page", source: sourceForUrl({ url: web.url, snippet: web.markdown.slice(0, 1200) }), markdown: web.markdown };
+      result.web = { kind: "page", source: sourceForUrl({ url: web.url, snippet: web.markdown.slice(0, CHAT_SOURCE_SNIPPET_MAX_LENGTH) }), markdown: web.markdown };
     } else result.web = candidate.web as ChatToolResult["web"];
   }
   if (candidate.utility && typeof candidate.utility === "object") result.utility = candidate.utility as ChatToolResult["utility"];

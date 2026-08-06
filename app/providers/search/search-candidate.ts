@@ -1,4 +1,4 @@
-import { sourceForUrl } from "../../../lib/chat-citations";
+import { CHAT_SOURCE_SNIPPET_MAX_LENGTH, sourceForUrl } from "../../../lib/chat-citations";
 import type { SearchCandidate, SearchProviderQuery } from "../../server/search/search-types";
 import { array, text } from "./search-http";
 
@@ -18,7 +18,7 @@ export function candidate(input: {
     ...sourceForUrl({
       title: text(input.title, 300),
       url,
-      snippet: text(input.snippet, 1_500),
+      snippet: text(input.snippet, CHAT_SOURCE_SNIPPET_MAX_LENGTH),
       publishedAt: text(input.publishedAt, 100),
     }),
     provider: input.provider,

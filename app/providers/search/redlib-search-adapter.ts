@@ -1,6 +1,7 @@
 import "server-only";
 
 import { JSDOM } from "jsdom";
+import { CHAT_SOURCE_SNIPPET_MAX_LENGTH } from "../../../lib/chat-citations";
 import type { SearchCandidate, SearchProviderQuery } from "../../server/search/search-types";
 import { requireOk, searchRequest, text } from "./search-http";
 import { candidate } from "./search-candidate";
@@ -14,7 +15,7 @@ function publicRedditUrl(path: string): string {
 
 function resultText(anchor: Element): string {
   const container = anchor.closest("article, .post, .thread, .result") ?? anchor.parentElement;
-  return (container?.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 1_500);
+  return (container?.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, CHAT_SOURCE_SNIPPET_MAX_LENGTH);
 }
 
 export async function searchRedlib(query: SearchProviderQuery, signal?: AbortSignal): Promise<SearchCandidate[]> {
