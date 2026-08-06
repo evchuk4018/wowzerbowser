@@ -24,6 +24,7 @@
 * For delegated exploration and implementation, prefer `gpt-5.6-luna` with maximum reasoning effort (`max`). Keep delegated write scopes disjoint and review their changes before integration.
 * Never try to verify the UI or functionality with a browser or screenshot.
 * Always push to `main` when done.
+* A GitHub push is not a deployment. After pushing, always update the homelab checkout at `/srv/storage/wowzerbowser` to the pushed `main` revision, rebuild and restart `web` and `background-worker` through `./docker/update.sh` (or an equivalent guarded workflow using `./docker/compose.sh`), and verify the running revision plus healthy app containers before considering the task complete. Do not invoke raw `docker compose` for app startup because it bypasses the storage-mount guard.
 * Once tests pass, always apply pending database migrations to the local `homelab` server and verify with the migration check before considering the task complete.
 
 ## Prompt Cost Accounting
