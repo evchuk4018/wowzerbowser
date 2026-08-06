@@ -370,8 +370,7 @@ function AssistantActivityTimelineInner({
   onOpenArtifact,
   streaming = false,
 }: AssistantActivityTimelineProps) {
-  const renderableActivities = activities as RenderableActivity[];
-  const phases = renderableActivities.reduce<Map<number, { activities: RenderableActivity[]; phaseBreak?: PhaseBreakActivity }>>((grouped, activity) => {
+  const phases = activities.reduce<Map<number, { activities: RenderableActivity[]; phaseBreak?: PhaseBreakActivity }>>((grouped, activity) => {
     const phase = grouped.get(activity.phase) ?? { activities: [] };
     phase.activities.push(activity);
     if (activity.kind === "phase_break") phase.phaseBreak = activity;
