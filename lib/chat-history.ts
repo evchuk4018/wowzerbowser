@@ -41,7 +41,7 @@ export type ChatOutputActivity = {
 
 export type ChatToolActivity = {
   id: string;
-  kind: "python" | "web" | "image" | "document";
+  kind: "python" | "web" | "image" | "document" | "subagent_tool";
   round: number;
   phase: number;
   call: ChatToolCall;
@@ -67,6 +67,7 @@ export type ChatPythonActivity = Omit<ChatToolActivity, "kind"> & { kind: "pytho
 export type ChatWebActivity = Omit<ChatToolActivity, "kind"> & { kind: "web" };
 export type ChatImageActivity = Omit<ChatToolActivity, "kind"> & { kind: "image" };
 export type ChatDocumentActivity = Omit<ChatToolActivity, "kind"> & { kind: "document" };
+export type ChatSubagentToolActivity = Omit<ChatToolActivity, "kind"> & { kind: "subagent_tool" };
 export type ChatResearchSummaryRevision = {
   revision: number;
   summary: string;
@@ -87,7 +88,7 @@ export type ChatSubagentActivity = {
   durationMs?: number;
 };
 
-export type ChatAssistantActivity = ChatReasoningActivity | ChatOutputActivity | ChatPythonActivity | ChatWebActivity | ChatImageActivity | ChatDocumentActivity | ChatPhaseBreakActivity | ChatSubagentActivity;
+export type ChatAssistantActivity = ChatReasoningActivity | ChatOutputActivity | ChatPythonActivity | ChatWebActivity | ChatImageActivity | ChatDocumentActivity | ChatSubagentToolActivity | ChatPhaseBreakActivity | ChatSubagentActivity;
 
 export type ChatHistoryMessage = {
   id: string;
@@ -215,6 +216,7 @@ function activityForTool(call: ChatToolCall, round: number, startedAt: number): 
   } as const;
   if (call.name === "run_python") return { ...base, kind: "python" };
   if (call.name === "inspect_image") return { ...base, kind: "image" };
+  if (call.name === "run_subagent") return { ...base, kind: "subagent_tool" };
   if (["inspect_pdf_editability", "edit_source_backed_document", "edit_pdf", "compare_document_revisions"].includes(call.name)) return { ...base, kind: "document" };
   return { ...base, kind: legacyToolKind(call) };
 }
@@ -331,6 +333,7 @@ function applySubagentUpdate(
   now: number,
   plan: DeepResearchPlan | undefined,
 ): ChatAssistantActivity[] {
+  if (event.mode === "tool") return activities ?? [];
   const next = [...(activities ?? [])];
   const index = next.findIndex((activity) => activity.kind === "subagent" && activity.taskId === event.taskId);
   const previous = index >= 0 ? next[index] as ChatSubagentActivity : queuedSubagentActivity(event.taskId, event.title, round, phase);

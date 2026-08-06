@@ -78,6 +78,20 @@ test("reduces a frame-sized event batch with one final message state", () => {
   assert.equal(state.message.status, "complete");
 });
 
+test("normal subagent calls stay in the ordinary tool timeline", () => {
+  let state = createChatStreamState(baseMessage);
+  state = reduceChatStreamEvents(state, [
+    event(1, { type: "tool_call", call: { id: "subagent-1", name: "run_subagent", arguments: JSON.stringify({ task: "Inspect the repository" }) } }),
+    event(2, { type: "subagent_update", mode: "tool", taskId: "subagent-1", title: "Inspect the repository", status: "running" }),
+    event(3, { type: "tool_result", result: { id: "subagent-1", name: "run_subagent", ok: true, stdout: "Found it.", stderr: "", durationMs: 42 } }),
+  ]);
+
+  assert.deepEqual(state.message.activities?.map(({ kind }) => kind), ["subagent_tool"]);
+  const activity = state.message.activities?.[0];
+  assert.equal(activity?.status, "completed");
+  assert.equal(activity?.result?.stdout, "Found it.");
+});
+
 test("retains output metrics delivered after the terminal event", () => {
   const state = reduceChatStreamEvents(createChatStreamState(baseMessage), [
     event(1, { type: "content", delta: "Answer" }),

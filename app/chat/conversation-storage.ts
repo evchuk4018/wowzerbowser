@@ -302,10 +302,10 @@ function normalizeActivity(value: unknown, loadedAt: number, freezeRunning: bool
     };
   }
 
-  if (candidate.kind !== "python" && candidate.kind !== "web" && candidate.kind !== "image" && candidate.kind !== "document") return null;
+  if (candidate.kind !== "python" && candidate.kind !== "web" && candidate.kind !== "image" && candidate.kind !== "document" && candidate.kind !== "subagent_tool") return null;
   const call = normalizeToolCall(candidate.call);
   if (!call || (status !== "running" && status !== "completed" && status !== "failed")) return null;
-  const activity: Extract<ChatAssistantActivity, { kind: "python" | "web" | "image" | "document" }> = {
+  const activity: Extract<ChatAssistantActivity, { kind: "python" | "web" | "image" | "document" | "subagent_tool" }> = {
     id,
     kind: candidate.kind,
     round,

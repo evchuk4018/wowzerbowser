@@ -383,6 +383,7 @@ export type ChatStreamEvent =
   | { type: "deep_research_plan"; plan: DeepResearchPlan }
   | {
       type: "subagent_update";
+      mode?: "research" | "tool";
       taskId: string;
       status: "queued" | "running" | "completed" | "failed";
       title: string;

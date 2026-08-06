@@ -340,6 +340,7 @@ export async function generateChatResponse(
       }),
       onSubagentUpdate: async ({ task, status, summary, summaryRevision, trace }) => enqueue({
         type: "subagent_update",
+        mode: "research",
         taskId: task.id,
         title: task.title,
         status,
@@ -670,6 +671,7 @@ export async function generateChatResponse(
                 run: runDelegatedTask,
                 onUpdate: async ({ taskId, title, status, summary }) => enqueue({
                   type: "subagent_update",
+                  mode: "tool",
                   taskId,
                   title,
                   status,

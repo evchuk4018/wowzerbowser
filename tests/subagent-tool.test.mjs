@@ -65,6 +65,38 @@ test("subagent calls batch in parallel while stateful workspace writes remain se
   ]);
 });
 
+test("parallel subagent executions overlap and preserve result order", async () => {
+  const { executeToolBatch } = await import("../app/server/agent/tool-execution-policy.ts");
+  const release = [];
+  let running = 0;
+  let peak = 0;
+  const batchPromise = executeToolBatch(
+    ["one", "two"],
+    async (name) => executeSubagentTool(
+      { id: name, name: RUN_SUBAGENT_TOOL_NAME, arguments: JSON.stringify({ task: name }) },
+      {
+        signal: new AbortController().signal,
+        run: async () => {
+          running += 1;
+          peak = Math.max(peak, running);
+          await new Promise((resolve) => release.push(resolve));
+          running -= 1;
+          return { ok: true, stdout: `${name}-result` };
+        },
+      },
+    ),
+    new AbortController().signal,
+    2,
+  );
+  // The executor starts both calls before either deferred child is released.
+  await new Promise((resolve) => setImmediate(resolve));
+  release.splice(0).forEach((resolve) => resolve());
+  const settled = await batchPromise;
+  assert.equal(peak, 2);
+  assert.deepEqual(settled.map((item) => item.status), ["fulfilled", "fulfilled"]);
+  assert.deepEqual(settled.map((item) => item.value.stdout), ["one-result", "two-result"]);
+});
+
 test("subagent results survive chat request replay validation with bounded sources", () => {
   const parsed = parseChatRequest({
     systemPrompt: "system",

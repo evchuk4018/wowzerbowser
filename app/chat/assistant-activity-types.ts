@@ -6,5 +6,6 @@ export type {
   ChatWebActivity as WebActivity,
   ChatImageActivity as ImageActivity,
   ChatDocumentActivity as DocumentActivity,
+  ChatSubagentToolActivity as SubagentToolActivity,
   ChatPhaseBreakActivity as PhaseBreakActivity,
 } from "../../lib/chat-history";

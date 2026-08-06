@@ -14,6 +14,7 @@ import type {
   ReasoningActivity,
   WebActivity,
   PhaseBreakActivity,
+  SubagentToolActivity,
 } from "./assistant-activity-types";
 import { DocumentEditActivity } from "./document-edit-activity";
 import { fetchChatArtifact } from "./chat-service";
@@ -29,6 +30,7 @@ export type {
   WebActivity,
   DocumentActivity,
   PhaseBreakActivity,
+  SubagentToolActivity,
 } from "./assistant-activity-types";
 
 function useLiveDuration(startedAt?: number, running = false) {
@@ -158,6 +160,36 @@ function ImageDisclosure({ activity }: { activity: ImageActivity }) {
     </div>
   );
 }
+
+function SubagentToolDisclosure({ activity }: { activity: SubagentToolActivity }) {
+  const [open, setOpen] = useState(false);
+  const liveDuration = useLiveDuration(activity.startedAt, activity.status === "running");
+  const duration = activity.result?.durationMs ?? activity.durationMs ?? liveDuration;
+  const statusLabel = activity.status === "running" ? "Running" : activity.status === "completed" ? "Completed" : "Failed";
+  let task = "Delegated task";
+  try {
+    const parsed = JSON.parse(activity.call.arguments) as { task?: unknown };
+    if (typeof parsed.task === "string" && parsed.task.trim()) task = parsed.task.trim();
+  } catch {
+    // Keep malformed calls visible through the normal tool result state.
+  }
+  const output = [activity.result?.stdout, activity.result?.stderr ? `stderr\n${activity.result.stderr}` : ""]
+    .filter(Boolean)
+    .join("\n");
+
+  return (
+    <div className={`web-nested web-nested-${activity.status}`}>
+      <button type="button" className="web-nested-summary" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <span className="python-nested-chevron" aria-hidden="true">{open ? "⌄" : "›"}</span>
+        <span className="web-activity-label">Subagent: {task}</span>
+        <span className="python-activity-status" role="status" aria-live="polite">{statusLabel}</span>
+        {duration !== undefined && <span className="python-activity-duration">{formatDuration(duration)}</span>}
+      </button>
+      {open && <pre className="web-output">{output || (activity.status === "running" ? "Waiting for result…" : "No output")}</pre>}
+    </div>
+  );
+}
+
 type RenderableActivity = AssistantActivity | SubagentActivity;
 
 function ReasoningCard({
@@ -196,6 +228,7 @@ function ReasoningCard({
             if (item.kind === "web") return <WebDisclosure key={item.id} activity={item} />;
             if (item.kind === "image") return <ImageDisclosure key={item.id} activity={item} />;
             if (item.kind === "document") return <DocumentEditActivity key={item.id} activity={item} />;
+            if (item.kind === "subagent_tool") return <SubagentToolDisclosure key={item.id} activity={item} />;
             return null;
           })}
         </div>
