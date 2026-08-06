@@ -9,11 +9,12 @@ import { configuredVisionModel } from "./chat-model-catalog-service";
 import { downloadAuthorizedDocumentBytes } from "./chat-document-store";
 import { pdfPageVisualPrompt } from "./document-page-visual-prompt";
 import { renderPdfPage } from "./pdf-page-renderer";
-import { recordUsage } from "../usage/usage-store";
+import { recordPromptUsage } from "../usage/prompt-cost-service";
 
 export type InspectDocumentPageInput = {
   ownerId: string;
   conversationId: string;
+  jobId?: string;
   documentId: string;
   pageNumber: number;
   question: string;
@@ -48,7 +49,7 @@ export async function inspectDocumentPage(input: InspectDocumentPageInput): Prom
     rendered.contentType,
     { signal: input.signal, model: await configuredVisionModel(input.ownerId).catch(() => null) },
   );
-  await recordUsage({
+  await recordPromptUsage({
     ownerId: input.ownerId,
     provider: "openrouter",
     model: answer.model ?? OPENROUTER_QWEN_FLASH_MODEL,
@@ -56,8 +57,10 @@ export async function inspectDocumentPage(input: InspectDocumentPageInput): Prom
     requestId: `${input.toolCallId}:pdf-page`,
     round: 0,
     usage: answer.usage ?? estimateUsageFromText(`${pdfPageVisualPrompt}\n\nQuestion: ${question}`, answer.content),
-    source: answer.usage ? "exact" : "estimated",
+    source: answer.usage || answer.exactCostUsd !== undefined ? "exact" : "estimated",
     conversationId: input.conversationId,
+    jobId: input.jobId,
+    exactCostUsd: answer.exactCostUsd,
   }).catch(() => undefined);
   return { pageNumber: input.pageNumber, answer: answer.content, model: answer.model };
 }

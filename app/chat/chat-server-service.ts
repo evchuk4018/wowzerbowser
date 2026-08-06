@@ -34,7 +34,7 @@ import { chatMemoryToolDefinitions, executeChatMemoryTool } from "../server/agen
 import { executeUserMemoryTool, userMemoryToolDefinitions } from "../server/agent/user-memory-tool";
 import { USER_MEMORY_TOOL_INSTRUCTIONS } from "../server/agent/user-memory-tool-instructions";
 import { RESPONSE_STYLE_INSTRUCTIONS } from "../server/agent/response-style-instructions";
-import { recordUsage } from "../server/usage/usage-store";
+import { recordPromptUsage } from "../server/usage/prompt-cost-service";
 import { TODO_TOOL_DEFINITIONS, executeTodoTool } from "../server/agent/todo-tool";
 import { getTodoList } from "../server/chat/chat-todo-store";
 import { planTodos } from "../server/chat/chat-todo-planner";
@@ -208,7 +208,7 @@ export async function generateChatResponse(
     current: currentTodos,
     signal,
     onUsage: async (answer) => {
-      await recordUsage({
+      await recordPromptUsage({
         ownerId,
         provider: "openrouter",
         model: answer.model,
@@ -216,7 +216,7 @@ export async function generateChatResponse(
         requestId: responseId ?? `todo-${conversationId}`,
         round: 0,
         usage: answer.usage ?? answer.estimatedUsage,
-        source: answer.usage ? "exact" : "estimated",
+        source: answer.usage || answer.exactCostUsd !== undefined ? "exact" : "estimated",
         exactCostUsd: answer.exactCostUsd,
         unpriced: answer.exactCostUsd === undefined,
         conversationId,
@@ -230,7 +230,7 @@ export async function generateChatResponse(
       toolGroups,
       signal,
       onRouterUsage: async ({ model, usage, estimated, exactCostUsd }) => {
-        await recordUsage({
+        await recordPromptUsage({
           ownerId,
           provider: "openrouter",
           model,
@@ -238,7 +238,7 @@ export async function generateChatResponse(
           requestId: responseId ?? `context-${conversationId}`,
           round: 0,
           usage,
-          source: estimated ? "estimated" : "exact",
+          source: !estimated || exactCostUsd !== undefined ? "exact" : "estimated",
           exactCostUsd,
           unpriced: exactCostUsd === undefined,
           conversationId,
@@ -489,6 +489,7 @@ export async function generateChatResponse(
                 ownerId,
                 conversationId,
                 allowedImageIds,
+                jobId: responseId,
                 signal: roundSignal,
                 responseDeadlineAt,
               });
@@ -513,8 +514,8 @@ export async function generateChatResponse(
                 ownerId,
                 signal: roundSignal,
                 contextCache: recalledContexts,
-                onRecallUsage: async ({ model, usage, exactCostUsd }) => {
-                  await recordUsage({
+                onRecallUsage: async ({ model, usage, source, exactCostUsd }) => {
+                  await recordPromptUsage({
                     ownerId,
                     provider: "openrouter",
                     model,
@@ -522,7 +523,7 @@ export async function generateChatResponse(
                     requestId: responseId ?? `chat-${conversationId}`,
                     round: round * 10_000 + callIndex,
                     usage,
-                    source: "exact",
+                    source,
                     exactCostUsd,
                     unpriced: exactCostUsd === undefined,
                     conversationId,
@@ -571,7 +572,7 @@ export async function generateChatResponse(
               return result;
             }
             if (selected("documents") && allPdfReadTools.some((tool) => tool.function.name === call.name)) {
-              return executePdfTool(call, { ownerId, conversationId, allowedPdfIds, signal: roundSignal });
+              return executePdfTool(call, { ownerId, conversationId, allowedPdfIds, jobId: responseId, signal: roundSignal });
             }
             if (call.name === SEARCH_CURRENT_CHAT_TOOL_NAME && focusedPlan) return executeCurrentChatContextTool(call, focusedPlan.searchEntries);
             if (call.name === SEARCH_CONNECTOR_TOOLS_NAME && connectorDiscoveryAvailable) {

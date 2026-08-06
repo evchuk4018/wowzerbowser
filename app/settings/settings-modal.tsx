@@ -68,6 +68,10 @@ function formatCurrency(value: number, currency = "USD") {
   }).format(value);
 }
 
+function formatPricing(value: number | null): string {
+  return value == null ? "N/A" : formatCurrency(value);
+}
+
 function providerLabel(provider: string) {
   return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
@@ -283,6 +287,8 @@ function UsageSettings({ loadUsage }: Pick<SettingsModalProps, "loadUsage">) {
                     <th scope="col">Input</th>
                     <th scope="col">Cached input</th>
                     <th scope="col">Output</th>
+                    <th scope="col">Request</th>
+                    <th scope="col">Reasoning</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -290,12 +296,14 @@ function UsageSettings({ loadUsage }: Pick<SettingsModalProps, "loadUsage">) {
                     <tr key={`${item.provider}:${item.model}`}>
                       <td>{providerLabel(item.provider)}</td>
                       <th scope="row">{item.label}</th>
-                      <td>{formatCurrency(item.inputUsdPerMillion)}</td>
-                      <td>{item.cachedInputUsdPerMillion == null ? "N/A" : formatCurrency(item.cachedInputUsdPerMillion)}</td>
-                      <td>{formatCurrency(item.outputUsdPerMillion)}</td>
+                      <td>{formatPricing(item.inputUsdPerMillion)}</td>
+                      <td>{formatPricing(item.cachedInputUsdPerMillion)}</td>
+                      <td>{formatPricing(item.outputUsdPerMillion)}</td>
+                      <td>{formatPricing(item.requestUsd)}</td>
+                      <td>{formatPricing(item.reasoningUsdPerMillion)}</td>
                     </tr>
                   )) : (
-                    <tr><td colSpan={5} className="settings-table-empty">Pricing will appear with usage data.</td></tr>
+                    <tr><td colSpan={7} className="settings-table-empty">Pricing will appear with usage data.</td></tr>
                   )}
                 </tbody>
               </table>

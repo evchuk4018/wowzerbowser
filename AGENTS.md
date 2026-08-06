@@ -21,9 +21,18 @@
 ## Workflow
 
 * Use subagents whenever possible.
+* For delegated exploration and implementation, prefer `gpt-5.6-luna` with maximum reasoning effort (`max`). Keep delegated write scopes disjoint and review their changes before integration.
 * Never try to verify the UI or functionality with a browser or screenshot.
 * Always push to `main` when done.
 * Once tests pass, always apply pending database migrations to the local `homelab` server and verify with the migration check before considering the task complete.
+
+## Prompt Cost Accounting
+
+* Every prompt's displayed ending cost must include all linked, non-dreaming model work: foreground generation, reasoning activity titles, chat titles, summaries, context routing, todo planning, chat recall, image analysis and follow-ups, PDF/document image or page analysis, research, automation, and other billable model-backed work.
+* Link every billable usage record to its originating owner, conversation, and chat job whenever it belongs to a prompt. Late background work must refresh the persisted prompt cost without delaying the answer.
+* Exclude local CPU-only work such as OpenDataLoader, EasyOCR, native PDF parsing, and rendering from USD totals. Record provider-backed analysis that is actually billed.
+* Use provider-reported exact costs whenever available. Otherwise calculate only from an authoritative, model-specific pricing snapshot that includes request, cached-input, output, and reasoning charges. Never invent USD or use an unrelated model's fallback price; missing pricing must remain explicit and visible.
+* Dreaming usage is intentionally excluded from prompt-level costs, while remaining available in account-wide usage reporting.
 
 ## Local Server
 

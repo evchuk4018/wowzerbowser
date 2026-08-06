@@ -1,7 +1,7 @@
 import type { ChatConversation, ChatHistoryMessage } from "../../lib/chat-history";
 import { applyChatStreamEvent } from "../../lib/chat-history";
 import type { ChatJobResumeResponse, SequencedChatStreamEvent } from "../../lib/chat-protocol";
-import { fetchChatJob, resumeChatJob } from "./chat-service";
+import { fetchChatJob, resumeChatJob, watchChatJobCost } from "./chat-service";
 import { waitForChatRetry } from "./chat-retry-backoff";
 import type { ConversationAction } from "./conversation-state";
 
@@ -93,6 +93,9 @@ export async function recoverPersistedJob({
           dispatch({ type: "UPDATE_MESSAGE", conversationId: candidate.conversationId, messageId: candidate.message.id, patch: currentMessage });
         }
         dispatch({ type: "UPDATE_MESSAGE", conversationId: candidate.conversationId, messageId: candidate.message.id, patch: { status: "complete" } });
+        void watchChatJobCost(candidate.conversationId, candidate.message.jobId, (streamMetrics) => {
+          dispatch({ type: "UPDATE_MESSAGE", conversationId: candidate.conversationId, messageId: candidate.message.id, patch: { streamMetrics } });
+        }, signal);
         onConversationStreamingChange?.(candidate.conversationId, false);
         return;
       }
@@ -123,6 +126,9 @@ export async function recoverPersistedJob({
     if (terminal) {
       if (signal.aborted) return;
       dispatch(terminal);
+      void watchChatJobCost(candidate.conversationId, candidate.message.jobId, (streamMetrics) => {
+        dispatch({ type: "UPDATE_MESSAGE", conversationId: candidate.conversationId, messageId: candidate.message.id, patch: { streamMetrics } });
+      }, signal);
       onConversationStreamingChange?.(candidate.conversationId, false);
       return;
     }

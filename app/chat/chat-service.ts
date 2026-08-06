@@ -3,6 +3,7 @@ import type {
   ChatModelInfo,
   ChatRequest,
   ChatJobResumeResponse,
+  ChatStreamMetrics,
   SequencedChatStreamEvent,
 } from "../../lib/chat-protocol";
 import type { ChatConversation, ChatConversationSummary } from "../../lib/chat-history";
@@ -95,6 +96,29 @@ export async function fetchChatJob(conversationId: string, jobId: string, after:
   const response = await authFetch(`/api/chat/jobs/${encodeURIComponent(conversationId)}/${encodeURIComponent(jobId)}?after=${after}`, { signal });
   if (!response.ok) throw new Error(await readError(response));
   return response.json() as Promise<ChatJobResumeResponse>;
+}
+
+/** Polls only the durable snapshot so late title/summary/analysis usage can
+ * refresh a completed prompt without holding up the answer stream. */
+export async function watchChatJobCost(
+  conversationId: string,
+  jobId: string,
+  onMetrics: (metrics: ChatStreamMetrics) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (typeof window === "undefined") return;
+  const timeout = AbortSignal.timeout(15_000);
+  const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  for (let attempt = 0; attempt < 20 && !combined.aborted; attempt += 1) {
+    if (attempt > 0) await new Promise<void>((resolve) => window.setTimeout(resolve, 750));
+    if (combined.aborted) return;
+    try {
+      const snapshot = await fetchChatJob(conversationId, jobId, Number.MAX_SAFE_INTEGER, combined);
+      if (snapshot.providerMetrics) onMetrics(snapshot.providerMetrics);
+    } catch {
+      if (combined.aborted) return;
+    }
+  }
 }
 
 export async function cancelChatJob(conversationId: string, jobId: string) {

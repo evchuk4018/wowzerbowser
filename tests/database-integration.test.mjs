@@ -122,7 +122,7 @@ test("Discord messages are idempotent and recover a preparation lease", async ()
 
 test("local migrations, atomic chat jobs, document registration, and leased summaries work against real PostgreSQL", async () => {
   const migrationRows = await query("select version from schema_migrations order by version");
-  assert.deepEqual(migrationRows.map((row) => row.version), ["001_initial_schema", "002_seed_catalog", "003_atomic_functions", "004_owner_auth", "005_local_filesystem_storage", "006_durable_worker_queue", "007_durable_image_processing_queue", "008_background_scheduler", "009_local_integration_state", "010_open_data_loader_pdf"]);
+  assert.deepEqual(migrationRows.map((row) => row.version), ["001_initial_schema", "002_seed_catalog", "003_atomic_functions", "004_owner_auth", "005_local_filesystem_storage", "006_durable_worker_queue", "007_durable_image_processing_queue", "008_background_scheduler", "009_local_integration_state", "010_open_data_loader_pdf", "011_chat_live_notifications", "012_chat_response_metrics", "013_prompt_cost_accounting"]);
 
   const conversationId = `${testPrefix}-chat`;
   const jobId = `${testPrefix}-job`;
@@ -425,4 +425,30 @@ test("local migrations, atomic chat jobs, document registration, and leased summ
     ? scheduleChanged.next_run_at.getTime()
     : Date.parse(scheduleChanged.next_run_at);
   assert.equal(storedNextRunAt, Date.parse(manuallyScheduled));
+});
+
+test("prompt cost refresh aggregates linked non-dreaming work and persists late unpriced state", async () => {
+  const conversationId = `${testPrefix}-prompt-cost`;
+  const jobId = `${testPrefix}-prompt-cost-job`;
+  const request = requestFor(conversationId, jobId);
+  await submit(request);
+  const token = randomUUID();
+  const jobClaim = await claim(conversationId, jobId, token);
+  assert.equal(jobClaim.claimed, true);
+
+  await query(
+    "insert into chat_usage_records(owner_id,provider,model,request_kind,request_id,round,conversation_id,job_id,prompt_tokens,completion_tokens,total_tokens,cost_usd,usage_source,unpriced) values($1,'openrouter','test-model','chat',$2,0,$3,$4,10,5,15,0.05,'exact',false),($1,'openrouter','test-model','title',$5,0,$3,$4,3,2,5,0.02,'estimated',false),($1,'openrouter','test-model','dreaming',$6,0,$3,$4,100,100,200,99,'exact',false)",
+    [owner, `${jobId}:chat`, conversationId, jobId, `${jobId}:title`, `${jobId}:dreaming`],
+  );
+  const [refreshed] = await query("select refresh_chat_job_cost($1,$2,$3) as result", [owner, conversationId, jobId]);
+  assert.deepEqual(refreshed.result, { updated: true, runCost: { costUsd: 0.07, source: "estimated" } });
+  const [jobMetrics] = await query("select provider_metrics->'runCost' as run_cost from chat_jobs where owner_id=$1 and conversation_id=$2 and job_id=$3", [owner, conversationId, jobId]);
+  assert.deepEqual(jobMetrics.run_cost, { costUsd: 0.07, source: "estimated" });
+
+  await query(
+    "insert into chat_usage_records(owner_id,provider,model,request_kind,request_id,round,conversation_id,job_id,prompt_tokens,completion_tokens,total_tokens,cost_usd,usage_source,unpriced) values($1,'openrouter','unknown-model','image_analysis',$2,0,$3,$4,1,1,2,null,'estimated',true)",
+    [owner, `${jobId}:image`, conversationId, jobId],
+  );
+  const [unpriced] = await query("select refresh_chat_job_cost($1,$2,$3) as result", [owner, conversationId, jobId]);
+  assert.deepEqual(unpriced.result, { updated: true, runCost: { costUsd: null, source: "unpriced" } });
 });

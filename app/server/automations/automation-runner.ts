@@ -145,9 +145,11 @@ export async function runClaimedAutomation(
       if (!recordedUsage) return;
       await dependencies.recordUsage({
         ownerId: run.owner_id, provider, model, requestKind: "automation", requestId: run.id, round,
-        usage: recordedUsage, source: usage ? "exact" : "estimated", exactCostUsd,
-        pricingSnapshot: pricing ? { provider, model, label: model, inputUsdPerMillion: pricing.inputUsdPerMillion ?? 0, cachedInputUsdPerMillion: pricing.cachedInputUsdPerMillion, outputUsdPerMillion: pricing.outputUsdPerMillion ?? 0 } : null,
+        usage: recordedUsage, source: usage || exactCostUsd !== undefined ? "exact" : "estimated", exactCostUsd,
+        pricingSnapshot: pricing ? { provider, model, label: model, inputUsdPerMillion: pricing.inputUsdPerMillion, cachedInputUsdPerMillion: pricing.cachedInputUsdPerMillion, outputUsdPerMillion: pricing.outputUsdPerMillion, requestUsd: pricing.requestUsd, reasoningUsdPerMillion: pricing.reasoningUsdPerMillion } : null,
         unpriced: exactCostUsd === undefined,
+        conversationId: `automation-${automation.id}`,
+        jobId,
       });
     }, undefined, { profile: "automation", onAutomationResult: (value) => { structuredAnswer = value; } });
     if (generationError) throw new Error(generationError);

@@ -27,15 +27,21 @@ export function calculateUsageCost(usage: ChatUsage, pricing: UsagePricing | nul
   const normalized = normalizeUsage(usage);
   const promptTokens = normalized.promptTokens ?? 0;
   const completionTokens = normalized.completionTokens ?? 0;
-  if (promptTokens === 0 && completionTokens === 0) return 0;
+  const reasoningTokens = normalized.reasoningTokens ?? 0;
+  if (promptTokens === 0 && completionTokens === 0 && reasoningTokens === 0) return pricing.requestUsd ?? 0;
   const cachedPromptTokens = Math.min(promptTokens, normalized.cachedPromptTokens ?? 0);
   const uncachedPromptTokens = promptTokens - cachedPromptTokens;
-  const cachedRate = pricing.cachedInputUsdPerMillion ?? pricing.inputUsdPerMillion;
+  if (uncachedPromptTokens > 0 && pricing.inputUsdPerMillion === null) return null;
+  if (cachedPromptTokens > 0 && pricing.cachedInputUsdPerMillion === null && pricing.inputUsdPerMillion === null) return null;
+  if (completionTokens > 0 && pricing.outputUsdPerMillion === null) return null;
+  if (reasoningTokens > 0 && pricing.reasoningUsdPerMillion === null) return null;
+  const cachedRate = pricing.cachedInputUsdPerMillion ?? pricing.inputUsdPerMillion ?? 0;
   return (
-    uncachedPromptTokens * pricing.inputUsdPerMillion
+    uncachedPromptTokens * (pricing.inputUsdPerMillion ?? 0)
     + cachedPromptTokens * cachedRate
-    + completionTokens * pricing.outputUsdPerMillion
-  ) / 1_000_000;
+    + completionTokens * (pricing.outputUsdPerMillion ?? 0)
+    + reasoningTokens * (pricing.reasoningUsdPerMillion ?? 0)
+  ) / 1_000_000 + (pricing.requestUsd ?? 0);
 }
 
 export function calculateChatModelCost(usage: ChatUsage, pricing: ChatModelPricing | null): number | null {
@@ -46,9 +52,10 @@ export function calculateChatModelCost(usage: ChatUsage, pricing: ChatModelPrici
   const reasoningTokens = normalized.reasoningTokens ?? 0;
   const cachedPromptTokens = Math.min(promptTokens, normalized.cachedPromptTokens ?? 0);
   const uncachedPromptTokens = promptTokens - cachedPromptTokens;
-  const hasTokenUsage = promptTokens > 0 || completionTokens > 0;
-
-  if (hasTokenUsage && (pricing.inputUsdPerMillion === null || pricing.outputUsdPerMillion === null)) return null;
+  if (uncachedPromptTokens > 0 && pricing.inputUsdPerMillion === null) return null;
+  if (cachedPromptTokens > 0 && pricing.cachedInputUsdPerMillion === null && pricing.inputUsdPerMillion === null) return null;
+  if (completionTokens > 0 && pricing.outputUsdPerMillion === null) return null;
+  if (reasoningTokens > 0 && pricing.reasoningUsdPerMillion === null) return null;
 
   const cachedRate = pricing.cachedInputUsdPerMillion ?? pricing.inputUsdPerMillion ?? 0;
   const tokenCost = (

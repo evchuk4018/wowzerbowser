@@ -21,6 +21,7 @@ export type OpenRouterImageAnswer = {
   content: string;
   model: string | null;
   usage: ChatUsage | null;
+  exactCostUsd?: number;
 };
 
 export class OpenRouterImageError extends ChatImageError {
@@ -44,6 +45,7 @@ type OpenRouterResponse = {
     total_tokens?: unknown;
     prompt_tokens_details?: { cached_tokens?: unknown };
     completion_tokens_details?: { reasoning_tokens?: unknown };
+    cost?: unknown;
   } | null;
 };
 
@@ -54,7 +56,8 @@ function apiKey(): string {
 }
 
 function numberOrUndefined(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+  const parsed = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 function usageFromResponse(value: OpenRouterResponse["usage"]): ChatUsage | null {
@@ -243,6 +246,7 @@ export async function askOpenRouterAboutImage(
     content,
     model: typeof payload.model === "string" && payload.model ? payload.model : null,
     usage: usageFromResponse(payload.usage),
+    ...(numberOrUndefined(payload.usage?.cost) !== undefined ? { exactCostUsd: numberOrUndefined(payload.usage?.cost) } : {}),
   };
 }
 
@@ -251,6 +255,7 @@ export type OpenRouterImageAnalysis = {
   mainVisuals: string;
   model: string | null;
   usage: ChatUsage | null;
+  exactCostUsd?: number;
 };
 
 const IMAGE_ANALYSIS_RESPONSE_FORMAT = {
@@ -318,6 +323,7 @@ export async function analyzeOpenRouterImage(
     mainVisuals: value.mainVisuals.trim(),
     model: typeof payload.model === "string" && payload.model ? payload.model : null,
     usage: usageFromResponse(payload.usage),
+    ...(numberOrUndefined(payload.usage?.cost) !== undefined ? { exactCostUsd: numberOrUndefined(payload.usage?.cost) } : {}),
   };
 }
 

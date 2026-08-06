@@ -7,11 +7,11 @@ export async function POST(request: Request) {
   const owner = await authorizeOwnerSession(request);
   if (!owner) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   try {
-    const body = await request.json() as { firstTurn?: unknown; conversationId?: unknown };
-    if (typeof body.firstTurn !== "string" || !body.firstTurn.trim() || body.firstTurn.length > 20_000 || typeof body.conversationId !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(body.conversationId)) {
+    const body = await request.json() as { firstTurn?: unknown; conversationId?: unknown; jobId?: unknown };
+    if (typeof body.firstTurn !== "string" || !body.firstTurn.trim() || body.firstTurn.length > 20_000 || typeof body.conversationId !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(body.conversationId) || (body.jobId !== undefined && (typeof body.jobId !== "string" || !/^[a-zA-Z0-9_-]{1,256}$/.test(body.jobId)))) {
       return NextResponse.json({ error: "Invalid first turn." }, { status: 400 });
     }
-    const title = await generateAndPersistChatTitle(owner.id, body.conversationId, body.firstTurn.trim());
+    const title = await generateAndPersistChatTitle(owner.id, body.conversationId, body.firstTurn.trim(), typeof body.jobId === "string" ? body.jobId : undefined);
     return NextResponse.json({ title });
   } catch (error) {
     const status = error instanceof OpenRouterError ? error.status : 503;

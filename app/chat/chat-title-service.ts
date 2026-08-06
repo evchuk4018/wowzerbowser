@@ -1,10 +1,10 @@
 import { authFetch } from "../auth/auth-fetch";
 
-export async function generateChatTitle(firstTurn: string, conversationId: string): Promise<string> {
+export async function generateChatTitle(firstTurn: string, conversationId: string, jobId?: string): Promise<string> {
   const response = await authFetch("/api/chat/title", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ firstTurn, conversationId }),
+    body: JSON.stringify({ firstTurn, conversationId, ...(jobId ? { jobId } : {}) }),
   });
   if (!response.ok) throw new Error("The chat could not be named.");
   const body = await response.json() as { title?: unknown };

@@ -33,7 +33,7 @@ function buildContext(conversation: ChatConversation): string {
   return `${raw.slice(0, head)}\n\n[conversation clipped; only the most recent context is included]\n\n${raw.slice(-(MAX_CONTEXT - head - 80))}`;
 }
 
-export type ChatMemoryToolContext = { ownerId: string; signal: AbortSignal; contextCache: Map<string, string>; onRecallUsage?: (usage: { model: string; usage: ChatUsage; exactCostUsd?: number }) => Promise<void> };
+export type ChatMemoryToolContext = { ownerId: string; signal: AbortSignal; contextCache: Map<string, string>; onRecallUsage?: (usage: { model: string; usage: ChatUsage; source: "exact" | "estimated"; exactCostUsd?: number }) => Promise<void> };
 
 export function chatMemoryToolDefinitions(openRouterConfigured?: boolean) { return availableChatMemoryTools(openRouterConfigured); }
 
@@ -59,7 +59,7 @@ export async function executeChatMemoryTool(call: ChatToolCall, context: ChatMem
       context.contextCache.set(conversationId, serialized);
     }
     const answer = await recallChatWithQwen(serialized, prompt, { signal: context.signal });
-    if (answer.usage) await context.onRecallUsage?.({ model: answer.model, usage: answer.usage, exactCostUsd: answer.exactCostUsd });
+    await context.onRecallUsage?.({ model: answer.model, usage: answer.usage ?? answer.estimatedUsage, source: answer.usage || answer.exactCostUsd !== undefined ? "exact" : "estimated", exactCostUsd: answer.exactCostUsd });
     return { id: call.id, name: call.name, ok: true, stdout: answer.answer, stderr: "" };
   } catch (error) {
     return failure(call, error instanceof Error ? error.message : "Chat memory tool failed.");

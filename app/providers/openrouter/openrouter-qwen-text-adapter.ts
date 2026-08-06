@@ -64,6 +64,7 @@ export type QwenReasoningSummaryAnswer = {
   provider: "openrouter";
   model: string;
   usage: ChatUsage | null;
+  estimatedUsage: ChatUsage;
   exactCostUsd?: number;
 };
 
@@ -71,6 +72,7 @@ export type QwenChatRecallAnswer = {
   answer: string;
   model: string;
   usage: ChatUsage | null;
+  estimatedUsage: ChatUsage;
   exactCostUsd?: number;
 };
 
@@ -207,6 +209,7 @@ export async function summarizeChatWithQwen(
     provider: "openrouter",
     model: answer.model,
     usage: answer.usage,
+    estimatedUsage: answer.estimatedUsage,
     ...(answer.exactCostUsd === undefined ? {} : { exactCostUsd: answer.exactCostUsd }),
   };
 }
@@ -226,6 +229,7 @@ export async function summarizeReasoningWithQwenFlash(
     provider: "openrouter",
     model: answer.model,
     usage: answer.usage,
+    estimatedUsage: answer.estimatedUsage,
     ...(answer.exactCostUsd === undefined ? {} : { exactCostUsd: answer.exactCostUsd }),
   };
 }
@@ -251,6 +255,7 @@ export async function recallChatWithQwen(
     answer: answer.content,
     model: answer.model,
     usage: answer.usage,
+    estimatedUsage: answer.estimatedUsage,
     ...(answer.exactCostUsd === undefined ? {} : { exactCostUsd: answer.exactCostUsd }),
   };
 }

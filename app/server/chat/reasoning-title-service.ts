@@ -98,9 +98,9 @@ export class ReasoningTitleCoordinator {
     this.inFlight = (async () => {
       try {
         const answer: QwenReasoningSummaryAnswer = await this.summarizeQwen(`${PROMPT_PREFIX}${monologue}`, this.options.signal);
+        await this.options.onUsage?.({ ...answer, phase, revision });
         const summary = cleanTitle(answer.summary);
         if (!summary) return;
-        await this.options.onUsage?.({ ...answer, phase, revision });
         if (phase === this.phase && revision >= this.summarizedRevision && !this.options.signal.aborted) {
           this.summarizedRevision = revision;
           await this.options.emit({ type: "phase_summary", phase, summary, revision });

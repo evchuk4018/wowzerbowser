@@ -26,6 +26,7 @@ export type ChatSummaryAnswer = {
   provider: "openrouter";
   model: string;
   usage: ChatUsage | null;
+  estimatedUsage: ChatUsage;
   exactCostUsd?: number;
 };
 

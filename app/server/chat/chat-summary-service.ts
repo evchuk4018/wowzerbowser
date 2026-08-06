@@ -6,7 +6,7 @@ import {
   type ChatSummaryInteraction,
   type ChatSummaryTask,
 } from "../../../lib/chat-summary";
-import { recordUsage } from "../usage/usage-store";
+import { recordPromptUsage } from "../usage/prompt-cost-service";
 import { formatBackgroundError, logBackgroundTaskFailure } from "../observability/background-error";
 import { summarizeChatWithQwen } from "../../providers/openrouter/openrouter-qwen-text-adapter";
 import { OpenRouterError } from "../../providers/openrouter/openrouter-catalog-adapter";
@@ -72,10 +72,11 @@ async function persistSummaryUsage(input: {
   jobId: string;
   provider: "openrouter";
   model: string;
-  usage: NonNullable<Awaited<ReturnType<typeof summarizeChatWithQwen>>["usage"]>;
+  usage: Awaited<ReturnType<typeof summarizeChatWithQwen>>["estimatedUsage"];
+  source: "exact" | "estimated";
   exactCostUsd?: number;
 }): Promise<void> {
-  await recordUsage({
+  await recordPromptUsage({
     ownerId: input.ownerId,
     provider: input.provider,
     model: input.model,
@@ -83,7 +84,7 @@ async function persistSummaryUsage(input: {
     requestId: input.jobId,
     round: 0,
     usage: input.usage,
-    source: "exact",
+    source: input.source,
     exactCostUsd: input.exactCostUsd,
     unpriced: input.exactCostUsd === undefined,
     conversationId: input.conversationId,
@@ -125,6 +126,18 @@ async function executeChatSummaryTask(task: ChatSummaryTask): Promise<void> {
         assistantContent: source.assistantContent,
       });
   const answer = await summarizeChatWithQwen(prompt);
+  if (answer.usage || answer.estimatedUsage) {
+    await persistSummaryUsage({
+      ownerId: task.ownerId,
+      conversationId: task.conversationId,
+      jobId: task.sourceJobId,
+      provider: answer.provider,
+      model: answer.model,
+      usage: answer.usage ?? answer.estimatedUsage,
+      source: answer.usage ? "exact" : "estimated",
+      exactCostUsd: answer.exactCostUsd,
+    });
+  }
   const summary = summaryFromAnswer(answer.summary, previousSummary, needsRebuild);
   const expectedRevision = summaryState?.revision ?? 0;
   const latestActive = activeInteractions.at(-1);
@@ -138,17 +151,6 @@ async function executeChatSummaryTask(task: ChatSummaryTask): Promise<void> {
     sourceJobId: task.sourceJobId,
   });
   if (!updated) throw new ChatSummaryConflictError();
-  if (answer.usage) {
-    await persistSummaryUsage({
-      ownerId: task.ownerId,
-      conversationId: task.conversationId,
-      jobId: task.sourceJobId,
-      provider: answer.provider,
-      model: answer.model,
-      usage: answer.usage,
-      exactCostUsd: answer.exactCostUsd,
-    });
-  }
   await completeChatSummaryTask(task, summary);
 }
 

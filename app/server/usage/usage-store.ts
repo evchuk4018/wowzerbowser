@@ -2,7 +2,6 @@ import "server-only";
 
 import type { UsagePricing, UsageRecord, UsageRecordInput } from "../../../lib/usage-protocol";
 import { calculateUsageCost, normalizeUsage } from "../../../lib/usage-pricing";
-import { DEFAULT_DEEPSEEK_USAGE_PRICING } from "../../providers/deepseek/deepseek-pricing";
 import { databaseOwnerId, isoTimestamp, jsonb, query } from "../database/database";
 
 function numberValue(value: unknown): number {
@@ -10,21 +9,27 @@ function numberValue(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function nullableNumberValue(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function pricingFromRow(row: Record<string, unknown>): UsagePricing {
   return {
     provider: String(row.provider),
     model: String(row.model),
     label: String(row.label),
-    inputUsdPerMillion: numberValue(row.input_usd_per_million),
-    cachedInputUsdPerMillion: row.cached_input_usd_per_million === null
-      ? null
-      : numberValue(row.cached_input_usd_per_million),
-    outputUsdPerMillion: numberValue(row.output_usd_per_million),
+    inputUsdPerMillion: nullableNumberValue(row.input_usd_per_million),
+    cachedInputUsdPerMillion: nullableNumberValue(row.cached_input_usd_per_million),
+    outputUsdPerMillion: nullableNumberValue(row.output_usd_per_million),
+    requestUsd: nullableNumberValue(row.request_usd),
+    reasoningUsdPerMillion: nullableNumberValue(row.reasoning_usd_per_million),
   };
 }
 
 export async function listUsagePricing(): Promise<UsagePricing[]> {
-  const rows = await query<Record<string, unknown>>("select provider,model,label,input_usd_per_million,cached_input_usd_per_million,output_usd_per_million from chat_model_pricing order by provider,model");
+  const rows = await query<Record<string, unknown>>("select provider,model,label,input_usd_per_million,cached_input_usd_per_million,output_usd_per_million,request_usd,reasoning_usd_per_million from chat_model_pricing order by provider,model");
   return rows.map((row) => pricingFromRow(row));
 }
 
@@ -56,16 +61,15 @@ export async function queueUsage(input: UsageRecordInput): Promise<void> {
 
 async function writeUsageRecord(input: UsageRecordInput): Promise<void> {
   const catalog = await listUsagePricing();
-  const pricing = catalog.find((entry) => entry.provider === input.provider && entry.model === input.model)
-    ?? DEFAULT_DEEPSEEK_USAGE_PRICING.find((entry) => entry.provider === input.provider && entry.model === input.model)
-    ?? null;
+  const pricing = catalog.find((entry) => entry.provider === input.provider && entry.model === input.model) ?? null;
   const usage = normalizeUsage(input.usage);
   const effectivePricing = input.pricingSnapshot ?? pricing;
   const costUsd = input.exactCostUsd ?? calculateUsageCost(usage, effectivePricing);
-  await query(`insert into chat_usage_records(owner_id,provider,model,request_kind,request_id,round,recorded_at,conversation_id,job_id,prompt_tokens,completion_tokens,total_tokens,cached_prompt_tokens,reasoning_tokens,cost_usd,usage_source,exact_cost_usd,pricing_snapshot,unpriced,input_usd_per_million,cached_input_usd_per_million,output_usd_per_million,pricing_label)
-    values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19,$20,$21,$22,$23)
+  const unpriced = costUsd === null;
+  await query(`insert into chat_usage_records(owner_id,provider,model,request_kind,request_id,round,recorded_at,conversation_id,job_id,prompt_tokens,completion_tokens,total_tokens,cached_prompt_tokens,reasoning_tokens,cost_usd,usage_source,exact_cost_usd,pricing_snapshot,unpriced,input_usd_per_million,cached_input_usd_per_million,output_usd_per_million,request_usd,reasoning_usd_per_million,pricing_label)
+    values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19,$20,$21,$22,$23,$24,$25)
     on conflict(owner_id,provider,request_kind,request_id,round) do nothing`,
-    [databaseOwnerId(input.ownerId), input.provider, input.model, input.requestKind, input.requestId, input.round, input.recordedAt ?? new Date().toISOString(), input.conversationId ?? null, input.jobId ?? null, usage.promptTokens ?? 0, usage.completionTokens ?? 0, usage.totalTokens ?? 0, usage.cachedPromptTokens ?? 0, usage.reasoningTokens ?? 0, costUsd, input.source, input.exactCostUsd ?? null, effectivePricing == null ? null : jsonb(effectivePricing), input.unpriced ?? (costUsd === null), effectivePricing?.inputUsdPerMillion ?? null, effectivePricing?.cachedInputUsdPerMillion ?? null, effectivePricing?.outputUsdPerMillion ?? null, effectivePricing?.label ?? null]);
+    [databaseOwnerId(input.ownerId), input.provider, input.model, input.requestKind, input.requestId, input.round, input.recordedAt ?? new Date().toISOString(), input.conversationId ?? null, input.jobId ?? null, usage.promptTokens ?? 0, usage.completionTokens ?? 0, usage.totalTokens ?? 0, usage.cachedPromptTokens ?? 0, usage.reasoningTokens ?? 0, costUsd, input.source, input.exactCostUsd ?? null, effectivePricing == null ? null : jsonb(effectivePricing), unpriced, effectivePricing?.inputUsdPerMillion ?? null, effectivePricing?.cachedInputUsdPerMillion ?? null, effectivePricing?.outputUsdPerMillion ?? null, effectivePricing?.requestUsd ?? null, effectivePricing?.reasoningUsdPerMillion ?? null, effectivePricing?.label ?? null]);
 }
 
 export async function flushUsageOutbox(ownerId: string): Promise<void> {
@@ -132,7 +136,7 @@ export async function listUsageRecords(
   const pageSize = 1_000;
   for (let offset = 0; ; offset += pageSize) {
     const parameters: unknown[] = [databaseOwner];
-    let statement = "select provider,model,request_kind,request_id,round,recorded_at,prompt_tokens,completion_tokens,total_tokens,cached_prompt_tokens,reasoning_tokens,cost_usd,usage_source,input_usd_per_million,cached_input_usd_per_million,output_usd_per_million,pricing_label from chat_usage_records where owner_id=$1";
+    let statement = "select provider,model,request_kind,request_id,round,recorded_at,prompt_tokens,completion_tokens,total_tokens,cached_prompt_tokens,reasoning_tokens,cost_usd,usage_source,input_usd_per_million,cached_input_usd_per_million,output_usd_per_million,request_usd,reasoning_usd_per_million,pricing_label from chat_usage_records where owner_id=$1";
     if (window) {
       parameters.push(window.start, window.end);
       statement += " and recorded_at >= $2 and recorded_at < $3";
@@ -145,17 +149,18 @@ export async function listUsageRecords(
   }
   return rows.map((row) => {
     const value = row as Record<string, unknown>;
-    const pricing = value.input_usd_per_million === null || value.output_usd_per_million === null
+    const pricingValues = [value.input_usd_per_million, value.cached_input_usd_per_million, value.output_usd_per_million, value.request_usd, value.reasoning_usd_per_million];
+    const pricing = pricingValues.every((item) => item === null || item === undefined)
       ? null
       : {
           provider: String(value.provider),
           model: String(value.model),
           label: String(value.pricing_label ?? value.model),
-          inputUsdPerMillion: numberValue(value.input_usd_per_million),
-          cachedInputUsdPerMillion: value.cached_input_usd_per_million === null
-            ? null
-            : numberValue(value.cached_input_usd_per_million),
-          outputUsdPerMillion: numberValue(value.output_usd_per_million),
+          inputUsdPerMillion: nullableNumberValue(value.input_usd_per_million),
+          cachedInputUsdPerMillion: nullableNumberValue(value.cached_input_usd_per_million),
+          outputUsdPerMillion: nullableNumberValue(value.output_usd_per_million),
+          requestUsd: nullableNumberValue(value.request_usd),
+          reasoningUsdPerMillion: nullableNumberValue(value.reasoning_usd_per_million),
         } satisfies UsagePricing;
     return {
       provider: String(value.provider),

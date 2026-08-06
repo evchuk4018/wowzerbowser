@@ -15,7 +15,7 @@ import {
 import { estimateUsageFromText } from "../../../lib/usage-pricing";
 import type { ChatToolResult } from "../../../lib/chat-protocol";
 import type { ChatToolCall } from "../../../lib/chat-protocol";
-import { recordUsage } from "../usage/usage-store";
+import { recordPromptUsage } from "../usage/prompt-cost-service";
 import { analyzeOpenRouterImage, askOpenRouterAboutImage } from "../../providers/openrouter/openrouter-image-adapter";
 import { OPENROUTER_QWEN_FLASH_MODEL } from "../../providers/openrouter/openrouter-config";
 import { configuredVisionModel } from "./chat-model-catalog-service";
@@ -80,9 +80,10 @@ async function recordImageUsage(input: {
   usage: { promptTokens?: number; completionTokens?: number; totalTokens?: number; cachedPromptTokens?: number; reasoningTokens?: number } | null;
   prompt: string;
   answer: string;
+  exactCostUsd?: number;
 }): Promise<void> {
   const model = input.model ?? OPENROUTER_QWEN_FLASH_MODEL;
-  await recordUsage({
+  await recordPromptUsage({
     ownerId: input.ownerId,
     provider: "openrouter",
     model,
@@ -90,9 +91,10 @@ async function recordImageUsage(input: {
     requestId: input.requestId,
     round: 0,
     usage: input.usage ?? estimateUsageFromText(input.prompt, input.answer),
-    source: input.usage ? "exact" : "estimated",
+    source: input.usage || input.exactCostUsd !== undefined ? "exact" : "estimated",
     conversationId: input.conversationId,
     jobId: input.jobId,
+    exactCostUsd: input.exactCostUsd,
   });
 }
 
@@ -145,6 +147,7 @@ export async function analyzeStoredChatImage(input: {
     usage: analysis.usage,
     prompt: IMAGE_ANALYSIS_PROMPT,
     answer: JSON.stringify({ visibleText, mainVisuals }),
+    exactCostUsd: analysis.exactCostUsd,
   }).catch(() => undefined);
   return {
     status: "complete",
@@ -291,6 +294,7 @@ export async function inspectChatImage(input: {
   imageId: string;
   question: string;
   toolCallId: string;
+  jobId?: string;
   signal?: AbortSignal;
 }): Promise<ChatImageToolResult> {
   const question = input.question.trim();
@@ -303,12 +307,14 @@ export async function inspectChatImage(input: {
   await recordImageUsage({
     ownerId: input.ownerId,
     conversationId: input.conversationId,
+    jobId: input.jobId,
     requestId: input.toolCallId,
     requestKind: "image_followup",
     model: answer.model,
     usage: answer.usage,
     prompt: question,
     answer: answer.content,
+    exactCostUsd: answer.exactCostUsd,
   }).catch(() => undefined);
   return {
     kind: "image",
@@ -326,9 +332,26 @@ export function chatToolResultForImageError(callId: string, error: unknown): Cha
 
 export const chatImagePrompts = { IMAGE_ANALYSIS_PROMPT, FOLLOWUP_SYSTEM_PROMPT } as const;
 
-export async function analyzeDocumentImage(bytes: Uint8Array, contentType: ChatImageContentType, signal?: AbortSignal, visionModel?: string | null): Promise<{ visibleText: string | null; mainVisuals: string | null }> {
+export async function analyzeDocumentImage(
+  bytes: Uint8Array,
+  contentType: ChatImageContentType,
+  signal?: AbortSignal,
+  visionModel?: string | null,
+  usageContext?: { ownerId: string; conversationId: string; jobId?: string; requestId: string },
+): Promise<{ visibleText: string | null; mainVisuals: string | null }> {
   const storedLimit = 2_000;
   const analysis = await analyzeOpenRouterImage(IMAGE_ANALYSIS_PROMPT, bytes, contentType, { signal, model: visionModel });
+  if (usageContext) {
+    await recordImageUsage({
+      ...usageContext,
+      requestKind: "image_analysis",
+      model: analysis.model,
+      usage: analysis.usage,
+      prompt: IMAGE_ANALYSIS_PROMPT,
+      answer: JSON.stringify({ visibleText: analysis.visibleText, mainVisuals: analysis.mainVisuals }),
+      exactCostUsd: analysis.exactCostUsd,
+    }).catch(() => undefined);
+  }
   return {
     visibleText: analysis.visibleText?.slice(0, storedLimit) ?? null,
     mainVisuals: analysis.mainVisuals ? analysis.mainVisuals.slice(0, storedLimit) : null,

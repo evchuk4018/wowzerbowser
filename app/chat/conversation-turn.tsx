@@ -152,11 +152,12 @@ function ConversationTurnInner({
     && Number.isFinite(assistantMessage.streamMetrics.outputTps)
     ? `${assistantMessage.streamMetrics.outputTps.toFixed(1)} t/s`
     : null;
-  const runCost = assistantMessage.status === "complete"
-    && typeof assistantMessage.streamMetrics?.runCost?.costUsd === "number"
-    && Number.isFinite(assistantMessage.streamMetrics.runCost.costUsd)
-    && assistantMessage.streamMetrics.runCost.costUsd >= 0
-    ? `${formatRunCost(assistantMessage.streamMetrics.runCost.costUsd)}${assistantMessage.streamMetrics.runCost.source === "estimated" ? " est." : ""}`
+  const runCost = assistantMessage.status === "complete" && assistantMessage.streamMetrics?.runCost
+    ? typeof assistantMessage.streamMetrics.runCost.costUsd === "number"
+      && Number.isFinite(assistantMessage.streamMetrics.runCost.costUsd)
+      && assistantMessage.streamMetrics.runCost.costUsd >= 0
+      ? `${formatRunCost(assistantMessage.streamMetrics.runCost.costUsd)}${assistantMessage.streamMetrics.runCost.source === "estimated" ? " est." : ""}`
+      : "Cost unavailable"
     : null;
   const hasUserAttachments = Boolean(userMessage.attachments?.length || userMessage.documents?.length);
   const handleContextMenu = (event: React.MouseEvent<HTMLElement>) => {

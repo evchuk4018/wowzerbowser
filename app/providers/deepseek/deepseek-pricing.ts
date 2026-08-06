@@ -9,6 +9,8 @@ export const DEFAULT_DEEPSEEK_USAGE_PRICING: UsagePricing[] = [
     inputUsdPerMillion: 0.14,
     cachedInputUsdPerMillion: 0.0028,
     outputUsdPerMillion: 0.28,
+    requestUsd: null,
+    reasoningUsdPerMillion: null,
   },
   {
     provider: "deepseek",
@@ -17,5 +19,7 @@ export const DEFAULT_DEEPSEEK_USAGE_PRICING: UsagePricing[] = [
     inputUsdPerMillion: 0.435,
     cachedInputUsdPerMillion: 0.003625,
     outputUsdPerMillion: 0.87,
+    requestUsd: null,
+    reasoningUsdPerMillion: null,
   },
 ];

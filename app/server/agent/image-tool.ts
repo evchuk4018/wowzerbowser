@@ -16,6 +16,7 @@ export { INSPECT_IMAGE_TOOL_DEFINITION, INSPECT_IMAGE_TOOL_NAME, availableImageT
 export type InspectImageToolContext = {
   ownerId: string;
   conversationId: string;
+  jobId?: string;
   /** Image ids copied from the server-validated request history. */
   allowedImageIds: readonly string[];
   signal: AbortSignal;
@@ -61,6 +62,7 @@ export async function executeInspectImageTool(
     const result = await inspectChatImage({
       ownerId: context.ownerId,
       conversationId: context.conversationId,
+      jobId: context.jobId,
       imageId: args.imageId,
       question: args.question,
       toolCallId: call.id,

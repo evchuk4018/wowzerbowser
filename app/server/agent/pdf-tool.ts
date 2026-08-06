@@ -15,7 +15,7 @@ export function availablePdfTools(hasAuthorizedDocument: boolean, hasAuthorizedP
 }
 
 const fail = (call: ChatToolCall, message: string): ChatToolResult => ({ id: call.id, name: call.name, ok: false, stdout: "", stderr: message });
-export async function executePdfTool(call: ChatToolCall, context: { ownerId: string; conversationId: string; allowedPdfIds: ReadonlySet<string>; signal?: AbortSignal }): Promise<ChatToolResult> {
+export async function executePdfTool(call: ChatToolCall, context: { ownerId: string; conversationId: string; allowedPdfIds: ReadonlySet<string>; jobId?: string; signal?: AbortSignal }): Promise<ChatToolResult> {
   let args: Record<string, unknown>; try { args = JSON.parse(call.arguments); } catch { return fail(call, "Invalid document tool arguments."); }
   const pdfId = typeof args.documentId === "string" ? args.documentId : "";
   if (!ID_PATTERN.test(pdfId)) return fail(call, "Document is not authorized for this conversation.");
@@ -31,6 +31,7 @@ export async function executePdfTool(call: ChatToolCall, context: { ownerId: str
       const result = await inspectDocumentPage({
         ownerId: context.ownerId,
         conversationId: context.conversationId,
+        jobId: context.jobId,
         documentId: pdfId,
         pageNumber: Number(pageNumber),
         question,

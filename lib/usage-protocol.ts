@@ -28,9 +28,11 @@ export type UsagePricing = {
   provider: string;
   model: string;
   label: string;
-  inputUsdPerMillion: number;
+  inputUsdPerMillion: number | null;
   cachedInputUsdPerMillion: number | null;
-  outputUsdPerMillion: number;
+  outputUsdPerMillion: number | null;
+  requestUsd: number | null;
+  reasoningUsdPerMillion: number | null;
 };
 export type UsageRecord = {
   provider: string;

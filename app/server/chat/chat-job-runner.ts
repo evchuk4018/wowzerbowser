@@ -8,7 +8,7 @@ import type {
   SequencedChatStreamEvent,
 } from "../../../lib/chat-protocol";
 import { generateChatResponse } from "../../chat/chat-server-service";
-import { recordUsage } from "../usage/usage-store";
+import { recordPromptUsage, refreshPromptCost } from "../usage/prompt-cost-service";
 import { claimChatJob, createChatJobEventWriter, finishChatJob, renewChatJob, saveChatJobResearchPlan, setChatJobAwaitingApproval, type ChatJobClaim } from "./chat-job-store";
 import { createChatEventCoalescer } from "./chat-event-coalescer";
 import { CHAT_JOB_HEARTBEAT_MS } from "./chat-job-lease";
@@ -170,7 +170,7 @@ export async function runClaimedChatJob(
       async ({ round, usage: providerUsage, estimatedUsage, provider, model, exactCostUsd, pricing }) => {
         const recordedUsage = providerUsage ?? estimatedUsage;
         if (!recordedUsage) return;
-        await recordUsage({
+        const refreshed = await recordPromptUsage({
           ownerId,
           provider,
           model,
@@ -178,38 +178,46 @@ export async function runClaimedChatJob(
           requestId: claim.jobId,
           round,
           usage: recordedUsage,
-          source: providerUsage ? "exact" : "estimated",
+          source: providerUsage || exactCostUsd !== undefined ? "exact" : "estimated",
           exactCostUsd,
           pricingSnapshot: pricing ? {
             provider,
             model,
             label: model,
-            inputUsdPerMillion: pricing.inputUsdPerMillion ?? 0,
+            inputUsdPerMillion: pricing.inputUsdPerMillion,
             cachedInputUsdPerMillion: pricing.cachedInputUsdPerMillion,
-            outputUsdPerMillion: pricing.outputUsdPerMillion ?? 0,
+            outputUsdPerMillion: pricing.outputUsdPerMillion,
+            requestUsd: pricing.requestUsd,
+            reasoningUsdPerMillion: pricing.reasoningUsdPerMillion,
           } : null,
-          unpriced: exactCostUsd === undefined && (!pricing || pricing.inputUsdPerMillion === null || pricing.outputUsdPerMillion === null),
+          unpriced: exactCostUsd === undefined && (!pricing || pricing.inputUsdPerMillion === null || pricing.outputUsdPerMillion === null || ((providerUsage?.reasoningTokens ?? estimatedUsage?.reasoningTokens ?? 0) > 0 && pricing.reasoningUsdPerMillion === null)),
+          conversationId: claim.conversationId,
+          jobId: claim.jobId,
         });
+        runCost = refreshed ?? runCost;
       },
-      async ({ provider, model, usage: summaryUsage, phase, revision, exactCostUsd }) => {
-        if (!summaryUsage) return;
-        await recordUsage({
+      async ({ provider, model, usage: summaryUsage, estimatedUsage, phase, revision, exactCostUsd }) => {
+        const recordedSummaryUsage = summaryUsage ?? estimatedUsage;
+        if (!recordedSummaryUsage) return;
+        const refreshed = await recordPromptUsage({
           ownerId,
           provider,
           model,
           requestKind: "reasoning_summary",
           requestId: claim.jobId,
           round: phase * 100_000 + revision,
-          usage: summaryUsage,
-          source: "exact",
+          usage: recordedSummaryUsage,
+          source: summaryUsage || exactCostUsd !== undefined ? "exact" : "estimated",
           exactCostUsd,
           unpriced: exactCostUsd === undefined,
           conversationId: claim.conversationId,
           jobId: claim.jobId,
         });
+        runCost = refreshed ?? runCost;
       },
     );
     await drainEventPipelines();
+    runCost = await refreshPromptCost(ownerId, claim.conversationId, claim.jobId) ?? runCost;
     if (!controller.signal.aborted && generation.awaitingApproval) {
       if (researchPlan) await saveChatJobResearchPlan(ownerId, claim.conversationId, claim.jobId, researchPlan);
       await setChatJobAwaitingApproval(ownerId, claim.conversationId, claim.jobId, leaseToken);

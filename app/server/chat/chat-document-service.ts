@@ -274,6 +274,7 @@ export function createPdfIngestor(overrides: Partial<PdfIngestionDependencies> =
       images = await timing.measure(DOCUMENT_INGESTION_STAGES.PDF_IMAGE_ANALYSIS, () => deps.prepareDocumentImages({
         ownerId: input.ownerId,
         conversationId: input.conversationId,
+        jobId: input.jobId,
         documentId: input.pdfId,
         filename: input.filename,
         projectId: input.projectId,
@@ -346,7 +347,12 @@ export async function ingestDocx(input: { ownerId: string; conversationId: strin
     const settled = await timing.measure(DOCUMENT_INGESTION_STAGES.DOCX_IMAGE_ANALYSIS, () => analyzeDocxImagesBounded(
       parsed.images,
       getPdfOcrConcurrency(),
-      (image) => analyzeDocumentImage(image.bytes, image.contentType, input.signal, visionModel).then((analysis) => ({ imageNumber: image.imageNumber, ...analysis })),
+      (image) => analyzeDocumentImage(image.bytes, image.contentType, input.signal, visionModel, {
+        ownerId: input.ownerId,
+        conversationId: input.conversationId,
+        jobId: input.jobId,
+        requestId: `${input.documentId}:image-${image.imageNumber}:analysis`,
+      }).then((analysis) => ({ imageNumber: image.imageNumber, ...analysis })),
       input.onProgress,
     ));
     if (settled.some((result) => result.status === "rejected")) timing.markFailed(DOCUMENT_INGESTION_STAGES.DOCX_IMAGE_ANALYSIS);

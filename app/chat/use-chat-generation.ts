@@ -16,6 +16,7 @@ import type {
 import {
   cancelChatJob,
   streamChatResponse,
+  watchChatJobCost,
 } from "./chat-service";
 import { toChatMessageInput } from "./chat-message-input";
 import { generateChatTitle } from "./chat-title-service";
@@ -503,8 +504,18 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         }
       }
       flushPendingEventsNow();
+      if (effectiveJobId && !controller.signal.aborted) {
+        void watchChatJobCost(conversation.id, effectiveJobId, (streamMetrics) => {
+          inputRefDispatch(input, {
+            type: "UPDATE_MESSAGE",
+            conversationId: conversation.id,
+            messageId: assistantMessage.id,
+            patch: { streamMetrics },
+          });
+        });
+      }
       if (shouldGenerateTitle && !controller.signal.aborted) {
-        void generateChatTitle(content, conversation.id)
+        void generateChatTitle(content, conversation.id, effectiveJobId)
           .then((title) => inputRefDispatch(input, { type: "UPDATE_TITLE", conversationId: conversation.id, title }))
           .catch(() => undefined);
       }

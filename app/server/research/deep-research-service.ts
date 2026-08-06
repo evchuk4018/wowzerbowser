@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { ResearchBudget } from "../../../lib/chat-protocol";
 import { canonicalSourceUrl, sourceForUrl, type ChatSource } from "../../../lib/chat-citations";
 import { searchSelfHosted } from "../search/search-service";
-import { recordUsage } from "../usage/usage-store";
+import { recordPromptUsage } from "../usage/prompt-cost-service";
 import { researchLimits } from "./research-config";
 import { decomposeResearchRequest, extractResearchClaims, verifyResearchClaims } from "./research-model";
 import { fetchResearchPage } from "./research-page-service";
@@ -94,7 +94,7 @@ export async function performDeepResearch(input: {
   const onAnswer = async (answer: ModelAnswer) => {
     budget.modelCalls += 1;
     budget.estimatedCostUsd += answer.exactCostUsd ?? modelReservation;
-    await recordUsage({ ownerId: input.ownerId, provider: "openrouter", model: answer.model, requestKind: "deep_research", requestId: input.jobId, round: budget.modelCalls, usage: answer.usage ?? answer.estimatedUsage, source: answer.usage ? "exact" : "estimated", exactCostUsd: answer.exactCostUsd, unpriced: answer.exactCostUsd === undefined, conversationId: input.conversationId, jobId: input.jobId }).catch(() => undefined);
+    await recordPromptUsage({ ownerId: input.ownerId, provider: "openrouter", model: answer.model, requestKind: "deep_research", requestId: input.jobId, round: budget.modelCalls, usage: answer.usage ?? answer.estimatedUsage, source: answer.usage || answer.exactCostUsd !== undefined ? "exact" : "estimated", exactCostUsd: answer.exactCostUsd, unpriced: answer.exactCostUsd === undefined, conversationId: input.conversationId, jobId: input.jobId }).catch(() => undefined);
   };
 
   const initialMaximum = Math.max(1, Math.min(5, limits.maxSearches));

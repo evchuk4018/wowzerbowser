@@ -30,11 +30,13 @@ export type DocumentImageAnalysisFunction = (
   contentType: ChatImageContentType,
   signal?: AbortSignal,
   visionModel?: string | null,
+  usageContext?: { ownerId: string; conversationId: string; jobId?: string; requestId: string },
 ) => Promise<DocumentImageAnalysis>;
 
 export type PrepareDocumentImagesInput = {
   ownerId: string;
   conversationId: string;
+  jobId?: string;
   documentId: string;
   filename: string;
   projectId?: string;
@@ -84,7 +86,12 @@ async function prepareOne(input: PrepareDocumentImagesInput, candidate: Document
   let analysis: DocumentImageAnalysis | undefined;
   let error: unknown;
   try {
-    analysis = await (input.analyze ?? analyzeDocumentImage)(candidate.bytes, "image/png", input.signal, input.visionModel);
+    analysis = await (input.analyze ?? analyzeDocumentImage)(candidate.bytes, "image/png", input.signal, input.visionModel, {
+      ownerId: input.ownerId,
+      conversationId: input.conversationId,
+      jobId: input.jobId,
+      requestId: `${input.documentId}:${candidate.imageId}:analysis`,
+    });
   } catch (reason) {
     error = reason;
   }
