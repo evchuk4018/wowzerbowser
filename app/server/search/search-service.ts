@@ -9,6 +9,28 @@ import { isSearchCandidateRelevant, scoreSearchCandidate } from "./search-releva
 import { searchProviderWithReliability } from "./search-provider-reliability";
 import { planSearchQueries, type PlannedSearchQuery } from "./search-query-planner";
 import type { SearchCandidate, SearchProviderName, SearchProviderQuery } from "./search-types";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
+
+const MAX_SEARCH_RESULTS = 20;
+type WebSearchLimitKey =
+  | "webSearchMaxResultsGeneral"
+  | "webSearchMaxResultsNews"
+  | "webSearchMaxResultsCommunity"
+  | "webSearchMaxResultsReference";
+
+function configuredSearchMaxResults(focus: SearchFocus): number {
+  const key: WebSearchLimitKey = focus === "news"
+    ? "webSearchMaxResultsNews"
+    : focus === "community"
+      ? "webSearchMaxResultsCommunity"
+      : focus === "reference"
+        ? "webSearchMaxResultsReference"
+        : "webSearchMaxResultsGeneral";
+  const value = (runtimeConfigSnapshot() as unknown as Record<string, unknown>)[key];
+  return typeof value === "number" && Number.isSafeInteger(value)
+    ? Math.max(1, Math.min(MAX_SEARCH_RESULTS, value))
+    : MAX_SEARCH_RESULTS;
+}
 
 export class SearchUnavailableError extends Error {
   constructor(failedProviders: SearchProviderName[] = []) {
@@ -58,7 +80,8 @@ export async function searchSelfHosted(input: {
 }): Promise<SearchCandidate[]> {
   const focus = input.focus ?? "general";
   const queryIndex = input.queryIndex ?? 0;
-  const count = Math.max(1, Math.min(20, input.count ?? 20));
+  const maxResults = configuredSearchMaxResults(focus);
+  const count = Math.max(1, Math.min(maxResults, Number(input.count ?? maxResults) || maxResults));
   const plans: PlannedSearchQuery[] = input.expandQueries
     ? planSearchQueries({
       query: input.query,

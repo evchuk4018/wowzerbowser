@@ -1,17 +1,18 @@
 import "server-only";
 import type { ChatToolCall, ChatToolResult } from "../../../lib/chat-protocol";
-import { documentPageMarkdown, MAX_PDF_PAGES_PER_READ, MAX_PDF_SEARCH_RESULTS } from "../../../lib/chat-document";
+import { documentPageMarkdown } from "../../../lib/chat-document";
 import { MAX_IMAGE_FOLLOWUP_QUESTION_LENGTH } from "../../../lib/chat-image";
 import { getAuthorizedDocument, getDocumentPages } from "../chat/chat-document-store";
 import { inspectDocumentPage } from "../chat/document-page-visual-service";
-import { INSPECT_DOCUMENT_PAGE_TOOL_NAME, PDF_TOOL_DEFINITIONS, READ_PDF_PAGES_TOOL_NAME, SEARCH_PDF_TOOL_NAME } from "./pdf-tool-manifest";
+import { configuredPdfReadMaxPages, configuredPdfSearchMaxResults, INSPECT_DOCUMENT_PAGE_TOOL_NAME, pdfToolDefinitions, READ_PDF_PAGES_TOOL_NAME, SEARCH_PDF_TOOL_NAME } from "./pdf-tool-manifest";
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const safeError = (error: unknown) => (error instanceof Error ? error.message : "Document inspection failed.").slice(0, 1_000);
 
 export function availablePdfTools(hasAuthorizedDocument: boolean, hasAuthorizedPdf = hasAuthorizedDocument) {
   if (!hasAuthorizedDocument) return [];
-  return hasAuthorizedPdf ? PDF_TOOL_DEFINITIONS : PDF_TOOL_DEFINITIONS.filter((tool) => tool.function.name !== INSPECT_DOCUMENT_PAGE_TOOL_NAME);
+  const definitions = pdfToolDefinitions();
+  return hasAuthorizedPdf ? definitions : definitions.filter((tool) => tool.function.name !== INSPECT_DOCUMENT_PAGE_TOOL_NAME);
 }
 
 const fail = (call: ChatToolCall, message: string): ChatToolResult => ({ id: call.id, name: call.name, ok: false, stdout: "", stderr: message });
@@ -47,12 +48,13 @@ export async function executePdfTool(call: ChatToolCall, context: { ownerId: str
     const query = typeof args.query === "string" ? args.query.trim() : ""; if (!query) return fail(call, "query is required.");
     const pages = await getDocumentPages(context.ownerId, context.conversationId, pdfId);
     const needle = query.toLocaleLowerCase();
-    const matches = pages.flatMap((page) => { const lower = page.text.toLocaleLowerCase(); const index = lower.indexOf(needle); if (index < 0) return []; const start = Math.max(0, index - 80); return [{ pageNumber: page.pageNumber, excerpt: page.text.slice(start, index + query.length + 80).replace(/\s+/g, " ").trim() }]; }).slice(0, MAX_PDF_SEARCH_RESULTS);
+    const matches = pages.flatMap((page) => { const lower = page.text.toLocaleLowerCase(); const index = lower.indexOf(needle); if (index < 0) return []; const start = Math.max(0, index - 80); return [{ pageNumber: page.pageNumber, excerpt: page.text.slice(start, index + query.length + 80).replace(/\s+/g, " ").trim() }]; }).slice(0, configuredPdfSearchMaxResults());
     return { id: call.id, name: call.name, ok: true, stdout: JSON.stringify({ results: matches }), stderr: "" };
   }
   if (call.name === READ_PDF_PAGES_TOOL_NAME) {
     const start = args.startPage, end = args.endPage;
-    if (!Number.isInteger(start) || !Number.isInteger(end) || Number(start) < 1 || Number(end) < Number(start) || Number(end) - Number(start) + 1 > MAX_PDF_PAGES_PER_READ) return fail(call, `Use a valid, ordered range of at most ${MAX_PDF_PAGES_PER_READ} pages.`);
+    const maxPages = configuredPdfReadMaxPages();
+    if (!Number.isInteger(start) || !Number.isInteger(end) || Number(start) < 1 || Number(end) < Number(start) || Number(end) - Number(start) + 1 > maxPages) return fail(call, `Use a valid, ordered range of at most ${maxPages} pages.`);
     const document = await getAuthorizedDocument(context.ownerId, context.conversationId, pdfId);
     if (!document || Number(end) > document.pageCount) return fail(call, "The requested page range is outside this document.");
     const pages = await getDocumentPages(context.ownerId, context.conversationId, pdfId, Number(start), Number(end));

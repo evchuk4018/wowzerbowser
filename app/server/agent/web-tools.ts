@@ -17,14 +17,55 @@ const MAX_SNIPPET = CHAT_SOURCE_SNIPPET_MAX_LENGTH;
 const MAX_MARKDOWN = 24_000;
 const MAX_TIME_ZONE = 100;
 const MAX_LOCATION = 300;
+type WebSearchLimitKey =
+  | "webSearchMaxResultsGeneral"
+  | "webSearchMaxResultsNews"
+  | "webSearchMaxResultsCommunity"
+  | "webSearchMaxResultsReference";
 
-export const WEB_TOOL_DEFINITIONS = [
-  { type: "function" as const, function: { name: WEB_SEARCH_TOOL_NAME, description: "Search the web for concise, current result snippets. The search may use a small number of intent-targeted queries when freshness, ambiguity, recommendations, or community evidence justify it.", parameters: { type: "object", additionalProperties: false, required: ["query"], properties: { query: { type: "string", minLength: 1, maxLength: 400 }, count: { type: "integer", minimum: 1, maximum: MAX_RESULTS }, focus: { type: "string", enum: ["general", "news", "community", "reference"] }, freshness: { type: "string", enum: ["day", "week", "month", "year"] } } } } },
-  { type: "function" as const, function: { name: FETCH_PAGE_TOOL_NAME, description: "Read a specific public web page as bounded Markdown. Use a URL returned by web_search or explicitly supplied by the user; do not guess undocumented paths.", parameters: { type: "object", additionalProperties: false, required: ["url"], properties: { url: { type: "string", minLength: 1, maxLength: 2_000, format: "uri" } } } } },
-  { type: "function" as const, function: { name: CHECK_TIME_TOOL_NAME, description: "Check the current server time, optionally in an IANA time zone.", parameters: { type: "object", additionalProperties: false, properties: { timeZone: { type: "string", minLength: 1, maxLength: MAX_TIME_ZONE } } } } },
-  { type: "function" as const, function: { name: CHECK_DATE_TOOL_NAME, description: "Check the current server calendar date, optionally in an IANA time zone.", parameters: { type: "object", additionalProperties: false, properties: { timeZone: { type: "string", minLength: 1, maxLength: MAX_TIME_ZONE } } } } },
-  { type: "function" as const, function: { name: CHECK_LOCATION_TOOL_NAME, description: "Check the configured coarse deployment location. This does not locate the user.", parameters: { type: "object", additionalProperties: false, properties: {} } } },
-] as const;
+function configuredLimit(key: WebSearchLimitKey | "webFetchMaxMarkdownCharacters", fallback: number, hardCap: number): number {
+  const value = (runtimeConfigSnapshot() as unknown as Record<string, unknown>)[key];
+  return typeof value === "number" && Number.isSafeInteger(value)
+    ? Math.max(1, Math.min(hardCap, value))
+    : fallback;
+}
+
+function webSearchMaxResults(focus: SearchFocus): number {
+  const key: WebSearchLimitKey = focus === "news"
+    ? "webSearchMaxResultsNews"
+    : focus === "community"
+      ? "webSearchMaxResultsCommunity"
+      : focus === "reference"
+        ? "webSearchMaxResultsReference"
+        : "webSearchMaxResultsGeneral";
+  return configuredLimit(key, MAX_RESULTS, MAX_RESULTS);
+}
+
+function webSearchSchemaMaxResults(): number {
+  return Math.max(
+    webSearchMaxResults("general"),
+    webSearchMaxResults("news"),
+    webSearchMaxResults("community"),
+    webSearchMaxResults("reference"),
+  );
+}
+
+function webFetchMaxMarkdownCharacters(): number {
+  return configuredLimit("webFetchMaxMarkdownCharacters", MAX_MARKDOWN, MAX_MARKDOWN);
+}
+
+function webToolDefinitions() {
+  const searchMaximum = webSearchSchemaMaxResults();
+  return [
+    { type: "function" as const, function: { name: WEB_SEARCH_TOOL_NAME, description: "Search the web for concise, current result snippets. The active result limit is focus-specific and bounded for safety. The search may use a small number of intent-targeted queries when freshness, ambiguity, recommendations, or community evidence justify it.", parameters: { type: "object", additionalProperties: false, required: ["query"], properties: { query: { type: "string", minLength: 1, maxLength: 400 }, count: { type: "integer", minimum: 1, maximum: searchMaximum }, focus: { type: "string", enum: ["general", "news", "community", "reference"] }, freshness: { type: "string", enum: ["day", "week", "month", "year"] } } } } },
+    { type: "function" as const, function: { name: FETCH_PAGE_TOOL_NAME, description: "Read a specific public web page as bounded Markdown. The active Markdown output limit is configurable within a hard safety cap. Use a URL returned by web_search or explicitly supplied by the user; do not guess undocumented paths.", parameters: { type: "object", additionalProperties: false, required: ["url"], properties: { url: { type: "string", minLength: 1, maxLength: 2_000, format: "uri" } } } } },
+    { type: "function" as const, function: { name: CHECK_TIME_TOOL_NAME, description: "Check the current server time, optionally in an IANA time zone.", parameters: { type: "object", additionalProperties: false, properties: { timeZone: { type: "string", minLength: 1, maxLength: MAX_TIME_ZONE } } } } },
+    { type: "function" as const, function: { name: CHECK_DATE_TOOL_NAME, description: "Check the current server calendar date, optionally in an IANA time zone.", parameters: { type: "object", additionalProperties: false, properties: { timeZone: { type: "string", minLength: 1, maxLength: MAX_TIME_ZONE } } } } },
+    { type: "function" as const, function: { name: CHECK_LOCATION_TOOL_NAME, description: "Check the configured coarse deployment location. This does not locate the user.", parameters: { type: "object", additionalProperties: false, properties: {} } } },
+  ] as const;
+}
+
+export const WEB_TOOL_DEFINITIONS = webToolDefinitions();
 
 function configuredLocation(): string | undefined {
   const location = runtimeConfigSnapshot().deploymentLocation.trim().slice(0, MAX_LOCATION);
@@ -32,7 +73,8 @@ function configuredLocation(): string | undefined {
 }
 
 export function availableWebTools() {
-  return WEB_TOOL_DEFINITIONS.filter((tool) => {
+  const definitions = webToolDefinitions();
+  return definitions.filter((tool) => {
     switch (tool.function.name) {
       case WEB_SEARCH_TOOL_NAME: return configuredSearchStack();
       case FETCH_PAGE_TOOL_NAME: return configuredSearchStack();
@@ -119,9 +161,12 @@ export async function executeWebTool(call: ChatToolCall, signal?: AbortSignal): 
     }
     if (call.name === WEB_SEARCH_TOOL_NAME) {
       requireOnly(input, ["query", "q", "count", "focus", "freshness"], call.name);
-      const query = searchQuery(input); const count = Math.max(1, Math.min(MAX_RESULTS, Number(input.count) || MAX_RESULTS));
+      const query = searchQuery(input);
+      const focus = searchFocus(input, call.name);
+      const maxResults = webSearchMaxResults(focus);
+      const count = Math.max(1, Math.min(maxResults, Number(input.count) || maxResults));
       if (!query) throw new Error("web_search requires a query.");
-      const results = (await searchSelfHosted({ query, count, focus: searchFocus(input, call.name), freshness: searchFreshness(input, call.name), expandQueries: true, signal })).map(({ id, title, url, snippet, publisher, publishedAt }) => ({
+      const results = (await searchSelfHosted({ query, count, focus, freshness: searchFreshness(input, call.name), expandQueries: true, signal })).map(({ id, title, url, snippet, publisher, publishedAt }) => ({
         id,
         title,
         url,
@@ -135,7 +180,7 @@ export async function executeWebTool(call: ChatToolCall, signal?: AbortSignal): 
       requireOnly(input, ["url"], call.name);
       const url = text(input.url, 2_000); if (!/^https?:\/\//i.test(url)) throw new Error("fetch_page requires an http(s) URL.");
       const fetched = await fetchResearchPage(url, signal);
-      const markdown = fetched.page.markdown.slice(0, MAX_MARKDOWN);
+      const markdown = fetched.page.markdown.slice(0, webFetchMaxMarkdownCharacters());
       return { id: call.id, name: call.name, ok: true, stdout: "", stderr: "", durationMs: Date.now() - startedAt, web: { kind: "page", source: sourceForUrl({ title: fetched.page.source.title, url: fetched.page.source.url, snippet: markdown.slice(0, MAX_SNIPPET), publishedAt: fetched.page.source.publishedAt }), markdown } };
     }
     throw new Error(`Unknown tool: ${call.name}`);

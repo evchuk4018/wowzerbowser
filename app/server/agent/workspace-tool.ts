@@ -13,6 +13,7 @@ import {
   WORKSPACE_READ_TOOL_NAME,
   WORKSPACE_SEARCH_TOOL_NAME,
   WORKSPACE_WRITE_TOOL_NAME,
+  configuredWorkspaceSearchDefaultResults,
 } from "./workspace-tool-manifest";
 
 export { WORKSPACE_TOOL_DEFINITIONS } from "./workspace-tool-manifest";
@@ -195,7 +196,7 @@ export async function executeWorkspaceTool(call: ChatToolCall, context: Workspac
     if (call.name === WORKSPACE_SEARCH_TOOL_NAME) {
       const query = boundedString(input.query, "query", WORKSPACE_LIMITS.maxSearchQueryLength, true)!;
       const root = optionalDirectoryPath(input.path, "path");
-      const maxResults = boundedInteger(input.maxResults, "maxResults", 1, WORKSPACE_LIMITS.maxSearchResults, 50);
+      const maxResults = boundedInteger(input.maxResults, "maxResults", 1, WORKSPACE_LIMITS.maxSearchResults, configuredWorkspaceSearchDefaultResults());
       const matches = await searchWorkspace(context.executor, query, root, maxResults);
       return { id: call.id, name: call.name, ok: true, stdout: json(matches), stderr: "", durationMs: Date.now() - startedAt };
     }

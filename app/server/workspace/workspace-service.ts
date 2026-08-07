@@ -5,10 +5,18 @@ import { isValidConversationId } from "../../../lib/chat-conversation-id";
 import { WORKSPACE_LIMITS, workspaceFileFor, workspacePath, type WorkspaceFile, type WorkspaceSearchMatch } from "../../../lib/workspace-protocol";
 import { LocalPythonExecutor } from "../python/local-python-executor";
 import { query } from "../database/database";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
 const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+
+function workspaceSearchDefaultResults(): number {
+  const value = (runtimeConfigSnapshot() as unknown as Record<string, unknown>).workspaceSearchDefaultResults;
+  return typeof value === "number" && Number.isSafeInteger(value)
+    ? Math.max(1, Math.min(WORKSPACE_LIMITS.maxSearchResults, value))
+    : 50;
+}
 
 export class WorkspaceRequestError extends Error {
   constructor(readonly status: number, message: string) {
@@ -95,10 +103,10 @@ export async function readWorkspaceAsset(ownerId: string, conversationId: string
   });
 }
 
-export async function searchWorkspaceFiles(ownerId: string, conversationId: string, query: string, root = "", maxResults = 50): Promise<WorkspaceSearchMatch[]> {
+export async function searchWorkspaceFiles(ownerId: string, conversationId: string, query: string, root = "", maxResults = workspaceSearchDefaultResults()): Promise<WorkspaceSearchMatch[]> {
   if (!query.trim() || query.length > WORKSPACE_LIMITS.maxSearchQueryLength) throw new WorkspaceRequestError(400, "Search query is invalid.");
   const normalizedRoot = root ? workspacePath(root) : "";
-  const limit = Number.isSafeInteger(maxResults) ? Math.min(Math.max(maxResults, 1), WORKSPACE_LIMITS.maxSearchResults) : 50;
+  const limit = Number.isSafeInteger(maxResults) ? Math.min(Math.max(maxResults, 1), WORKSPACE_LIMITS.maxSearchResults) : workspaceSearchDefaultResults();
   return withWorkspace(ownerId, conversationId, async (executor) => {
     const files = await executor.listWorkspaceTree(normalizedRoot);
     const needle = query.toLocaleLowerCase();
