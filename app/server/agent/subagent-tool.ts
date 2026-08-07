@@ -2,11 +2,13 @@ import "server-only";
 
 import type { ChatArtifact, ChatStreamEvent, ChatToolCall, ChatToolResult } from "../../../lib/chat-protocol";
 import type { ChatSource } from "../../../lib/chat-citations";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 
-const MAX_TASK_LENGTH = 12_000;
-const MAX_CONTEXT_LENGTH = 16_000;
-const MAX_OUTPUT_LENGTH = 40_000;
-const MAX_SOURCES = 40;
+const MAX_SAFE_TASK_LENGTH = 50_000;
+const MAX_SAFE_CONTEXT_LENGTH = 100_000;
+const MAX_SAFE_OUTPUT_LENGTH = 250_000;
+const MAX_SAFE_SOURCES = 200;
+const MAX_SAFE_ARTIFACTS = 100;
 
 export type SubagentRunRequest = {
   task: string;
@@ -41,6 +43,9 @@ function fail(call: ChatToolCall, stderr: string, durationMs?: number): ChatTool
 }
 
 function parseArguments(call: ChatToolCall): { task: string; context?: string } {
+  const configuration = runtimeConfigSnapshot();
+  const maxTaskLength = Math.min(configuration.subagentMaxTaskCharacters, MAX_SAFE_TASK_LENGTH);
+  const maxContextLength = Math.min(configuration.subagentMaxContextCharacters, MAX_SAFE_CONTEXT_LENGTH);
   let value: unknown;
   try {
     value = JSON.parse(call.arguments || "{}");
@@ -49,11 +54,11 @@ function parseArguments(call: ChatToolCall): { task: string; context?: string } 
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid subagent arguments.");
   const input = value as Record<string, unknown>;
-  if (typeof input.task !== "string" || !input.task.trim() || input.task.trim().length > MAX_TASK_LENGTH) {
-    throw new Error("task is required and must be at most 12,000 characters.");
+  if (typeof input.task !== "string" || !input.task.trim() || input.task.trim().length > maxTaskLength) {
+    throw new Error(`task is required and must be at most ${maxTaskLength.toLocaleString()} characters.`);
   }
-  if (input.context !== undefined && (typeof input.context !== "string" || input.context.length > MAX_CONTEXT_LENGTH)) {
-    throw new Error("context must be a string of at most 16,000 characters.");
+  if (input.context !== undefined && (typeof input.context !== "string" || input.context.length > maxContextLength)) {
+    throw new Error(`context must be a string of at most ${maxContextLength.toLocaleString()} characters.`);
   }
   return {
     task: input.task.trim(),
@@ -100,22 +105,28 @@ export async function executeSubagentTool(call: ChatToolCall, context: SubagentT
         // Activity presentation is best effort.
       }
     });
-    const stdout = result.stdout.slice(0, MAX_OUTPUT_LENGTH);
+    const configuration = runtimeConfigSnapshot();
+    const maxOutputLength = Math.min(configuration.subagentMaxOutputCharacters, MAX_SAFE_OUTPUT_LENGTH);
+    const maxSources = Math.min(configuration.subagentMaxSources, MAX_SAFE_SOURCES);
+    const maxArtifacts = Math.min(configuration.subagentMaxArtifacts, MAX_SAFE_ARTIFACTS);
+    const stdout = result.stdout.slice(0, maxOutputLength);
+    const stderr = (result.stderr ?? "").slice(0, maxOutputLength);
     await update(result.ok ? "completed" : "failed", result.ok ? "Delegated task complete." : result.stderr?.slice(0, 240) || "Delegated task failed.");
     return {
       id: call.id,
       name: call.name,
       ok: result.ok,
       stdout,
-      stderr: result.stderr ?? "",
+      stderr,
       durationMs: Date.now() - startedAt,
-      ...(result.stdout.length > MAX_OUTPUT_LENGTH ? { stdoutTruncated: true } : {}),
-      ...(result.artifacts?.length ? { artifacts: result.artifacts.slice(0, 20) } : {}),
+      ...(result.stdout.length > maxOutputLength ? { stdoutTruncated: true } : {}),
+      ...(result.stderr && result.stderr.length > stderr.length ? { stderrTruncated: true } : {}),
+      ...(result.artifacts?.length ? { artifacts: result.artifacts.slice(0, maxArtifacts) } : {}),
       subagent: {
         kind: "delegation",
         taskId: call.id,
         title,
-        sources: (result.sources ?? []).slice(0, MAX_SOURCES),
+        sources: (result.sources ?? []).slice(0, maxSources),
       },
     };
   } catch (error) {

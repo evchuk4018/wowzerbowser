@@ -42,6 +42,7 @@ import { recordPromptUsage } from "../server/usage/prompt-cost-service";
 import { TODO_TOOL_DEFINITIONS, executeTodoTool } from "../server/agent/todo-tool";
 import { getTodoList } from "../server/chat/chat-todo-store";
 import { planTodos } from "../server/chat/chat-todo-planner";
+import { runtimeConfigSnapshot } from "../server/config/runtime-config-service";
 import { listOwnerSkills } from "../server/skills/skill-service";
 import { skillCatalogInstructions } from "../server/agent/skill-instructions";
 import { executeReadSkillTool } from "../server/agent/skill-tool";
@@ -53,14 +54,14 @@ import { COMPLETE_AUTOMATION_RUN_TOOL_DEFINITION, COMPLETE_AUTOMATION_RUN_TOOL_N
 import { availableDeepResearchTools } from "../server/agent/deep-research-tool-manifest";
 import { executeDeepResearchTool } from "../server/agent/deep-research-tool";
 import { deepResearchInstructionsFor } from "../server/agent/deep-research-tool-instructions";
-import { RUN_SUBAGENT_TOOL_DEFINITION, RUN_SUBAGENT_TOOL_NAME } from "../server/agent/subagent-tool-manifest";
+import { RUN_SUBAGENT_TOOL_NAME, subagentToolDefinition } from "../server/agent/subagent-tool-manifest";
 import { executeSubagentTool } from "../server/agent/subagent-tool";
 import { SUBAGENT_CHILD_INSTRUCTIONS, SUBAGENT_TOOL_INSTRUCTIONS } from "../server/agent/subagent-tool-instructions";
 import type { ResearchRun } from "../server/research/research-types";
 import { compileFocusedContext, type FocusedContextPlan, type FocusedToolGroup } from "../server/chat/focused-context";
 import {
   CURRENT_CHAT_CONTEXT_TOOL_INSTRUCTIONS,
-  SEARCH_CURRENT_CHAT_TOOL_DEFINITION,
+  currentChatContextToolDefinition,
   SEARCH_CURRENT_CHAT_TOOL_NAME,
 } from "../server/agent/current-chat-context-tool-manifest";
 import { executeCurrentChatContextTool } from "../server/agent/current-chat-context-tool";
@@ -323,20 +324,22 @@ export async function generateChatResponse(
   const skillTools = selected("skills") && !automationExecution ? SKILL_TOOL_DEFINITIONS : [];
   const todoTools = selected("todos") && !automationExecution && (planner.plannedThisTurn || Boolean(planner.list?.items.length)) ? TODO_TOOL_DEFINITIONS : [];
   const automationResultTools = selected("automation-result") && automationExecution ? [COMPLETE_AUTOMATION_RUN_TOOL_DEFINITION] : [];
-  const contextTools = focusedPlan?.searchEntries.length ? [SEARCH_CURRENT_CHAT_TOOL_DEFINITION] : [];
-  const pagesForInlineDocument = createInlineDocumentPageLoader((document) => getDocumentPages(ownerId, conversationId, document.id));
+  const contextTools = focusedPlan?.searchEntries.length ? [currentChatContextToolDefinition()] : [];
+  const configuration = runtimeConfigSnapshot();
+  const documentContextLimits = { maxInlineTokens: configuration.documentInlineMaxTokens, maxInlinePages: configuration.documentInlineMaxPages };
+  const pagesForInlineDocument = createInlineDocumentPageLoader((document) => getDocumentPages(ownerId, conversationId, document.id), documentContextLimits);
   const contextualMessages = await Promise.all(chatRequest.messages.map(async (message) => {
     const documents = (message.documents ?? []).filter((item) => allowedPdfIds.has(item.id));
     if (!documents.length) return message;
     const contexts = await Promise.all(documents.map(async ({ id }) => {
       const document = authoritativePdfs.get(id)!;
-      return documentContext(document, await pagesForInlineDocument(document));
+      return documentContext(document, await pagesForInlineDocument(document), documentContextLimits);
     }));
     return { ...message, content: `${message.content}\n\n${contexts.join("\n\n")}` };
   }));
   chatRequest = { ...chatRequest, messages: contextualMessages };
   const allowedProjectIds = new Set([...authoritativePdfs.values()].map((document) => document.projectId).filter((projectId): projectId is string => Boolean(projectId)));
-  const baseToolDefinitions = [...activePythonTools, ...activeWorkspaceTools, ...activeImageTools, ...activeWebTools, ...activeDeepResearchTools, ...pdfEditTools, ...activePhaseTools, ...customDefinitions, ...activeChatMemoryTools, ...activeUserMemoryTools, ...skillTools, ...todoTools, ...automationResultTools, ...contextTools, ...(connectorDiscoveryAvailable && selected("connectors") ? [SEARCH_CONNECTOR_TOOLS_DEFINITION] : []), ...(subagentExecution ? [] : [RUN_SUBAGENT_TOOL_DEFINITION])];
+  const baseToolDefinitions = [...activePythonTools, ...activeWorkspaceTools, ...activeImageTools, ...activeWebTools, ...activeDeepResearchTools, ...pdfEditTools, ...activePhaseTools, ...customDefinitions, ...activeChatMemoryTools, ...activeUserMemoryTools, ...skillTools, ...todoTools, ...automationResultTools, ...contextTools, ...(connectorDiscoveryAvailable && selected("connectors") ? [SEARCH_CONNECTOR_TOOLS_DEFINITION] : []), ...(subagentExecution ? [] : [subagentToolDefinition()])];
   const imageToolAdvertised = activeImageTools.some((tool) => tool.function.name === INSPECT_IMAGE_TOOL_NAME);
 
   const enqueue = async (event: ChatStreamEvent) => {
@@ -555,8 +558,8 @@ export async function generateChatResponse(
               ok: childErrors.length === 0,
               stdout: stdout || (stderr ? "" : "Delegated task completed without a textual summary."),
               ...(stderr ? { stderr } : {}),
-              ...(childArtifacts.length ? { artifacts: [...new Map(childArtifacts.map((artifact) => [artifact.id, artifact])).values()].slice(0, 20) } : {}),
-              sources: validCitationSources([...childSourceCatalog.values()]).slice(0, 40),
+              ...(childArtifacts.length ? { artifacts: [...new Map(childArtifacts.map((artifact) => [artifact.id, artifact])).values()].slice(0, Math.min(configuration.subagentMaxArtifacts, 100)) } : {}),
+              sources: validCitationSources([...childSourceCatalog.values()]).slice(0, Math.min(configuration.subagentMaxSources, 200)),
             };
           };
           await enqueue({ type: "round", round });

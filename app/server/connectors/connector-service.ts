@@ -13,6 +13,7 @@ import {
   updateTool, upsertDefinition, upsertTools, type ConnectorConnectionRow, type ConnectorDefinitionRow, type ConnectorToolRow,
 } from "./connector-repository";
 import type { ConnectorProvider, ConnectorProviderContext } from "./connector-types";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 
 const managed = new ManagedConnectorProvider((id) => connectorManifest(id));
 const remoteMcp = new RemoteMcpProvider();
@@ -167,7 +168,7 @@ export async function searchConnectorTools(ownerId: string, query: string, conne
       if (score || queryWords.size === 0) matches.push(tool);
     }
   }
-  const limited = matches.slice(0, 12);
+  const limited = matches.slice(0, Math.min(runtimeConfigSnapshot().connectorSearchMaxResults, 100));
   const grouped = new Map<string, { connectorId: string; connectorName: string; tools: ConnectorTool[] }>();
   for (const tool of limited) {
     const item = catalog.find((candidate) => candidate.id === tool.connectorId);

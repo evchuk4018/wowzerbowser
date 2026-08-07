@@ -11,7 +11,7 @@ import { planSearchQueries, type PlannedSearchQuery } from "./search-query-plann
 import type { SearchCandidate, SearchProviderName, SearchProviderQuery } from "./search-types";
 import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 
-const MAX_SEARCH_RESULTS = 20;
+const MAX_SEARCH_RESULTS = 50;
 type WebSearchLimitKey =
   | "webSearchMaxResultsGeneral"
   | "webSearchMaxResultsNews"

@@ -107,7 +107,7 @@ test("Qwen task wrappers preserve title, summary, reasoning, and recall limits",
   assert.equal(bodies[0].max_tokens, 24);
   assert.equal(bodies[1].max_tokens, 512);
   assert.equal(bodies[2].max_tokens, 32);
-  assert.equal(bodies[3].max_tokens, undefined);
+  assert.equal(bodies[3].max_tokens, 2_000);
   for (const body of bodies) {
     assert.deepEqual(body.models, [OPENROUTER_QWEN_FLASH_MODEL, OPENROUTER_DEEPSEEK_FLASH_MODEL]);
     assert.equal(body.model, undefined);

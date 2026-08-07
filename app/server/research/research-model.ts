@@ -3,6 +3,7 @@ import { completeOpenRouterQwenText } from "../../providers/openrouter/openroute
 import type { QwenTextOptionsForResearch } from "../../providers/openrouter/openrouter-qwen-text-adapter";
 import type { ResearchClaim } from "../../../lib/chat-protocol";
 import type { ResearchQuery } from "./research-types";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 
 type Answer = Awaited<ReturnType<typeof completeOpenRouterQwenText>>;
 export type ResearchReasoningDelta = (delta: string) => Promise<void> | void;
@@ -22,10 +23,11 @@ function streamingOptions(signal: AbortSignal | undefined, onReasoningDelta: Res
 }
 
 export async function decomposeResearchRequest(request: string, maximum: number, signal: AbortSignal | undefined, onAnswer: (answer: Answer) => Promise<void>, onReasoningDelta?: ResearchReasoningDelta): Promise<ResearchQuery[]> {
+  const configuration = runtimeConfigSnapshot();
   const answer = await completeOpenRouterQwenText(request.slice(0, 20_000), {
     ...streamingOptions(signal, onReasoningDelta),
-    timeoutMs: 20_000,
-    maxTokens: 900,
+    timeoutMs: Math.min(configuration.deepResearchQueryPlannerTimeoutMs, 120_000),
+    maxTokens: Math.min(configuration.deepResearchQueryPlannerMaxOutputTokens, 4_000),
     systemPrompt: `Return strict JSON {"queries":[{"query":"...","intent":"official|recent|analysis|community|contradicting|academic|developer","freshness":"day|week|month|year"}]}. Create ${Math.min(5, maximum)} to ${maximum} targeted queries. Collectively cover primary/official sources, recent information, independent analysis, community anecdotes, and contradicting evidence. Use academic or developer intents when relevant. No markdown.`,
   });
   await onAnswer(answer);
@@ -39,10 +41,11 @@ export async function decomposeResearchRequest(request: string, maximum: number,
 }
 
 export async function extractResearchClaims(request: string, evidence: string, signal: AbortSignal | undefined, onAnswer: (answer: Answer) => Promise<void>, onReasoningDelta?: ResearchReasoningDelta): Promise<ResearchClaim[]> {
+  const configuration = runtimeConfigSnapshot();
   const answer = await completeOpenRouterQwenText(`<request>${request}</request>\n<evidence>${evidence}</evidence>`, {
     ...streamingOptions(signal, onReasoningDelta),
-    timeoutMs: 25_000,
-    maxTokens: 2_500,
+    timeoutMs: Math.min(configuration.deepResearchClaimTimeoutMs, 120_000),
+    maxTokens: Math.min(configuration.deepResearchClaimMaxOutputTokens, 8_000),
     systemPrompt: 'Extract only material claims supported by the evidence. Return strict JSON {"claims":[{"id":"claim-1","claim":"...","supportingSourceIds":["src_..."],"conflictingSourceIds":[],"dates":[],"confidence":"high|medium|low","status":"supported|weak|conflicting|outdated"}]}. Preserve exact source ids. Identify conflicts instead of merging them away. No markdown.',
   });
   await onAnswer(answer);
@@ -50,10 +53,11 @@ export async function extractResearchClaims(request: string, evidence: string, s
 }
 
 export async function verifyResearchClaims(request: string, claims: ResearchClaim[], evidence: string, signal: AbortSignal | undefined, onAnswer: (answer: Answer) => Promise<void>, onReasoningDelta?: ResearchReasoningDelta): Promise<{ claims: ResearchClaim[]; followUpQueries: ResearchQuery[] }> {
+  const configuration = runtimeConfigSnapshot();
   const answer = await completeOpenRouterQwenText(`<request>${request}</request>\n<claims>${JSON.stringify(claims)}</claims>\n<evidence>${evidence}</evidence>`, {
     ...streamingOptions(signal, onReasoningDelta),
-    timeoutMs: 25_000,
-    maxTokens: 2_500,
+    timeoutMs: Math.min(configuration.deepResearchClaimTimeoutMs, 120_000),
+    maxTokens: Math.min(configuration.deepResearchClaimMaxOutputTokens, 8_000),
     systemPrompt: 'Verify every claim against the evidence. Downgrade unsupported or outdated claims and expose conflicts. Return strict JSON {"claims":[same schema],"followUpQueries":[{"query":"...","intent":"official|recent|analysis|community|contradicting|academic|developer"}]}. Return at most two follow-up queries only for consequential gaps or conflicts. Preserve exact source ids. No markdown.',
   });
   await onAnswer(answer);
@@ -65,12 +69,13 @@ export async function verifyResearchClaims(request: string, claims: ResearchClai
       const item = value && typeof value === "object" ? value as Record<string, unknown> : {};
       const intent = ["official", "recent", "analysis", "community", "contradicting", "academic", "developer"].includes(String(item.intent)) ? item.intent as ResearchQuery["intent"] : "contradicting";
       return typeof item.query === "string" && item.query.trim() ? { query: item.query.trim().slice(0, 400), intent } : null;
-    }).filter((item): item is ResearchQuery => Boolean(item)).slice(0, 2),
+    }).filter((item): item is ResearchQuery => Boolean(item)).slice(0, Math.min(configuration.deepResearchMaxFollowUpSearches, 2)),
   };
 }
 
 function normalizeClaims(value: unknown): ResearchClaim[] {
   if (!Array.isArray(value)) return [];
+  const maximum = Math.min(runtimeConfigSnapshot().deepResearchMaxClaims, 200);
   return value.map((entry, index) => {
     const item = entry && typeof entry === "object" ? entry as Record<string, unknown> : {};
     const claim = typeof item.claim === "string" ? item.claim.trim().slice(0, 2_000) : "";
@@ -78,5 +83,5 @@ function normalizeClaims(value: unknown): ResearchClaim[] {
     const confidence = ["high", "medium", "low"].includes(String(item.confidence)) ? item.confidence as ResearchClaim["confidence"] : "low";
     const status = ["supported", "weak", "conflicting", "outdated"].includes(String(item.status)) ? item.status as ResearchClaim["status"] : "weak";
     return { id: typeof item.id === "string" ? item.id.slice(0, 64) : `claim-${index + 1}`, claim, supportingSourceIds: strings(item.supportingSourceIds), conflictingSourceIds: strings(item.conflictingSourceIds), dates: strings(item.dates, 10), confidence, status };
-  }).filter((item): item is ResearchClaim => Boolean(item)).slice(0, 50);
+  }).filter((item): item is ResearchClaim => Boolean(item)).slice(0, maximum);
 }

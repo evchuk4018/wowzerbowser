@@ -1,12 +1,7 @@
 import "server-only";
 
 import type { ChatUsage } from "../../../lib/chat-protocol";
-import { CHAT_RECALL_TIMEOUT_MS } from "../../../lib/chat-recall";
-import {
-  CHAT_SUMMARY_MAX_OUTPUT_TOKENS,
-  CHAT_SUMMARY_TIMEOUT_MS,
-  type ChatSummaryAnswer,
-} from "../../../lib/chat-summary";
+import type { ChatSummaryAnswer } from "../../../lib/chat-summary";
 import { estimateUsageFromText } from "../../../lib/usage-pricing";
 import {
   OPENROUTER_BASE_URL,
@@ -16,6 +11,7 @@ import {
   openRouterHeaders,
 } from "./openrouter-config";
 import { OpenRouterError } from "./openrouter-catalog-adapter";
+import { runtimeConfigSnapshot } from "../../server/config/runtime-config-service";
 
 export { OPENROUTER_QWEN_FLASH_MODEL };
 export const QWEN_REASONING_SUMMARY_MAX_OUTPUT_TOKENS = 32;
@@ -283,11 +279,12 @@ export async function generateQwenTitle(
   persistUsage?: (usage: QwenTitleUsage) => Promise<void>,
   options: Pick<QwenTextOptions, "fetchImpl" | "signal" | "timeoutMs"> = {},
 ): Promise<string> {
+  const configuration = runtimeConfigSnapshot();
   const answer = await completeOpenRouterQwenText(firstTurn, {
     systemPrompt: "Name this chat from the user's first turn. Return only a concise title of 2 to 5 words, with no quotation marks or punctuation.",
     ...options,
-    timeoutMs: options.timeoutMs ?? QWEN_TITLE_TIMEOUT_MS,
-    maxTokens: QWEN_TITLE_MAX_OUTPUT_TOKENS,
+    timeoutMs: options.timeoutMs ?? Math.min(configuration.chatTitleTimeoutMs, 60_000),
+    maxTokens: Math.min(configuration.chatTitleMaxOutputTokens, 128),
   });
   await persistUsage?.({
     provider: "openrouter",
@@ -299,17 +296,18 @@ export async function generateQwenTitle(
   return cleanTitle(answer.content);
 }
 
-export type QwenChatSummaryOptions = { signal?: AbortSignal; fetchImpl?: typeof fetch; timeoutMs?: number };
+export type QwenChatSummaryOptions = { signal?: AbortSignal; fetchImpl?: typeof fetch; timeoutMs?: number; maxTokens?: number };
 
 export async function summarizeChatWithQwen(
   prompt: string,
   options: QwenChatSummaryOptions = {},
 ): Promise<ChatSummaryAnswer> {
+  const configuration = runtimeConfigSnapshot();
   const answer = await completeOpenRouterQwenText(prompt, {
     signal: options.signal,
     fetchImpl: options.fetchImpl,
-    timeoutMs: options.timeoutMs ?? CHAT_SUMMARY_TIMEOUT_MS,
-    maxTokens: CHAT_SUMMARY_MAX_OUTPUT_TOKENS,
+    timeoutMs: options.timeoutMs ?? Math.min(configuration.chatSummaryTimeoutMs, 120_000),
+    maxTokens: options.maxTokens ?? Math.min(configuration.chatSummaryMaxOutputTokens, 4_000),
   });
   return {
     summary: answer.content,
@@ -326,10 +324,12 @@ export async function summarizeReasoningWithQwenFlash(
   signal?: AbortSignal,
   options: Pick<QwenTextOptions, "fetchImpl" | "timeoutMs"> = {},
 ): Promise<QwenReasoningSummaryAnswer> {
+  const configuration = runtimeConfigSnapshot();
   const answer = await completeOpenRouterQwenText(prompt, {
     signal,
     ...options,
-    maxTokens: QWEN_REASONING_SUMMARY_MAX_OUTPUT_TOKENS,
+    timeoutMs: options.timeoutMs ?? Math.min(configuration.reasoningSummaryTimeoutMs, 60_000),
+    maxTokens: Math.min(configuration.reasoningSummaryMaxOutputTokens, 256),
   });
   return {
     summary: answer.content,
@@ -344,7 +344,7 @@ export async function summarizeReasoningWithQwenFlash(
 export async function recallChatWithQwen(
   context: string,
   prompt: string,
-  options: { signal?: AbortSignal; fetchImpl?: typeof fetch; timeoutMs?: number } = {},
+  options: { signal?: AbortSignal; fetchImpl?: typeof fetch; timeoutMs?: number; maxTokens?: number } = {},
 ): Promise<QwenChatRecallAnswer> {
   const responsePrompt = [
     "Answer the user's question using only the private conversation data below.",
@@ -353,10 +353,12 @@ export async function recallChatWithQwen(
     `<conversation-data>\n${context}\n</conversation-data>`,
     `<question>\n${prompt}\n</question>`,
   ].join("\n\n");
+  const configuration = runtimeConfigSnapshot();
   const answer = await completeOpenRouterQwenText(responsePrompt, {
     signal: options.signal,
     fetchImpl: options.fetchImpl,
-    timeoutMs: options.timeoutMs ?? CHAT_RECALL_TIMEOUT_MS,
+    timeoutMs: options.timeoutMs ?? Math.min(configuration.chatMemoryRecallTimeoutMs, 120_000),
+    maxTokens: options.maxTokens ?? Math.min(configuration.chatMemoryRecallMaxOutputTokens, 8_000),
   });
   return {
     answer: answer.content,

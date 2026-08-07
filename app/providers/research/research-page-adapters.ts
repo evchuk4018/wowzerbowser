@@ -8,8 +8,7 @@ import type { ResearchLink } from "../../server/research/research-types";
 import { record, searchRequest, text } from "../search/search-http";
 import { runtimeConfigSnapshot } from "../../server/config/runtime-config-service";
 
-const TIMEOUT_MS = 30_000;
-const MAX_MARKDOWN = 80_000;
+const MAX_SAFE_MARKDOWN = 80_000;
 
 export type ExtractedPage = {
   finalUrl: string;
@@ -44,7 +43,7 @@ function hash(markdown: string): string {
   return createHash("sha256").update(markdown).digest("hex");
 }
 
-function linksFromMarkdown(markdown: string): ResearchLink[] {
+function linksFromMarkdown(markdown: string, maximum: number): ResearchLink[] {
   const links: ResearchLink[] = [];
   const seen = new Set<string>();
   const pattern = /\[([^\]]{1,300})\]\((https?:\/\/[^)\s]+)(?:\s+"[^"]*")?\)/g;
@@ -53,18 +52,22 @@ function linksFromMarkdown(markdown: string): ResearchLink[] {
     if (!url || seen.has(url)) continue;
     seen.add(url);
     links.push({ url, text: match[1].replace(/\s+/g, " ").trim() });
-    if (links.length >= 300) break;
+    if (links.length >= maximum) break;
   }
   return links;
 }
 
 async function directHtmlExtraction(url: string, signal?: AbortSignal): Promise<ExtractedPage> {
+  const configuration = runtimeConfigSnapshot();
+  const maxMarkdown = Math.min(configuration.deepResearchPageOutputCharacters, MAX_SAFE_MARKDOWN);
+  const timeoutMs = Math.min(configuration.searchProviderRequestTimeoutMs, 60_000);
+  const maxLinks = Math.min(configuration.deepResearchMaxPageLinks, 1_000);
   let current = await assertPublicResearchUrl(url);
   for (let redirects = 0; redirects <= 4; redirects += 1) {
     const response = await searchRequest(current.toString(), {
       redirect: "manual",
       headers: { Accept: "text/html,application/xhtml+xml,text/plain;q=0.8", "User-Agent": "wowzerbowser-research/1.0" },
-    }, signal, TIMEOUT_MS);
+    }, signal, timeoutMs);
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       const location = response.headers.get("location");
       if (!location || redirects === 4) throw new Error("Page redirect limit exceeded.");
@@ -74,14 +77,14 @@ async function directHtmlExtraction(url: string, signal?: AbortSignal): Promise<
     if (!response.ok) throw new Error(`Direct page request failed with status ${response.status}.`);
     const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
     if (contentType && !contentType.includes("html") && !contentType.includes("text/plain")) throw new Error("Unsupported page content type.");
-    const html = (await response.text()).slice(0, MAX_MARKDOWN * 8);
+    const html = (await response.text()).slice(0, maxMarkdown * 8);
     const dom = new JSDOM(html, { url: current.toString() });
     const content = dom.window.document.querySelector("article, main") ?? dom.window.document.body;
-    const markdown = (content?.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, MAX_MARKDOWN);
+    const markdown = (content?.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, maxMarkdown);
     if (markdown.length < 200) throw new Error("Direct extraction returned too little content.");
     const links = [...dom.window.document.querySelectorAll("a[href]")].flatMap((element) => {
       try { return [{ url: new URL(element.getAttribute("href")!, current).toString(), text: (element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 300) }]; } catch { return []; }
-    }).filter((link) => /^https?:\/\//i.test(link.url)).slice(0, 300);
+    }).filter((link) => /^https?:\/\//i.test(link.url)).slice(0, maxLinks);
     return {
       finalUrl: current.toString(),
       title: (dom.window.document.title ?? current.toString()).trim().slice(0, 300),
@@ -97,7 +100,11 @@ async function directHtmlExtraction(url: string, signal?: AbortSignal): Promise<
 
 export async function extractFirecrawl(url: string, signal?: AbortSignal): Promise<ExtractedPage> {
   await assertPublicResearchUrl(url);
-  const base = runtimeConfigSnapshot().firecrawlUrl;
+  const configuration = runtimeConfigSnapshot();
+  const maxMarkdown = Math.min(configuration.deepResearchPageOutputCharacters, MAX_SAFE_MARKDOWN);
+  const timeoutMs = Math.min(configuration.searchProviderRequestTimeoutMs, 60_000);
+  const maxLinks = Math.min(configuration.deepResearchMaxPageLinks, 1_000);
+  const base = configuration.firecrawlUrl;
   const endpoint = new URL("/v2/scrape", `${base.replace(/\/$/, "")}/`);
   const apiKey = process.env.FIRECRAWL_API_KEY?.trim();
   try {
@@ -109,15 +116,15 @@ export async function extractFirecrawl(url: string, signal?: AbortSignal): Promi
         ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       },
       body: JSON.stringify({ url, formats: ["markdown"], onlyMainContent: true, blockAds: true, removeBase64Images: true }),
-    }, signal, TIMEOUT_MS);
+    }, signal, timeoutMs);
     if (!response.ok) throw new Error(`Firecrawl page retrieval failed with status ${response.status}.`);
     const body = record(await response.json());
     const data = record(body.data);
     const metadata = record(data.metadata);
-    const markdown = text(data.markdown ?? data.content, MAX_MARKDOWN);
+    const markdown = text(data.markdown ?? data.content, maxMarkdown);
     if (markdown.length < 200) throw new Error("Firecrawl returned too little content.");
     const finalUrl = text(metadata.sourceURL ?? metadata.sourceUrl, 2_000) || url;
-    return { finalUrl, title: text(metadata.title, 300) || finalUrl, markdown, links: linksFromMarkdown(markdown), contentType: "text/markdown", extractor: "firecrawl", ...(text(metadata.publishedTime ?? metadata.publishedAt, 100) ? { publishedAt: text(metadata.publishedTime ?? metadata.publishedAt, 100) } : {}), contentHash: hash(markdown) };
+    return { finalUrl, title: text(metadata.title, 300) || finalUrl, markdown, links: linksFromMarkdown(markdown, maxLinks), contentType: "text/markdown", extractor: "firecrawl", ...(text(metadata.publishedTime ?? metadata.publishedAt, 100) ? { publishedAt: text(metadata.publishedTime ?? metadata.publishedAt, 100) } : {}), contentHash: hash(markdown) };
   } catch (error) {
     if (signal?.aborted) throw error;
     return directHtmlExtraction(url, signal);

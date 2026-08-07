@@ -24,6 +24,31 @@ test("runtime configuration resolves environment defaults and bounded persisted 
   assert.ok(RUNTIME_CONFIG_DESCRIPTORS.some(({ key }) => key === "searxngFormats"));
 });
 
+test("assistant output limits are first-class runtime configurables", () => {
+  const expectedKeys = [
+    "webSearchMaxResultsGeneral", "webSearchMaxResultsNews", "webSearchMaxResultsCommunity", "webSearchMaxResultsReference",
+    "webFetchMaxMarkdownCharacters", "searchProviderRequestTimeoutMs", "searchProviderMaxAttempts", "searchProviderRetryDelayMs",
+    "focusedContextRecentTurns", "focusedContextMaxOlderTurns", "focusedContextMaxHistoryCharacters", "focusedContextRouterTimeoutMs", "focusedContextRouterMaxTokens",
+    "currentChatSearchDefaultResults", "currentChatSearchMaxResults", "currentChatSearchMaxOutputCharacters", "chatHistorySearchMaxResults",
+    "chatMemoryContextMaxCharacters", "chatMemoryRecallMaxPromptCharacters", "chatMemoryRecallMaxOutputTokens", "chatMemoryRecallTimeoutMs",
+    "chatSummaryMaxOutputTokens", "chatSummaryTimeoutMs", "chatSummaryMaxAttempts", "chatTitleMaxOutputTokens", "chatTitleTimeoutMs", "reasoningSummaryMaxOutputTokens", "reasoningSummaryTimeoutMs",
+    "todoPlannerMaxPromptCharacters", "todoPlannerMaxOutputTokens", "todoPlannerTimeoutMs", "todoPlannerMaxAttempts",
+    "documentInlineMaxTokens", "documentInlineMaxPages", "pdfSearchMaxResults", "pdfReadMaxPages", "imageAnalysisMaxResponseCharacters", "imageFollowupMaxQuestionCharacters", "documentImageAnalysisMaxStoredCharacters",
+    "workspaceSearchDefaultResults", "workspaceSearchMaxResults", "workspaceMaxReadOutputCharacters", "workspaceMaxSearchFileBytes", "workspaceMaxCommandOutputCharacters",
+    "connectorSearchMaxResults", "subagentMaxTaskCharacters", "subagentMaxContextCharacters", "subagentMaxOutputCharacters", "subagentMaxSources", "subagentMaxArtifacts",
+    "deepResearchQueryPlannerMaxOutputTokens", "deepResearchQueryPlannerTimeoutMs", "deepResearchClaimMaxOutputTokens", "deepResearchClaimTimeoutMs",
+    "deepResearchSynthesisMaxOutputTokens", "deepResearchSynthesisTimeoutMs", "deepResearchMaxEvidenceCharacters", "deepResearchMaxSourcesPerFinding", "deepResearchMaxClaims", "deepResearchMaxSubagentConcurrency", "deepResearchFindInPageMaxResults", "deepResearchMaxPageLinks", "deepResearchPageOutputCharacters",
+  ];
+  const descriptors = new Map(RUNTIME_CONFIG_DESCRIPTORS.map((descriptor) => [descriptor.key, descriptor]));
+  for (const key of expectedKeys) {
+    const descriptor = descriptors.get(key);
+    assert.ok(descriptor, `missing descriptor: ${key}`);
+    assert.equal(descriptor.type === "integer" || descriptor.type === "number", true, `${key} must be numeric`);
+    assert.equal(descriptor.restartRequired, false, `${key} should apply without a restart`);
+    assert.ok(descriptor.envName, `${key} needs an environment fallback`);
+  }
+});
+
 test("SearXNG settings are generated from the structured safe schema", () => {
   const yaml = searxngSettingsYaml({
     searxngFormats: ["json", "html"],

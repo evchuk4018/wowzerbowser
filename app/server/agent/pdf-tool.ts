@@ -1,10 +1,9 @@
 import "server-only";
 import type { ChatToolCall, ChatToolResult } from "../../../lib/chat-protocol";
 import { documentPageMarkdown } from "../../../lib/chat-document";
-import { MAX_IMAGE_FOLLOWUP_QUESTION_LENGTH } from "../../../lib/chat-image";
 import { getAuthorizedDocument, getDocumentPages } from "../chat/chat-document-store";
 import { inspectDocumentPage } from "../chat/document-page-visual-service";
-import { configuredPdfReadMaxPages, configuredPdfSearchMaxResults, INSPECT_DOCUMENT_PAGE_TOOL_NAME, pdfToolDefinitions, READ_PDF_PAGES_TOOL_NAME, SEARCH_PDF_TOOL_NAME } from "./pdf-tool-manifest";
+import { configuredPdfReadMaxPages, configuredPdfSearchMaxResults, configuredImageFollowupMaxQuestionCharacters, INSPECT_DOCUMENT_PAGE_TOOL_NAME, pdfToolDefinitions, READ_PDF_PAGES_TOOL_NAME, SEARCH_PDF_TOOL_NAME } from "./pdf-tool-manifest";
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const safeError = (error: unknown) => (error instanceof Error ? error.message : "Document inspection failed.").slice(0, 1_000);
@@ -27,7 +26,8 @@ export async function executePdfTool(call: ChatToolCall, context: { ownerId: str
     const pageNumber = args.pageNumber;
     const question = typeof args.question === "string" ? args.question.trim() : "";
     if (!Number.isSafeInteger(pageNumber) || Number(pageNumber) < 1 || Number(pageNumber) > authorized.pageCount) return fail(call, "The requested page is outside this document.");
-    if (!question || question.length > MAX_IMAGE_FOLLOWUP_QUESTION_LENGTH) return fail(call, `question is required and must be ${MAX_IMAGE_FOLLOWUP_QUESTION_LENGTH} characters or shorter.`);
+    const maxQuestionCharacters = configuredImageFollowupMaxQuestionCharacters();
+    if (!question || question.length > maxQuestionCharacters) return fail(call, `question is required and must be ${maxQuestionCharacters} characters or shorter.`);
     try {
       const result = await inspectDocumentPage({
         ownerId: context.ownerId,

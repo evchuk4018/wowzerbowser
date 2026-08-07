@@ -2,6 +2,7 @@ import "server-only";
 
 import type { ChatToolCall, ChatToolResult } from "../../../lib/chat-protocol";
 import { SEARCH_CURRENT_CHAT_TOOL_NAME } from "./current-chat-context-tool-manifest";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 
 export type CurrentChatSearchEntry = {
   id: string;
@@ -11,7 +12,7 @@ export type CurrentChatSearchEntry = {
   toolFacts: string[];
 };
 
-const MAX_RESULT_CHARACTERS = 16_000;
+const MAX_SAFE_RESULT_CHARACTERS = 100_000;
 
 function redactSecrets(value: string): string {
   return value
@@ -37,8 +38,11 @@ function argumentsFor(call: ChatToolCall): { query: string; limit: number } {
   const input = value as Record<string, unknown>;
   const query = typeof input.query === "string" ? input.query.trim() : "";
   if (!query || query.length > 400) throw new Error("query must contain 1 to 400 characters.");
-  const limit = input.limit === undefined ? 5 : Number(input.limit);
-  if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new Error("limit must be an integer from 1 to 10.");
+  const configuration = runtimeConfigSnapshot();
+  const defaultLimit = Math.min(configuration.currentChatSearchDefaultResults, configuration.currentChatSearchMaxResults);
+  const maxLimit = Math.min(configuration.currentChatSearchMaxResults, 50);
+  const limit = input.limit === undefined ? defaultLimit : Number(input.limit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > maxLimit) throw new Error(`limit must be an integer from 1 to ${maxLimit}.`);
   return { query, limit };
 }
 
@@ -49,13 +53,14 @@ export function executeCurrentChatContextTool(
   try {
     if (call.name !== SEARCH_CURRENT_CHAT_TOOL_NAME) throw new Error(`Unknown context tool: ${call.name}`);
     const { query, limit } = argumentsFor(call);
+    const maxResultCharacters = Math.min(runtimeConfigSnapshot().currentChatSearchMaxOutputCharacters, MAX_SAFE_RESULT_CHARACTERS);
     const queryTerms = terms(query);
     const matches = entries
       .map((entry) => ({ entry, score: score(entry, query, queryTerms) }))
       .filter(({ score: relevance }) => relevance > 0)
       .sort((left, right) => right.score - left.score || right.entry.position - left.entry.position)
       .slice(0, limit);
-    let remaining = MAX_RESULT_CHARACTERS;
+    let remaining = maxResultCharacters;
     const results: unknown[] = [];
     for (const { entry } of matches) {
       if (remaining <= 0) break;

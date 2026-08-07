@@ -1,17 +1,14 @@
 import "server-only";
 
 import type { ChatToolCall, ChatToolResult } from "../../../lib/chat-protocol";
-import {
-  MAX_IMAGE_FOLLOWUP_QUESTION_LENGTH,
-  ChatImageError,
-  isValidChatImageId,
-} from "../../../lib/chat-image";
+import { ChatImageError, isValidChatImageId } from "../../../lib/chat-image";
 import {
   chatToolResultForImageError,
   inspectChatImage,
 } from "../chat/chat-image-service";
 
 export { INSPECT_IMAGE_TOOL_DEFINITION, INSPECT_IMAGE_TOOL_NAME, availableImageTools } from "./image-tool-manifest";
+import { configuredImageFollowupMaxQuestionCharacters } from "./image-tool-manifest";
 
 export type InspectImageToolContext = {
   ownerId: string;
@@ -42,7 +39,7 @@ function parseInspectImageArguments(call: ChatToolCall): { imageId: string; ques
     throw new ChatImageError("invalid_arguments", "inspect_image imageId is invalid.");
   }
   const question = typeof record.question === "string" ? record.question.trim() : "";
-  if (!question || question.length > MAX_IMAGE_FOLLOWUP_QUESTION_LENGTH) {
+  if (!question || question.length > configuredImageFollowupMaxQuestionCharacters()) {
     throw new ChatImageError("invalid_arguments", "inspect_image question is invalid.");
   }
   return { imageId, question };

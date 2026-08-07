@@ -4,6 +4,7 @@ import { canonicalSourceUrl } from "../../../lib/chat-citations";
 import { performDeepResearch, researchStopReason } from "../research/deep-research-service";
 import { fetchResearchPage } from "../research/research-page-service";
 import type { ResearchRun } from "../research/research-types";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 import {
   DEEP_RESEARCH_SEARCH_TOOL_NAME, FIND_IN_PAGE_TOOL_NAME, FOLLOW_PAGE_LINK_TOOL_NAME,
   LIST_PAGE_LINKS_TOOL_NAME,
@@ -53,13 +54,15 @@ export async function executeDeepResearchTool(call: ChatToolCall, context: DeepR
     const page = run.pages.get(pageId);
     if (!page) return { activeRun: run, result: fail(call, "The page is not part of the active research run.") };
     if (call.name === FIND_IN_PAGE_TOOL_NAME) {
+      const configuration = runtimeConfigSnapshot();
       const query = required(input, "query", 400);
       const terms = query.toLowerCase().split(/\W+/).filter((term) => term.length > 2);
-      const matches = [...page.markdown.matchAll(/.{0,240}(?:\n|$)/g)].map((match) => ({ excerpt: match[0].trim(), start: match.index ?? 0 })).filter((match) => match.excerpt && terms.some((term) => match.excerpt.toLowerCase().includes(term))).slice(0, 20);
+      const matches = [...page.markdown.matchAll(/.{0,240}(?:\n|$)/g)].map((match) => ({ excerpt: match[0].trim(), start: match.index ?? 0 })).filter((match) => match.excerpt && terms.some((term) => match.excerpt.toLowerCase().includes(term))).slice(0, Math.min(configuration.deepResearchFindInPageMaxResults, 100));
       return { activeRun: run, result: { id: call.id, name: call.name, ok: true, stdout: "", stderr: "", durationMs: Date.now() - startedAt, research: { kind: "matches", runId: run.id, pageId, query, matches } } };
     }
     if (call.name === LIST_PAGE_LINKS_TOOL_NAME) {
-      return { activeRun: run, result: { id: call.id, name: call.name, ok: true, stdout: "", stderr: "", durationMs: Date.now() - startedAt, research: { kind: "links", runId: run.id, pageId, links: page.links.slice(0, 200).map(({ id, text }) => ({ id, text })) } } };
+      const configuration = runtimeConfigSnapshot();
+      return { activeRun: run, result: { id: call.id, name: call.name, ok: true, stdout: "", stderr: "", durationMs: Date.now() - startedAt, research: { kind: "links", runId: run.id, pageId, links: page.links.slice(0, Math.min(configuration.deepResearchMaxPageLinks, 1_000)).map(({ id, text }) => ({ id, text })) } } };
     }
     if (call.name === FOLLOW_PAGE_LINK_TOOL_NAME) {
       if (run.pages.size >= run.limits.maxFetchedPages) return { activeRun: run, result: fail(call, "The research page limit has been reached.") };
@@ -78,7 +81,8 @@ export async function executeDeepResearchTool(call: ChatToolCall, context: DeepR
       run.budget.fetchedPages = run.pages.size;
       run.sources = [...new Map([...run.sources, fetched.page.source].map((source) => [source.id, source])).values()];
       for (const child of fetched.page.links) run.allowedUrls.add(canonicalSourceUrl(child.url));
-      return { activeRun: run, result: { id: call.id, name: call.name, ok: true, stdout: "", stderr: "", durationMs: Date.now() - startedAt, research: { kind: "page", runId: run.id, page: { id: fetched.page.id, source: fetched.page.source, fetched: true, extractor: fetched.page.extractor }, markdown: fetched.page.markdown.slice(0, 24_000) } } };
+      const configuration = runtimeConfigSnapshot();
+      return { activeRun: run, result: { id: call.id, name: call.name, ok: true, stdout: "", stderr: "", durationMs: Date.now() - startedAt, research: { kind: "page", runId: run.id, page: { id: fetched.page.id, source: fetched.page.source, fetched: true, extractor: fetched.page.extractor }, markdown: fetched.page.markdown.slice(0, Math.min(configuration.deepResearchPageOutputCharacters, 80_000)) } } };
     }
     return { activeRun: run, result: fail(call, `Unknown deep research tool: ${call.name}`) };
   } catch (error) {

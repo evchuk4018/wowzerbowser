@@ -3,7 +3,6 @@ import "server-only";
 import type { ChatUsage } from "../../../lib/chat-protocol";
 import {
   OPENROUTER_IMAGE_TIMEOUT_MS,
-  MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH,
   type ChatImageContentType,
   ChatImageError,
 } from "../../../lib/chat-image";
@@ -12,6 +11,7 @@ import {
   OPENROUTER_IMAGE_MODELS,
   OPENROUTER_AUTO_MODEL,
 } from "./openrouter-config";
+import { runtimeConfigSnapshot } from "../../server/config/runtime-config-service";
 
 export { OPENROUTER_BASE_URL } from "./openrouter-config";
 export const OPENROUTER_IMAGE_MODEL = OPENROUTER_AUTO_MODEL;
@@ -236,10 +236,11 @@ export async function askOpenRouterAboutImage(
   contentType: ChatImageContentType,
   options: OpenRouterImageRequestOptions = {},
 ): Promise<OpenRouterImageAnswer> {
+  const responseLimit = Math.min(runtimeConfigSnapshot().imageAnalysisMaxResponseCharacters, 32_000);
   const payload = await requestOpenRouterImage({ prompt: question, bytes, contentType }, options);
   const content = answerText(payload.choices?.[0]?.message?.content);
   if (!content) throw new OpenRouterImageError("empty_answer", "Image understanding returned an empty answer.");
-  if (content.length > MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH) {
+  if (content.length > responseLimit) {
     throw new OpenRouterImageError("answer_too_long", "Image understanding returned an answer that is too long.");
   }
   return {
@@ -287,6 +288,7 @@ export async function analyzeOpenRouterImage(
   contentType: ChatImageContentType,
   options: OpenRouterImageRequestOptions = {},
 ): Promise<OpenRouterImageAnalysis> {
+  const responseLimit = Math.min(runtimeConfigSnapshot().imageAnalysisMaxResponseCharacters, 32_000);
   const payload = await requestOpenRouterImage({
     prompt,
     bytes,
@@ -313,8 +315,8 @@ export async function analyzeOpenRouterImage(
     throw new OpenRouterImageError("empty_answer", "Image understanding returned an empty answer.");
   }
   if (
-    (typeof visibleText === "string" && visibleText.length > MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH)
-    || value.mainVisuals.length > MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH
+    (typeof visibleText === "string" && visibleText.length > responseLimit)
+    || value.mainVisuals.length > responseLimit
   ) {
     throw new OpenRouterImageError("answer_too_long", "Image understanding returned an answer that is too long.");
   }

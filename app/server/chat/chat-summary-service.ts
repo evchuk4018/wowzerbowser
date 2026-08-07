@@ -1,7 +1,6 @@
 import "server-only";
 
 import {
-  CHAT_SUMMARY_MAX_ATTEMPTS,
   CHAT_SUMMARY_PROCESSING_BUDGET_MS,
   type ChatSummaryInteraction,
   type ChatSummaryTask,
@@ -26,11 +25,15 @@ import {
   replaceChatSummaryIfCurrent,
   supersedeChatSummaryTask,
 } from "./chat-summary-store";
-import { runtimeConfigSnapshot } from "../config/runtime-config-service";
+import { refreshRuntimeConfig, runtimeConfigSnapshot } from "../config/runtime-config-service";
 
 function enabled(): boolean {
   const config = runtimeConfigSnapshot();
   return config.chatDurableSummariesEnabled || config.userMemoryDreamingEnabled;
+}
+
+function chatSummaryMaxAttempts(): number {
+  return Math.min(runtimeConfigSnapshot().chatSummaryMaxAttempts, 5);
 }
 
 function retryableError(error: unknown): boolean {
@@ -93,6 +96,7 @@ async function persistSummaryUsage(input: {
 }
 
 async function executeChatSummaryTask(task: ChatSummaryTask): Promise<void> {
+  await refreshRuntimeConfig(task.ownerId);
   const source = await getCompletedChatSummaryJobSource(task.ownerId, task.conversationId, task.sourceJobId);
   if (!source) {
     await supersedeChatSummaryTask(task);
@@ -172,7 +176,7 @@ async function processChatSummaryTasks(ownerId: string, conversationId: string):
         attempt: task.attemptCount,
         retryable,
       }, error);
-      if (task.attemptCount >= CHAT_SUMMARY_MAX_ATTEMPTS || !retryable) continue;
+      if (task.attemptCount >= chatSummaryMaxAttempts() || !retryable) continue;
     }
   }
 }

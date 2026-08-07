@@ -11,6 +11,7 @@ import {
   type ResearchProgressUpdate,
   type ResearchTrace,
 } from "./deep-research-service";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 
 export type Finding = { taskId: string; title: string; claims: unknown[]; sources: ChatSource[]; warnings: string[] };
 
@@ -58,6 +59,7 @@ export async function orchestrateDeepResearch(input: {
   onOrchestratorUpdate?: ResearchOrchestratorCallback;
   onSubagentUpdate?: ResearchSubagentCallback;
 }): Promise<{ report: string; sources: ChatSource[]; findings: Finding[] }> {
+  const configuration = runtimeConfigSnapshot();
   const tasks = input.plan.items.map((item) => ({ id: item.id, title: item.title, prompt: `${item.question}\nFocus: ${item.focus}` }));
   const orchestratorTrace = new ResearchTraceCoordinator({
     actorId: input.jobId,
@@ -81,7 +83,7 @@ export async function orchestrateDeepResearch(input: {
     const results = await runSubagents<Finding>({
       tasks,
       signal: input.signal,
-      concurrency: 3,
+      concurrency: Math.min(configuration.deepResearchMaxSubagentConcurrency, 8),
       onUpdate: async (update: SubagentUpdate) => emitSubagent(input.onSubagentUpdate, update),
       worker: async (task, signal) => {
         const run = await performDeepResearch({
@@ -104,17 +106,18 @@ export async function orchestrateDeepResearch(input: {
     const evidence = findings.map((finding) => [
       `## ${finding.title}`,
       JSON.stringify(finding.claims).slice(0, 14_000),
-      finding.sources.slice(0, 8).map((source) => `- [${source.title}](${source.url}) — ${source.snippet}`).join("\n"),
+      finding.sources.slice(0, Math.min(configuration.deepResearchMaxSourcesPerFinding, 50)).map((source) => `- [${source.title}](${source.url}) — ${source.snippet}`).join("\n"),
       finding.warnings.length ? `Warnings: ${finding.warnings.join("; ")}` : "",
     ].filter(Boolean).join("\n")).join("\n\n");
 
     await orchestratorTrace.update("synthesis", "started");
     const answer = await completeOpenRouterQwenText(
-      `<question>\n${input.request}\n</question>\n<research>\n${evidence.slice(0, 50_000)}\n</research>`,
+      `<question>\n${input.request}\n</question>\n<research>\n${evidence.slice(0, Math.min(configuration.deepResearchMaxEvidenceCharacters, 250_000))}\n</research>`,
       {
         systemPrompt: "You are the final deep-research editor. Produce a clear report answering the question, organize it by the approved topics, distinguish evidence from uncertainty, and preserve relevant Markdown source links. Do not invent facts or sources.",
         signal: input.signal,
-        maxTokens: 5000,
+        timeoutMs: Math.min(configuration.deepResearchSynthesisTimeoutMs, 300_000),
+        maxTokens: Math.min(configuration.deepResearchSynthesisMaxOutputTokens, 20_000),
         stream: true,
         reasoningEffort: "low",
         onReasoningDelta: (delta) => orchestratorTrace.appendReasoning(delta),

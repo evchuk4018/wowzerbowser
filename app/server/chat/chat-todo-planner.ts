@@ -2,8 +2,11 @@ import "server-only";
 import { completeOpenRouterQwenText } from "../../providers/openrouter/openrouter-qwen-text-adapter";
 import { normalizeTodoList, type TodoItem, type TodoList } from "../../../lib/todo-protocol";
 import { replaceTodoList } from "./chat-todo-store";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 
-const TIMEOUT_MS = 20_000;
+const MAX_SAFE_PROMPT_CHARACTERS = 100_000;
+const MAX_SAFE_OUTPUT_TOKENS = 2_000;
+const MAX_SAFE_ATTEMPTS = 4;
 const SYSTEM = [
   "Create a concise task plan only for substantial work.",
   "Use a plan for a singular complex task or a long, genuinely multi-step task such as deep research, comparing sources, or researching and creating a document.",
@@ -78,18 +81,25 @@ export async function planTodos(input: {
   }
 
   const prompt = [
-    "<user-message>", input.userMessage.slice(0, 20_000), "</user-message>",
-    "<previous-assistant-output>", (input.previousAssistantOutput ?? "(first turn)").slice(0, 20_000), "</previous-assistant-output>",
+    "<user-message>", input.userMessage.slice(0, Math.min(runtimeConfigSnapshot().todoPlannerMaxPromptCharacters, MAX_SAFE_PROMPT_CHARACTERS)), "</user-message>",
+    "<previous-assistant-output>", (input.previousAssistantOutput ?? "(first turn)").slice(0, Math.min(runtimeConfigSnapshot().todoPlannerMaxPromptCharacters, MAX_SAFE_PROMPT_CHARACTERS)), "</previous-assistant-output>",
     "<current-todos>", JSON.stringify(input.current.items), "</current-todos>",
   ].join("\n");
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  const configuration = runtimeConfigSnapshot();
+  const maxAttempts = Math.min(configuration.todoPlannerMaxAttempts, MAX_SAFE_ATTEMPTS);
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
-      const answer = await completeOpenRouterQwenText(prompt, { systemPrompt: SYSTEM, signal: input.signal, timeoutMs: TIMEOUT_MS, maxTokens: 500 });
+      const answer = await completeOpenRouterQwenText(prompt, {
+        systemPrompt: SYSTEM,
+        signal: input.signal,
+        timeoutMs: configuration.todoPlannerTimeoutMs,
+        maxTokens: Math.min(configuration.todoPlannerMaxOutputTokens, MAX_SAFE_OUTPUT_TOKENS),
+      });
       await input.onUsage?.(answer);
       const list = await replaceTodoList(input.ownerId, input.conversationId, parseItems(answer.content));
       return { list, plannedThisTurn: list.items.length > 0 };
     } catch {
-      if (attempt === 1 || input.signal?.aborted) return { list: null, plannedThisTurn: false };
+      if (attempt >= maxAttempts - 1 || input.signal?.aborted) return { list: null, plannedThisTurn: false };
     }
   }
   return { list: null, plannedThisTurn: false };

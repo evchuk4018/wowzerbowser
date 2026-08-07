@@ -13,6 +13,7 @@ import {
   type ChatMessageStatus,
 } from "../../../lib/chat-history";
 import { databaseOwnerId, isoTimestamp, jsonb, query } from "../database/database";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 import { attachmentFromUploadRecord, listChatImageUploadRecords } from "./chat-image-store";
 import type { ChatSearchResult } from "../../../lib/chat-search";
 import type { TodoList } from "../../../lib/todo-protocol";
@@ -531,7 +532,8 @@ export type ChatConversationIndexRow = {
 };
 
 export function mapChatConversationSummaryRows(rows: ChatConversationIndexRow[]): ChatConversationSummary[] {
-  return rows.map((row) => ({
+  const maxResults = Math.min(runtimeConfigSnapshot().chatHistorySearchMaxResults, 250);
+  return rows.slice(0, maxResults).map((row) => ({
     id: row.conversation_id,
     title: row.title,
     updatedAt: row.updated_at,
@@ -553,7 +555,8 @@ export async function searchChatConversations(ownerId: string, searchTerm: strin
     updated_at: unknown;
     preview: string | null;
   }>("select conversation_id,title,updated_at,preview from search_chat_conversations($1,$2)", [databaseOwnerId(ownerId), searchTerm]);
-  return rows.map((row) => ({
+  const maxResults = Math.min(runtimeConfigSnapshot().chatHistorySearchMaxResults, 250);
+  return rows.slice(0, maxResults).map((row) => ({
     id: row.conversation_id,
     title: row.title,
     updatedAt: isoTimestamp(row.updated_at),

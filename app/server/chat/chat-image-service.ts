@@ -3,8 +3,6 @@ import "server-only";
 import { createHash } from "node:crypto";
 import {
   MAX_CHAT_IMAGES_PER_TURN,
-  MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH,
-  MAX_IMAGE_FOLLOWUP_QUESTION_LENGTH,
   type ChatImageAttachment,
   type ChatImageContentType,
   type ChatImageToolResult,
@@ -19,6 +17,7 @@ import { recordPromptUsage } from "../usage/prompt-cost-service";
 import { analyzeOpenRouterImage, askOpenRouterAboutImage } from "../../providers/openrouter/openrouter-image-adapter";
 import { OPENROUTER_QWEN_FLASH_MODEL } from "../../providers/openrouter/openrouter-config";
 import { configuredVisionModel } from "./chat-model-catalog-service";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 import { createStorageObject, getStorageObjectById } from "../storage/storage-repository";
 import { deleteOwnedStorageObject } from "../storage/storage-service";
 import {
@@ -36,6 +35,17 @@ import {
   waitForChatImageUpload,
   uploadChatImageObject,
 } from "./chat-image-store";
+
+const MAX_SAFE_IMAGE_ANALYSIS_RESPONSE_CHARACTERS = 32_000;
+const MAX_SAFE_IMAGE_FOLLOWUP_QUESTION_CHARACTERS = 10_000;
+
+function imageAnalysisMaxResponseCharacters(): number {
+  return Math.min(runtimeConfigSnapshot().imageAnalysisMaxResponseCharacters, MAX_SAFE_IMAGE_ANALYSIS_RESPONSE_CHARACTERS);
+}
+
+function imageFollowupMaxQuestionCharacters(): number {
+  return Math.min(runtimeConfigSnapshot().imageFollowupMaxQuestionCharacters, MAX_SAFE_IMAGE_FOLLOWUP_QUESTION_CHARACTERS);
+}
 
 export type ChatImageUpload = {
   id: string;
@@ -135,8 +145,9 @@ export async function analyzeStoredChatImage(input: {
     input.contentType,
     { signal: input.signal, model: input.visionModel ?? await configuredVisionModel(input.ownerId).catch(() => null) },
   );
-  const visibleText = analysis.visibleText?.slice(0, MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH) ?? null;
-  const mainVisuals = analysis.mainVisuals.slice(0, MAX_IMAGE_ANALYSIS_RESPONSE_LENGTH);
+  const responseLimit = imageAnalysisMaxResponseCharacters();
+  const visibleText = analysis.visibleText?.slice(0, responseLimit) ?? null;
+  const mainVisuals = analysis.mainVisuals.slice(0, responseLimit);
   await recordImageUsage({
     ownerId: input.ownerId,
     conversationId: input.conversationId,
@@ -298,8 +309,8 @@ export async function inspectChatImage(input: {
   signal?: AbortSignal;
 }): Promise<ChatImageToolResult> {
   const question = input.question.trim();
-  if (!question || question.length > MAX_IMAGE_FOLLOWUP_QUESTION_LENGTH) {
-    throw new ChatImageError("invalid_question", "The image question must be between 1 and 1,000 characters.");
+  if (!question || question.length > imageFollowupMaxQuestionCharacters()) {
+    throw new ChatImageError("invalid_question", `The image question must be between 1 and ${imageFollowupMaxQuestionCharacters().toLocaleString()} characters.`);
   }
   const image = await findChatImageAttachment(input.ownerId, input.conversationId, input.imageId);
   const bytes = await downloadChatImageObject(input.ownerId, input.conversationId, image);
@@ -339,7 +350,7 @@ export async function analyzeDocumentImage(
   visionModel?: string | null,
   usageContext?: { ownerId: string; conversationId: string; jobId?: string; requestId: string },
 ): Promise<{ visibleText: string | null; mainVisuals: string | null }> {
-  const storedLimit = 2_000;
+  const storedLimit = Math.min(runtimeConfigSnapshot().documentImageAnalysisMaxStoredCharacters, 16_000);
   const analysis = await analyzeOpenRouterImage(IMAGE_ANALYSIS_PROMPT, bytes, contentType, { signal, model: visionModel });
   if (usageContext) {
     await recordImageUsage({
@@ -359,25 +370,29 @@ export async function analyzeDocumentImage(
 }
 
 export const INSPECT_IMAGE_TOOL_NAME = "inspect_image";
-export const INSPECT_IMAGE_TOOL_DEFINITION = {
-  type: "function" as const,
-  function: {
-    name: INSPECT_IMAGE_TOOL_NAME,
-    description: "Ask a focused question about an image attached to the current conversation. Use this when the existing text and visual summaries do not contain enough information to answer the user accurately.",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      required: ["imageId", "question"],
-      properties: {
-        imageId: { type: "string", minLength: 1, maxLength: 128 },
-        question: { type: "string", minLength: 1, maxLength: MAX_IMAGE_FOLLOWUP_QUESTION_LENGTH },
+export function inspectImageToolDefinition() {
+  return {
+    type: "function" as const,
+    function: {
+      name: INSPECT_IMAGE_TOOL_NAME,
+      description: "Ask a focused question about an image attached to the current conversation. Use this when the existing text and visual summaries do not contain enough information to answer the user accurately.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["imageId", "question"],
+        properties: {
+          imageId: { type: "string", minLength: 1, maxLength: 128 },
+          question: { type: "string", minLength: 1, maxLength: imageFollowupMaxQuestionCharacters() },
+        },
       },
     },
-  },
-} as const;
+  } as const;
+}
+
+export const INSPECT_IMAGE_TOOL_DEFINITION = inspectImageToolDefinition();
 
 export function availableImageTools(hasImage = true) {
-  return hasImage ? [INSPECT_IMAGE_TOOL_DEFINITION] : [];
+  return hasImage ? [inspectImageToolDefinition()] : [];
 }
 
 function parseInspectImageArguments(call: ChatToolCall): { imageId: string; question: string } {
@@ -397,7 +412,7 @@ function parseInspectImageArguments(call: ChatToolCall): { imageId: string; ques
   if (typeof record.imageId !== "string" || !record.imageId.trim() || record.imageId.length > 128) {
     throw new ChatImageError("invalid_arguments", "inspect_image imageId is invalid.");
   }
-  if (typeof record.question !== "string" || !record.question.trim() || record.question.length > MAX_IMAGE_FOLLOWUP_QUESTION_LENGTH) {
+  if (typeof record.question !== "string" || !record.question.trim() || record.question.length > imageFollowupMaxQuestionCharacters()) {
     throw new ChatImageError("invalid_arguments", "inspect_image question is invalid.");
   }
   return { imageId: record.imageId.trim(), question: record.question.trim() };

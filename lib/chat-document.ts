@@ -10,6 +10,11 @@ export const DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.
 export const DOCUMENT_CONTENT_TYPES = ["application/pdf", DOCX_CONTENT_TYPE] as const;
 export const CHAT_DOCUMENT_BUCKET = "chat-documents";
 
+export type DocumentContextLimits = {
+  maxInlineTokens?: number;
+  maxInlinePages?: number;
+};
+
 export type ChatDocumentProviderMetadata = Record<string, unknown>;
 export type ChatDocumentImage = {
   imageId: string;
@@ -105,17 +110,23 @@ export function documentPageMarkdown(page: Pick<ChatDocumentPage, "text" | "mark
   return page.markdown?.trim() ? page.markdown : page.text;
 }
 
-export function shouldInlineDocument(document: Pick<ChatDocumentAttachment, "pageCount" | "tokenEstimate">): boolean {
-  return document.pageCount <= MAX_INLINE_PDF_PAGES && document.tokenEstimate <= MAX_INLINE_PDF_TOKENS;
+export function shouldInlineDocument(
+  document: Pick<ChatDocumentAttachment, "pageCount" | "tokenEstimate">,
+  limits: DocumentContextLimits = {},
+): boolean {
+  const maxPages = Math.min(limits.maxInlinePages ?? MAX_INLINE_PDF_PAGES, 200);
+  const maxTokens = Math.min(limits.maxInlineTokens ?? MAX_INLINE_PDF_TOKENS, 100_000);
+  return document.pageCount <= maxPages && document.tokenEstimate <= maxTokens;
 }
 
 /** Cache inline-page reads for the lifetime of one request. Large documents never invoke the loader. */
 export function createInlineDocumentPageLoader<T>(
   load: (document: ChatDocumentAttachment) => Promise<readonly T[]>,
+  limits: DocumentContextLimits = {},
 ): (document: ChatDocumentAttachment) => Promise<readonly T[]> {
   const pagesByDocument = new Map<string, Promise<readonly T[]>>();
   return (document) => {
-    if (!shouldInlineDocument(document)) return Promise.resolve([]);
+    if (!shouldInlineDocument(document, limits)) return Promise.resolve([]);
     const cached = pagesByDocument.get(document.id);
     if (cached) return cached;
     const pages = load(document);
@@ -124,8 +135,8 @@ export function createInlineDocumentPageLoader<T>(
   };
 }
 
-export function pdfContext(document: ChatDocumentAttachment, pages: readonly ChatDocumentPage[]): string {
-  if (shouldInlineDocument(document)) {
+export function pdfContext(document: ChatDocumentAttachment, pages: readonly ChatDocumentPage[], limits: DocumentContextLimits = {}): string {
+  if (shouldInlineDocument(document, limits)) {
     return [`[Attached PDF: ${document.name} (${document.id})]`, ...pages.map((page) =>
       `[PDF page ${page.pageNumber}]\n${documentPageMarkdown(page)}`),].join("\n\n");
   }
@@ -135,10 +146,10 @@ export function pdfContext(document: ChatDocumentAttachment, pages: readonly Cha
   ].join("\n");
 }
 
-export function documentContext(document: ChatDocumentAttachment, pages: readonly ChatDocumentPage[]): string {
-  if (document.contentType === "application/pdf") return pdfContext(document, pages);
+export function documentContext(document: ChatDocumentAttachment, pages: readonly ChatDocumentPage[], limits: DocumentContextLimits = {}): string {
+  if (document.contentType === "application/pdf") return pdfContext(document, pages, limits);
   const imageMetadata = `Embedded images: ${document.hasImages ? "yes" : "no"}; count=${document.imageCount}; analyzed=${document.analyzedImageCount}.`;
-  if (shouldInlineDocument(document)) {
+  if (shouldInlineDocument(document, limits)) {
     const analyses = document.imageAnalyses.map((image) => `[Embedded image ${image.imageNumber} analysis]\nVisible text: ${image.visibleText ?? "none"}\nMain visuals: ${image.mainVisuals ?? "none"}`);
     return [`[Attached DOCX: ${document.name} (${document.id})]`, imageMetadata, ...pages.map((page) => `[DOCX logical page ${page.pageNumber}]\n${page.text}`), ...analyses].join("\n\n");
   }

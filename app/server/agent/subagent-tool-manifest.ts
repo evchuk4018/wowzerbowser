@@ -1,8 +1,13 @@
 import type { ModelToolDefinition } from "../../../lib/model-tool-protocol";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 
 export const RUN_SUBAGENT_TOOL_NAME = "run_subagent";
 
-export const RUN_SUBAGENT_TOOL_DEFINITION: ModelToolDefinition = {
+export function subagentToolDefinition(): ModelToolDefinition {
+  const configuration = runtimeConfigSnapshot();
+  const maxTaskCharacters = Math.min(configuration.subagentMaxTaskCharacters, 50_000);
+  const maxContextCharacters = Math.min(configuration.subagentMaxContextCharacters, 100_000);
+  return {
   type: "function",
   function: {
     name: RUN_SUBAGENT_TOOL_NAME,
@@ -15,15 +20,18 @@ export const RUN_SUBAGENT_TOOL_DEFINITION: ModelToolDefinition = {
         task: {
           type: "string",
           minLength: 1,
-          maxLength: 12_000,
+          maxLength: maxTaskCharacters,
           description: "The independent task for the delegated agent.",
         },
         context: {
           type: "string",
-          maxLength: 16_000,
+          maxLength: maxContextCharacters,
           description: "Optional focused context or constraints the delegated agent should use.",
         },
       },
     },
   },
-};
+  };
+}
+
+export const RUN_SUBAGENT_TOOL_DEFINITION: ModelToolDefinition = subagentToolDefinition();

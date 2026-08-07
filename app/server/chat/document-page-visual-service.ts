@@ -1,6 +1,6 @@
 import "server-only";
 
-import { MAX_IMAGE_FOLLOWUP_QUESTION_LENGTH, ChatImageError } from "../../../lib/chat-image";
+import { ChatImageError } from "../../../lib/chat-image";
 import { ChatDocumentError } from "../../../lib/chat-document";
 import { estimateUsageFromText } from "../../../lib/usage-pricing";
 import { askOpenRouterAboutImage } from "../../providers/openrouter/openrouter-image-adapter";
@@ -10,6 +10,9 @@ import { downloadAuthorizedDocumentBytes } from "./chat-document-store";
 import { pdfPageVisualPrompt } from "./document-page-visual-prompt";
 import { renderPdfPage } from "./pdf-page-renderer";
 import { recordPromptUsage } from "../usage/prompt-cost-service";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
+
+const MAX_SAFE_FOLLOWUP_QUESTION_CHARACTERS = 10_000;
 
 export type InspectDocumentPageInput = {
   ownerId: string;
@@ -30,7 +33,8 @@ export type InspectDocumentPageResult = {
 
 export async function inspectDocumentPage(input: InspectDocumentPageInput): Promise<InspectDocumentPageResult> {
   const question = input.question.trim();
-  if (!question || question.length > MAX_IMAGE_FOLLOWUP_QUESTION_LENGTH) {
+  const maxQuestionCharacters = Math.min(runtimeConfigSnapshot().imageFollowupMaxQuestionCharacters, MAX_SAFE_FOLLOWUP_QUESTION_CHARACTERS);
+  if (!question || question.length > maxQuestionCharacters) {
     throw new ChatImageError("invalid_question", "The document page question is invalid.");
   }
   if (!Number.isSafeInteger(input.pageNumber) || input.pageNumber < 1) {

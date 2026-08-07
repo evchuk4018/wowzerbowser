@@ -11,11 +11,29 @@ const decoder = new TextDecoder();
 const encoder = new TextEncoder();
 const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
-function workspaceSearchDefaultResults(): number {
-  const value = (runtimeConfigSnapshot() as unknown as Record<string, unknown>).workspaceSearchDefaultResults;
+function workspaceSearchMaximum(): number {
+  const value = (runtimeConfigSnapshot() as unknown as Record<string, unknown>).workspaceSearchMaxResults;
   return typeof value === "number" && Number.isSafeInteger(value)
     ? Math.max(1, Math.min(WORKSPACE_LIMITS.maxSearchResults, value))
-    : 50;
+    : WORKSPACE_LIMITS.maxSearchResults;
+}
+
+function workspaceSearchDefaultResults(): number {
+  const value = (runtimeConfigSnapshot() as unknown as Record<string, unknown>).workspaceSearchDefaultResults;
+  const maximum = workspaceSearchMaximum();
+  return typeof value === "number" && Number.isSafeInteger(value)
+    ? Math.max(1, Math.min(maximum, value))
+    : Math.min(maximum, 50);
+}
+
+function workspaceMaxReadOutputCharacters(): number {
+  const value = (runtimeConfigSnapshot() as unknown as Record<string, unknown>).workspaceMaxReadOutputCharacters;
+  return typeof value === "number" && Number.isSafeInteger(value) ? Math.max(1_000, Math.min(1_048_576, value)) : WORKSPACE_LIMITS.maxReadOutputLength;
+}
+
+function workspaceMaxSearchFileBytes(): number {
+  const value = (runtimeConfigSnapshot() as unknown as Record<string, unknown>).workspaceMaxSearchFileBytes;
+  return typeof value === "number" && Number.isSafeInteger(value) ? Math.max(8_000, Math.min(4 * 1024 * 1024, value)) : WORKSPACE_LIMITS.maxSearchFileBytes;
 }
 
 export class WorkspaceRequestError extends Error {
@@ -86,12 +104,12 @@ export async function readWorkspaceFile(ownerId: string, conversationId: string,
   return withWorkspace(ownerId, conversationId, async (executor) => {
     const bytes = await executor.readWorkspaceFile(path);
     if (bytes.byteLength > WORKSPACE_LIMITS.maxReadBytes && startLine === undefined && endLine === undefined) throw new WorkspaceRequestError(413, "The file is too large to read in one response.");
+    const maxOutputCharacters = workspaceMaxReadOutputCharacters();
     const content = decoder.decode(bytes);
-    if (range.start === undefined && range.end === undefined) return { file: metadata(path, bytes.byteLength, hash(bytes)), content };
-    const start = range.start ?? 1;
-    const end = range.end ?? Number.MAX_SAFE_INTEGER;
-    const selected = content.split(/\r?\n/).slice(start - 1, end).join("\n");
-    return { file: metadata(path, bytes.byteLength, hash(bytes)), content: selected.length > WORKSPACE_LIMITS.maxReadOutputLength ? `${selected.slice(0, WORKSPACE_LIMITS.maxReadOutputLength)}\n[read output truncated]` : selected };
+    const selected = range.start === undefined && range.end === undefined
+      ? content
+      : content.split(/\r?\n/).slice((range.start ?? 1) - 1, range.end ?? Number.MAX_SAFE_INTEGER).join("\n");
+    return { file: metadata(path, bytes.byteLength, hash(bytes)), content: selected.length > maxOutputCharacters ? `${selected.slice(0, maxOutputCharacters)}\n[read output truncated]` : selected };
   });
 }
 
@@ -103,10 +121,10 @@ export async function readWorkspaceAsset(ownerId: string, conversationId: string
   });
 }
 
-export async function searchWorkspaceFiles(ownerId: string, conversationId: string, query: string, root = "", maxResults = workspaceSearchDefaultResults()): Promise<WorkspaceSearchMatch[]> {
+export async function searchWorkspaceFiles(ownerId: string, conversationId: string, query: string, root = "", maxResults?: number): Promise<WorkspaceSearchMatch[]> {
   if (!query.trim() || query.length > WORKSPACE_LIMITS.maxSearchQueryLength) throw new WorkspaceRequestError(400, "Search query is invalid.");
   const normalizedRoot = root ? workspacePath(root) : "";
-  const limit = Number.isSafeInteger(maxResults) ? Math.min(Math.max(maxResults, 1), WORKSPACE_LIMITS.maxSearchResults) : workspaceSearchDefaultResults();
+  const limit = maxResults !== undefined && Number.isSafeInteger(maxResults) ? Math.min(Math.max(maxResults, 1), workspaceSearchMaximum()) : workspaceSearchDefaultResults();
   return withWorkspace(ownerId, conversationId, async (executor) => {
     const files = await executor.listWorkspaceTree(normalizedRoot);
     const needle = query.toLocaleLowerCase();
@@ -114,7 +132,7 @@ export async function searchWorkspaceFiles(ownerId: string, conversationId: stri
     for (const file of files) {
       if (results.length >= limit) break;
       if (file.path.toLocaleLowerCase().includes(needle)) results.push({ path: file.path, line: 0, column: 0, excerpt: file.path });
-      if (file.size > WORKSPACE_LIMITS.maxSearchFileBytes) continue;
+      if (file.size > workspaceMaxSearchFileBytes()) continue;
       const text = decoder.decode(await executor.readWorkspaceFile(file.path));
       if (text.includes("\u0000")) continue;
       for (const [index, line] of text.split(/\r?\n/).entries()) {

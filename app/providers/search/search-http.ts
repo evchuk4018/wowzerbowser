@@ -1,14 +1,16 @@
 import "server-only";
 
-const DEFAULT_TIMEOUT_MS = 12_000;
-const MAX_ATTEMPTS = 2;
-const RETRY_DELAY_MS = 25;
+import { runtimeConfigSnapshot } from "../../server/config/runtime-config-service";
+
+const MAX_SAFE_TIMEOUT_MS = 60_000;
+const MAX_SAFE_ATTEMPTS = 4;
+const MAX_SAFE_RETRY_DELAY_MS = 5_000;
 
 function transientStatus(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
-function waitForRetry(signal: AbortSignal | undefined): Promise<void> {
+function waitForRetry(signal: AbortSignal | undefined, delayMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(signal.reason ?? new DOMException("The operation was aborted.", "AbortError"));
@@ -17,7 +19,7 @@ function waitForRetry(signal: AbortSignal | undefined): Promise<void> {
     const timer = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
       resolve();
-    }, RETRY_DELAY_MS);
+    }, delayMs);
     const onAbort = () => {
       clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
@@ -31,25 +33,29 @@ export async function searchRequest(
   url: string,
   init: RequestInit = {},
   signal?: AbortSignal,
-  timeoutMs = DEFAULT_TIMEOUT_MS,
+  timeoutMs?: number,
 ): Promise<Response> {
   const externalSignal = signal ?? init.signal ?? undefined;
+  const configuration = runtimeConfigSnapshot();
+  const requestTimeoutMs = Math.min(timeoutMs ?? configuration.searchProviderRequestTimeoutMs, MAX_SAFE_TIMEOUT_MS);
+  const maxAttempts = Math.min(configuration.searchProviderMaxAttempts, MAX_SAFE_ATTEMPTS);
+  const retryDelayMs = Math.min(configuration.searchProviderRetryDelayMs, MAX_SAFE_RETRY_DELAY_MS);
   let attempt = 0;
-  while (attempt < MAX_ATTEMPTS) {
+  while (attempt < maxAttempts) {
     attempt += 1;
-    const timeout = AbortSignal.timeout(timeoutMs);
+    const timeout = AbortSignal.timeout(requestTimeoutMs);
     const requestSignal = externalSignal ? AbortSignal.any([externalSignal, timeout]) : timeout;
     try {
       const response = await fetch(url, { ...init, signal: requestSignal });
-      if (attempt < MAX_ATTEMPTS && transientStatus(response.status)) {
+      if (attempt < maxAttempts && transientStatus(response.status)) {
         await response.body?.cancel().catch(() => undefined);
-        await waitForRetry(externalSignal);
+        await waitForRetry(externalSignal, retryDelayMs);
         continue;
       }
       return response;
     } catch (error) {
-      if (attempt >= MAX_ATTEMPTS || externalSignal?.aborted) throw error;
-      await waitForRetry(externalSignal);
+      if (attempt >= maxAttempts || externalSignal?.aborted) throw error;
+      await waitForRetry(externalSignal, retryDelayMs);
     }
   }
   throw new Error("Search request failed after retries.");

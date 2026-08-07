@@ -2,7 +2,6 @@ import "server-only";
 
 import type { ChatRequest } from "../../../lib/chat-protocol";
 import {
-  CHAT_SUMMARY_MAX_ATTEMPTS,
   CHAT_SUMMARY_LEASE_MS,
   CHAT_SUMMARY_RETRY_DELAYS_MS,
   type ChatSummaryInteraction,
@@ -11,6 +10,7 @@ import {
 } from "../../../lib/chat-summary";
 import type { MemorySummary } from "../../../lib/memory-protocol";
 import { databaseOwnerId, isoTimestamp, nullableIsoTimestamp, query } from "../database/database";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 
 type SummaryRow = {
   summary: string;
@@ -72,6 +72,10 @@ function summaryFromRow(row: SummaryRow): ChatSummaryState {
 
 const summaryJobColumns = "owner_id,conversation_id,source_job_id,source_turn_id,source_version_id,source_position,mode,status,attempt_count,next_attempt_at,lease_expires_at,last_error";
 const summaryJobReturningColumns = "jobs.owner_id,jobs.conversation_id,jobs.source_job_id,jobs.source_turn_id,jobs.source_version_id,jobs.source_position,jobs.mode,jobs.status,jobs.attempt_count,jobs.next_attempt_at,jobs.lease_expires_at,jobs.last_error";
+
+function chatSummaryMaxAttempts(): number {
+  return Math.min(runtimeConfigSnapshot().chatSummaryMaxAttempts, 5);
+}
 
 export async function getChatSummary(ownerId: string, conversationId: string): Promise<ChatSummaryState | null> {
   const [row] = await query<SummaryRow>(
@@ -195,7 +199,7 @@ export async function completeChatSummaryTask(task: ChatSummaryTask, resultSumma
 
 export async function failChatSummaryTask(task: ChatSummaryTask, errorMessage: string, retryable: boolean): Promise<void> {
   const now = new Date();
-  const shouldRetry = retryable && task.attemptCount < CHAT_SUMMARY_MAX_ATTEMPTS;
+  const shouldRetry = retryable && task.attemptCount < chatSummaryMaxAttempts();
   const retryDelay = CHAT_SUMMARY_RETRY_DELAYS_MS[Math.min(task.attemptCount - 1, CHAT_SUMMARY_RETRY_DELAYS_MS.length - 1)] ?? 3_000;
   if (shouldRetry) {
     await query(

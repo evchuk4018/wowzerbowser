@@ -5,6 +5,7 @@ import type { ChatArtifact, ChatToolCall, ChatToolResult } from "../../../lib/ch
 import { WORKSPACE_LIMITS, workspaceFileFor, workspacePath, type WorkspaceChangedFile, type WorkspaceCommandResult } from "../../../lib/workspace-protocol";
 import { registerArtifact } from "../artifacts/artifact-store";
 import type { LocalPythonExecutor } from "../python/local-python-executor";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 import {
   RUN_COMMAND_TOOL_NAME,
   WORKSPACE_DELETE_TOOL_NAME,
@@ -14,9 +15,20 @@ import {
   WORKSPACE_SEARCH_TOOL_NAME,
   WORKSPACE_WRITE_TOOL_NAME,
   configuredWorkspaceSearchDefaultResults,
+  configuredWorkspaceSearchMaxResults,
 } from "./workspace-tool-manifest";
 
 export { WORKSPACE_TOOL_DEFINITIONS } from "./workspace-tool-manifest";
+
+function workspaceMaxReadOutputCharacters(): number {
+  const value = (runtimeConfigSnapshot() as unknown as Record<string, unknown>).workspaceMaxReadOutputCharacters;
+  return typeof value === "number" && Number.isSafeInteger(value) ? Math.max(1_000, Math.min(1_048_576, value)) : WORKSPACE_LIMITS.maxReadOutputLength;
+}
+
+function workspaceMaxSearchFileBytes(): number {
+  const value = (runtimeConfigSnapshot() as unknown as Record<string, unknown>).workspaceMaxSearchFileBytes;
+  return typeof value === "number" && Number.isSafeInteger(value) ? Math.max(8_000, Math.min(4 * 1024 * 1024, value)) : WORKSPACE_LIMITS.maxSearchFileBytes;
+}
 
 type WorkspaceToolContext = {
   ownerId: string;
@@ -145,7 +157,7 @@ async function searchWorkspace(executor: LocalPythonExecutor, query: string, roo
     if (matches.length >= maxResults) break;
     const normalized = file.path.toLocaleLowerCase();
     if (normalized.includes(lowerQuery)) matches.push({ path: file.path, line: 0, column: 0, excerpt: file.path });
-    if (file.size > WORKSPACE_LIMITS.maxSearchFileBytes) continue;
+    if (file.size > workspaceMaxSearchFileBytes()) continue;
     const bytes = await executor.readWorkspaceFile(file.path);
     const text = decoder.decode(bytes);
     if (text.includes("\u0000")) continue;
@@ -169,17 +181,23 @@ async function changedArtifacts(context: WorkspaceToolContext, changedFiles: Wor
 }
 
 function commandResult(result: WorkspaceCommandResult): ChatToolResult {
+  const maxOutputCharacters = (() => {
+    const value = (runtimeConfigSnapshot() as unknown as Record<string, unknown>).workspaceMaxCommandOutputCharacters;
+    return typeof value === "number" && Number.isSafeInteger(value) ? Math.max(1_000, Math.min(1_048_576, value)) : WORKSPACE_LIMITS.maxCommandOutputLength;
+  })();
+  const stdout = result.stdout.slice(0, maxOutputCharacters);
+  const stderr = result.stderr.slice(0, maxOutputCharacters);
   return {
     id: "",
     name: RUN_COMMAND_TOOL_NAME,
     ok: result.exitCode === 0 && !result.timedOut,
-    stdout: result.stdout,
-    stderr: result.stderr,
+    stdout,
+    stderr,
     exitCode: result.exitCode,
     durationMs: result.durationMs,
     ...(result.timedOut ? { timedOut: true } : {}),
-    ...(result.stdoutTruncated ? { stdoutTruncated: true } : {}),
-    ...(result.stderrTruncated ? { stderrTruncated: true } : {}),
+    ...(result.stdoutTruncated || result.stdout.length > stdout.length ? { stdoutTruncated: true } : {}),
+    ...(result.stderrTruncated || result.stderr.length > stderr.length ? { stderrTruncated: true } : {}),
   };
 }
 
@@ -196,7 +214,7 @@ export async function executeWorkspaceTool(call: ChatToolCall, context: Workspac
     if (call.name === WORKSPACE_SEARCH_TOOL_NAME) {
       const query = boundedString(input.query, "query", WORKSPACE_LIMITS.maxSearchQueryLength, true)!;
       const root = optionalDirectoryPath(input.path, "path");
-      const maxResults = boundedInteger(input.maxResults, "maxResults", 1, WORKSPACE_LIMITS.maxSearchResults, configuredWorkspaceSearchDefaultResults());
+      const maxResults = boundedInteger(input.maxResults, "maxResults", 1, configuredWorkspaceSearchMaxResults(), configuredWorkspaceSearchDefaultResults());
       const matches = await searchWorkspace(context.executor, query, root, maxResults);
       return { id: call.id, name: call.name, ok: true, stdout: json(matches), stderr: "", durationMs: Date.now() - startedAt };
     }
@@ -210,8 +228,9 @@ export async function executeWorkspaceTool(call: ChatToolCall, context: Workspac
       const end = boundedInteger(input.endLine, "endLine", start, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
       const lines = text.split(/\r?\n/);
       const output = lines.slice(start - 1, end).map((line, index) => `${start + index}: ${line}`).join("\n");
-      const boundedOutput = output.length > WORKSPACE_LIMITS.maxReadOutputLength
-        ? `${output.slice(0, WORKSPACE_LIMITS.maxReadOutputLength)}\n[read output truncated]`
+      const maxOutputCharacters = workspaceMaxReadOutputCharacters();
+      const boundedOutput = output.length > maxOutputCharacters
+        ? `${output.slice(0, maxOutputCharacters)}\n[read output truncated]`
         : output;
       return { id: call.id, name: call.name, ok: true, stdout: boundedOutput, stderr: "", durationMs: Date.now() - startedAt };
     }

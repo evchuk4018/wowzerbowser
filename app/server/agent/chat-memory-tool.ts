@@ -5,13 +5,14 @@ import type { ChatConversation, ChatHistoryMessage } from "../../../lib/chat-his
 import { getActiveConversationTurns } from "../../../lib/chat-history";
 import { searchChatConversations, getChatConversation } from "../chat/chat-history-store";
 import { recallChatWithQwen } from "../../providers/openrouter/openrouter-qwen-text-adapter";
-import { CHAT_MEMORY_TOOL_DEFINITIONS, RECALL_CHATS_TOOL_NAME, SEARCH_CHATS_TOOL_NAME } from "./chat-memory-tool-manifest";
+import { buildChatMemoryToolDefinitions, RECALL_CHATS_TOOL_NAME, SEARCH_CHATS_TOOL_NAME } from "./chat-memory-tool-manifest";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 
-const MAX_QUERY = 200;
-const MAX_PROMPT = 2_000;
-const MAX_CONTEXT = 120_000;
+const MAX_SAFE_QUERY = 200;
+const MAX_SAFE_PROMPT = 20_000;
+const MAX_SAFE_CONTEXT = 300_000;
 export const availableChatMemoryTools = (openRouterConfigured = Boolean(process.env.OPENROUTER_API_KEY?.trim())) =>
-  CHAT_MEMORY_TOOL_DEFINITIONS.filter((tool) => tool.function.name !== RECALL_CHATS_TOOL_NAME || openRouterConfigured);
+  buildChatMemoryToolDefinitions().filter((tool) => tool.function.name !== RECALL_CHATS_TOOL_NAME || openRouterConfigured);
 
 const failure = (call: ChatToolCall, message: string): ChatToolResult => ({ id: call.id, name: call.name, ok: false, stdout: "", stderr: message });
 function args(call: ChatToolCall): Record<string, unknown> { try { const value = JSON.parse(call.arguments); if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>; } catch {} throw new Error("Invalid chat tool arguments."); }
@@ -24,13 +25,14 @@ function activeMessages(conversation: ChatConversation): ChatHistoryMessage[] {
 }
 
 function buildContext(conversation: ChatConversation): string {
+  const maxContext = Math.min(runtimeConfigSnapshot().chatMemoryContextMaxCharacters, MAX_SAFE_CONTEXT);
   const raw = activeMessages(conversation).map((message) => {
     const activities = message.activities?.length ? `\nActivities: ${JSON.stringify(message.activities)}` : "";
     return `[${message.role}]\n${message.content}${activities}`;
   }).join("\n\n");
-  if (raw.length <= MAX_CONTEXT) return raw || "(empty conversation)";
-  const head = Math.floor(MAX_CONTEXT * 0.2);
-  return `${raw.slice(0, head)}\n\n[conversation clipped; only the most recent context is included]\n\n${raw.slice(-(MAX_CONTEXT - head - 80))}`;
+  if (raw.length <= maxContext) return raw || "(empty conversation)";
+  const head = Math.floor(maxContext * 0.2);
+  return `${raw.slice(0, head)}\n\n[conversation clipped; only the most recent context is included]\n\n${raw.slice(-(maxContext - head - 80))}`;
 }
 
 export type ChatMemoryToolContext = { ownerId: string; signal: AbortSignal; contextCache: Map<string, string>; onRecallUsage?: (usage: { model: string; usage: ChatUsage; source: "exact" | "estimated"; exactCostUsd?: number }) => Promise<void> };
@@ -42,7 +44,7 @@ export async function executeChatMemoryTool(call: ChatToolCall, context: ChatMem
     const input = args(call);
     if (call.name === SEARCH_CHATS_TOOL_NAME) {
       const query = typeof input.query === "string" ? input.query.trim() : "";
-      if (query.length > MAX_QUERY) return failure(call, "Chat search query is too long.");
+      if (query.length > MAX_SAFE_QUERY) return failure(call, "Chat search query is too long.");
       const conversations = await searchChatConversations(context.ownerId, query);
       return { id: call.id, name: call.name, ok: true, stdout: JSON.stringify({ conversations }), stderr: "" };
     }
@@ -50,7 +52,9 @@ export async function executeChatMemoryTool(call: ChatToolCall, context: ChatMem
     const conversationId = typeof input.conversationId === "string" ? input.conversationId.trim() : "";
     const prompt = typeof input.prompt === "string" ? input.prompt.trim() : "";
     if (!conversationId || conversationId.length > 200) return failure(call, "conversationId is required and must be valid.");
-    if (!prompt || prompt.length > MAX_PROMPT) return failure(call, "prompt is required and must be at most 2,000 characters.");
+    const configuration = runtimeConfigSnapshot();
+    const maxPrompt = Math.min(configuration.chatMemoryRecallMaxPromptCharacters, MAX_SAFE_PROMPT);
+    if (!prompt || prompt.length > maxPrompt) return failure(call, `prompt is required and must be at most ${maxPrompt.toLocaleString()} characters.`);
     let serialized = context.contextCache.get(conversationId);
     if (!serialized) {
       const conversation = await getChatConversation(context.ownerId, conversationId);
@@ -58,7 +62,11 @@ export async function executeChatMemoryTool(call: ChatToolCall, context: ChatMem
       serialized = buildContext(conversation);
       context.contextCache.set(conversationId, serialized);
     }
-    const answer = await recallChatWithQwen(serialized, prompt, { signal: context.signal });
+    const answer = await recallChatWithQwen(serialized, prompt, {
+      signal: context.signal,
+      timeoutMs: Math.min(configuration.chatMemoryRecallTimeoutMs, 120_000),
+      maxTokens: Math.min(configuration.chatMemoryRecallMaxOutputTokens, 8_000),
+    });
     await context.onRecallUsage?.({ model: answer.model, usage: answer.usage ?? answer.estimatedUsage, source: answer.usage || answer.exactCostUsd !== undefined ? "exact" : "estimated", exactCostUsd: answer.exactCostUsd });
     return { id: call.id, name: call.name, ok: true, stdout: answer.answer, stderr: "" };
   } catch (error) {

@@ -13,12 +13,25 @@ import { chatModelIdentity, type ChatModelInfo, type ChatModelRef } from "../../
 
 const CATEGORY_LABELS: Record<RuntimeConfigDescriptor["category"], string> = {
   search: "Search",
+  chat: "Chat & context",
   providers: "Providers",
   research: "Deep research",
   documents: "Documents",
+  agent: "Agent tools",
   worker: "Background worker",
   memory: "Memory",
 };
+
+const CATEGORY_ORDER: RuntimeConfigDescriptor["category"][] = [
+  "search",
+  "chat",
+  "research",
+  "documents",
+  "agent",
+  "memory",
+  "providers",
+  "worker",
+];
 
 type ConfigurablesSettingsProps = {
   hasSession: () => Promise<boolean>;
@@ -96,7 +109,7 @@ export function ConfigurablesSettings({ hasSession, visionModel, onVisionModelCh
       group.push(descriptor);
       groups.set(descriptor.category, group);
     }
-    return [...groups.entries()];
+    return [...groups.entries()].sort(([left], [right]) => CATEGORY_ORDER.indexOf(left) - CATEGORY_ORDER.indexOf(right));
   }, [runtime]);
 
   const updateRuntimeValue = (key: RuntimeConfigKey, value: RuntimeConfigValues[RuntimeConfigKey]) => {

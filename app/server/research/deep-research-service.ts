@@ -6,6 +6,7 @@ import { searchSelfHosted } from "../search/search-service";
 import { recordPromptUsage } from "../usage/prompt-cost-service";
 import { ReasoningTitleCoordinator, type ReasoningTitleUsage } from "../chat/reasoning-title-service";
 import { researchLimits } from "./research-config";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 import { decomposeResearchRequest, extractResearchClaims, verifyResearchClaims } from "./research-model";
 import { fetchResearchPage } from "./research-page-service";
 import { rankResearchCandidates } from "./research-ranking";
@@ -182,8 +183,8 @@ async function executeQuery(query: ResearchQuery, index: number, run: ResearchRu
   }
 }
 
-function evidenceText(pages: Iterable<FetchedResearchPage>, maximumTokens: number): string {
-  const maximumCharacters = maximumTokens * 4;
+function evidenceText(pages: Iterable<FetchedResearchPage>, maximumTokens: number, configuredMaximumCharacters: number): string {
+  const maximumCharacters = Math.min(maximumTokens * 4, configuredMaximumCharacters, 250_000);
   let output = "";
   for (const page of pages) {
     const block = `<source id="${page.source.id}" url="${page.source.url}" date="${page.source.publishedAt ?? ""}">\n${page.markdown}\n</source>\n`;
@@ -221,6 +222,7 @@ export async function performDeepResearch(input: {
   ownerId: string; conversationId: string; jobId: string; request: string; signal?: AbortSignal; onUpdate?: ResearchProgressCallback;
 }): Promise<ResearchRun> {
   const limits = researchLimits();
+  const configuration = runtimeConfigSnapshot();
   const budget: ResearchBudget = { searches: 0, fetchedPages: 0, followUpSearches: 0, evidenceTokens: 0, modelCalls: 0, estimatedCostUsd: 0 };
   const run: ResearchRun = { id: `research_${randomUUID()}`, request: input.request, allowedUrls: new Set(), pages: new Map(), claims: [], sources: [], budget, limits, warnings: [] };
   const trace = new ResearchTraceCoordinator({
@@ -266,7 +268,7 @@ export async function performDeepResearch(input: {
   await trace.update("fetching", "completed", "completed");
   if (run.pages.size < 2) run.warnings.push("Research stopped with fewer than two readable sources.");
 
-  let evidence = evidenceText(run.pages.values(), limits.maxEvidenceTokens);
+  let evidence = evidenceText(run.pages.values(), limits.maxEvidenceTokens, configuration.deepResearchMaxEvidenceCharacters);
   budget.evidenceTokens = Math.ceil(evidence.length / 4);
   if (run.pages.size && budget.modelCalls < limits.maxModelCalls && budget.estimatedCostUsd + modelReservation <= limits.maxEstimatedCostUsd) {
     await trace.update("claim_extraction", "started");
@@ -306,7 +308,7 @@ export async function performDeepResearch(input: {
     ranked = rankResearchCandidates([...ranked, ...additional]);
     await fetchRankedPages(run, ranked.filter((candidate) => ![...run.pages.values()].some((page) => page.source.url === candidate.url)));
     if (run.pages.size - before < 2) run.warnings.push("Follow-up searches reached early stopping because they produced little new evidence.");
-    evidence = evidenceText(run.pages.values(), limits.maxEvidenceTokens);
+    evidence = evidenceText(run.pages.values(), limits.maxEvidenceTokens, configuration.deepResearchMaxEvidenceCharacters);
     budget.evidenceTokens = Math.ceil(evidence.length / 4);
     if (run.pages.size > before && budget.modelCalls < limits.maxModelCalls && budget.estimatedCostUsd + modelReservation <= limits.maxEstimatedCostUsd) {
       try {
