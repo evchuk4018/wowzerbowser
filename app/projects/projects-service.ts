@@ -61,6 +61,14 @@ export async function createProjectChat(projectId: string): Promise<ProjectChat>
   return (await readJson<{ chat: ProjectChat }>(response, "The chat could not be created.")).chat;
 }
 
+export async function assignChatToProject(projectId: string, conversationId: string, title: string): Promise<ProjectChat> {
+  const response = await authFetch(
+    `/api/projects/${encodeURIComponent(projectId)}/chats`,
+    jsonRequest("POST", { conversationId, title }),
+  );
+  return (await readJson<{ chat: ProjectChat }>(response, "The chat could not be added to the project.")).chat;
+}
+
 export async function deleteProjectFile(projectId: string, fileId: string): Promise<void> {
   const response = await authFetch(`/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}`, { method: "DELETE" });
   if (!response.ok) await readJson(response, "The file could not be deleted.");

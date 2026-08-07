@@ -64,6 +64,8 @@ import { parseChatModeCommand, type ChatMode } from "../../lib/chat-modes";
 import { ArtifactPreviewPanel } from "./artifact-preview-panel";
 import { defaultArtifactPreviewWidth, clampArtifactPreviewWidth } from "./artifact-preview-layout";
 import { readWorkspaceFileContent, saveWorkspaceFile } from "./chat-service";
+import { assignChatToProject, listProjects } from "../projects/projects-service";
+import type { ChatProject } from "../../lib/chat-project-protocol";
 
 export type ChatWorkspaceProps = {
   user: AuthUser;
@@ -116,6 +118,13 @@ export function ChatWorkspace({
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [recoveredStreaming, setRecoveredStreaming] = useState<Record<string, "persisted">>({});
   const [conversationSummaries, setConversationSummaries] = useState<ChatConversationSummary[]>([]);
+  const [projects, setProjects] = useState<ChatProject[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
+  const [projectAssignment, setProjectAssignment] = useState<{ conversationId: string; projectId: string } | null>(null);
+  const [projectAssignmentStatus, setProjectAssignmentStatus] = useState<{ conversationId: string; message: string } | null>(null);
+  const [projectAssignmentError, setProjectAssignmentError] = useState<{ conversationId: string; message: string } | null>(null);
   const [bootstrapModelPreferences, setBootstrapModelPreferences] = useState<Record<string, ChatModelPreference>>({});
   const [bootstrapComplete, setBootstrapComplete] = useState(false);
   const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
@@ -143,6 +152,8 @@ export function ChatWorkspace({
   const artifactPreviewRequestRef = useRef(0);
   const conversationLoadRequestRef = useRef(0);
   const bootstrapRequestRef = useRef(0);
+  const projectLoadInFlightRef = useRef(false);
+  const projectAssignmentTimerRef = useRef<number | null>(null);
   const initialConversationIdRef = useRef(requestedConversationId);
   const handledRouteRef = useRef<string | undefined | null>(null);
   const {
@@ -157,6 +168,23 @@ export function ChatWorkspace({
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     return fetchChatUsage(range, timeZone);
   }, [hasSession]);
+
+  const loadProjects = useCallback(async () => {
+    if (projectLoadInFlightRef.current || (projectsLoaded && !projectsError)) return;
+    projectLoadInFlightRef.current = true;
+    setProjectsLoading(true);
+    setProjectsError(null);
+    try {
+      if (!(await hasSession())) throw new Error("Your session expired.");
+      setProjects(await listProjects());
+      setProjectsLoaded(true);
+    } catch (error) {
+      setProjectsError(error instanceof Error ? error.message : "Projects are unavailable.");
+    } finally {
+      projectLoadInFlightRef.current = false;
+      setProjectsLoading(false);
+    }
+  }, [hasSession, projectsError, projectsLoaded]);
 
   useEffect(() => {
     if (!snapshotLoaded) return;
@@ -405,6 +433,52 @@ export function ChatWorkspace({
   );
   const activeStreaming = Boolean(streamingByConversation[state.activeId]);
   const startupPending = startupStage !== "remote" || !remoteAuthorized;
+  const assignActiveChatToProject = useCallback(async (project: ChatProject) => {
+    const conversation = state.conversations.find(({ id }) => id === state.activeId);
+    if (!conversation || startupPending || activeStreaming || loadingConversationId || generation.isSubmittingAttachments || generation.isPreparingAttachments) return;
+    setProjectAssignmentError(null);
+    setProjectAssignmentStatus(null);
+    if (conversation.projectId === project.id) {
+      setProjectAssignmentStatus({ conversationId: conversation.id, message: `Already in ${project.title}` });
+      if (projectAssignmentTimerRef.current !== null) window.clearTimeout(projectAssignmentTimerRef.current);
+      projectAssignmentTimerRef.current = window.setTimeout(() => setProjectAssignmentStatus(null), 2400);
+      return;
+    }
+
+    setProjectAssignment({ conversationId: conversation.id, projectId: project.id });
+    try {
+      await assignChatToProject(project.id, conversation.id, conversation.title);
+      dispatch({ type: "SET_PROJECT_ID", conversationId: conversation.id, projectId: project.id });
+      const updatedAt = new Date().toISOString();
+      setConversationSummaries((current) => {
+        const next = current.map((summary) => summary.id === conversation.id
+          ? { ...summary, title: conversation.title, projectId: project.id, updatedAt }
+          : summary);
+        if (next.some(({ id }) => id === conversation.id)) return next;
+        return [{
+          id: conversation.id,
+          title: conversation.title,
+          projectId: project.id,
+          updatedAt,
+          hasMessages: conversation.turns.length > 0,
+          isStreaming: false,
+        }, ...next];
+      });
+      setProjectAssignmentStatus({
+        conversationId: conversation.id,
+        message: `${conversation.projectId ? "Moved" : "Added"} to ${project.title}`,
+      });
+      if (projectAssignmentTimerRef.current !== null) window.clearTimeout(projectAssignmentTimerRef.current);
+      projectAssignmentTimerRef.current = window.setTimeout(() => setProjectAssignmentStatus(null), 2400);
+    } catch (error) {
+      setProjectAssignmentError({
+        conversationId: conversation.id,
+        message: error instanceof Error ? error.message : "The chat could not be added to the project.",
+      });
+    } finally {
+      setProjectAssignment((current) => current?.conversationId === conversation.id ? null : current);
+    }
+  }, [activeStreaming, generation.isPreparingAttachments, generation.isSubmittingAttachments, loadingConversationId, startupPending, state.activeId, state.conversations]);
   const sidebarConversations = useMemo(() => {
     const summariesById = new Map(
       conversationSummaries.map((summary) => [summary.id, summary]),
@@ -547,6 +621,12 @@ export function ChatWorkspace({
     releasePdfPreviewUrl();
   }, [releasePdfPreviewUrl]);
 
+  useEffect(() => () => {
+    if (projectAssignmentTimerRef.current !== null) {
+      window.clearTimeout(projectAssignmentTimerRef.current);
+    }
+  }, []);
+
   const startNewChat = useCallback(() => {
     shouldAutoScrollRef.current = true;
     conversationLoadRequestRef.current += 1;
@@ -662,7 +742,7 @@ export function ChatWorkspace({
   useEffect(() => {
     if (!remoteAuthorized) return;
     persistCurrentSnapshot();
-  }, [active?.id, active?.title, activeBranchKey, activeTurns.length, conversationSummaries, latestMessage?.status, persistCurrentSnapshot, remoteAuthorized, recoveredStreaming, settings.userPresence, state.activeId]);
+  }, [active?.id, active?.projectId, active?.title, activeBranchKey, activeTurns.length, conversationSummaries, latestMessage?.status, persistCurrentSnapshot, remoteAuthorized, recoveredStreaming, settings.userPresence, state.activeId]);
 
   useEffect(() => () => {
     void flushSnapshot();
@@ -1055,6 +1135,15 @@ export function ChatWorkspace({
           todos={latestMessage?.todos}
           mode={mode}
           setMode={setMode}
+          projects={projects}
+          projectsLoading={projectsLoading}
+          projectsError={projectsError}
+          onLoadProjects={loadProjects}
+          currentProjectId={active.projectId ?? null}
+          assigningProjectId={projectAssignment?.conversationId === active.id ? projectAssignment.projectId : null}
+          projectAssignmentStatus={projectAssignmentStatus?.conversationId === active.id ? projectAssignmentStatus.message : null}
+          projectAssignmentError={projectAssignmentError?.conversationId === active.id ? projectAssignmentError.message : null}
+          onAssignProject={assignActiveChatToProject}
         />
       </section>
       {pdfPreview && (

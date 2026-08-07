@@ -49,6 +49,12 @@ export type UpdateTitleAction = {
   title: string;
 };
 
+export type SetProjectAction = {
+  type: "SET_PROJECT_ID";
+  conversationId: string;
+  projectId: string | null;
+};
+
 export type AppendTurnAction = {
   type: "APPEND_TURN";
   conversationId: string;
@@ -108,6 +114,7 @@ export type ConversationAction =
   | SelectConversationAction
   | RemoveConversationAction
   | UpdateTitleAction
+  | SetProjectAction
   | AppendTurnAction
   | AppendTurnVersionAction
   | SelectTurnVersionAction

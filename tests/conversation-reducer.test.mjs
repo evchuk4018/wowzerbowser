@@ -53,6 +53,23 @@ test("loads, creates, selects, and titles conversations with stable ordering", (
   assert.equal(titled.conversations[1].title, "Renamed");
 });
 
+test("updates a conversation project without mutating the previous state", () => {
+  const state = loaded();
+  const assigned = conversationReducer(state, {
+    type: "SET_PROJECT_ID",
+    conversationId: "conversation-1",
+    projectId: "project-1",
+  });
+  assert.equal(assigned.conversations[0].projectId, "project-1");
+  assert.equal(state.conversations[0].projectId, undefined);
+  const cleared = conversationReducer(assigned, {
+    type: "SET_PROJECT_ID",
+    conversationId: "conversation-1",
+    projectId: null,
+  });
+  assert.equal(cleared.conversations[0].projectId, null);
+});
+
 test("updates messages immutably and marks terminal statuses", () => {
   const state = loaded();
   const assistantId = "version-1-assistant";

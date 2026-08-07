@@ -185,6 +185,12 @@ export function conversationReducer(
           ? conversation
           : { ...conversation, title: action.title });
 
+    case "SET_PROJECT_ID":
+      return updateConversation(state, action.conversationId, (conversation) =>
+        conversation.projectId === action.projectId
+          ? conversation
+          : { ...conversation, projectId: action.projectId });
+
     case "APPEND_TURN":
       return updateConversation(state, action.conversationId, (conversation) => {
         const activeTurns = getActiveConversationTurns(conversation);

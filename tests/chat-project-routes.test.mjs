@@ -3,6 +3,7 @@ import test from "node:test";
 import { createProjectCollectionHandlers } from "../app/api/projects/route.ts";
 import { createProjectHandler } from "../app/api/projects/[projectId]/route.ts";
 import { createProjectChatsHandler } from "../app/api/projects/[projectId]/chats/route.ts";
+import { ChatProjectServiceError } from "../app/server/projects/project-service.ts";
 import { createProjectFilesListHandler } from "../app/api/projects/[projectId]/files/route.ts";
 import { createProjectFileHandler } from "../app/api/projects/[projectId]/files/[fileId]/route.ts";
 
@@ -113,6 +114,61 @@ test("project chat routes list and create metadata through scoped services", asy
   assert.equal(created.status, 201);
   assert.equal((await created.json()).chat.id, "chat_2");
   assert.deepEqual(calls, [["list", "owner", "project_1"], ["create", "owner", "project_1", { title: "New" }]]);
+});
+
+test("project chat POST passes assignment bodies and preserves empty-body creation", async () => {
+  const calls = [];
+  const handlers = createProjectChatsHandler({
+    authorizeOwnerSession: async () => owner,
+    listProjectChatsForOwner: async () => [],
+    createProjectChat: async (...args) => {
+      calls.push(args);
+      return { id: args[2]?.conversationId ?? "created", projectId: project.id, title: args[2]?.title ?? "New conversation", createdAt: "now", updatedAt: "now", hasMessages: true, isStreaming: false };
+    },
+  });
+
+  const assigned = await handlers.POST(new Request("http://test/api/projects/project_1/chats", {
+    method: "POST",
+    body: JSON.stringify({ conversationId: "chat_1", title: "Existing chat" }),
+  }), { params: { projectId: "project_1" } });
+  assert.equal(assigned.status, 201);
+  assert.equal((await assigned.json()).chat.id, "chat_1");
+
+  const created = await handlers.POST(new Request("http://test/api/projects/project_1/chats", { method: "POST" }), { params: { projectId: "project_1" } });
+  assert.equal(created.status, 201);
+  assert.equal((await created.json()).chat.id, "created");
+  assert.deepEqual(calls, [
+    ["owner", "project_1", { conversationId: "chat_1", title: "Existing chat" }],
+    ["owner", "project_1", undefined],
+  ]);
+});
+
+test("project chat POST rejects invalid, missing, and unauthorized project requests", async () => {
+  const calls = [];
+  const dependencies = {
+    authorizeOwnerSession: async () => owner,
+    listProjectChatsForOwner: async () => [],
+    createProjectChat: async (...args) => {
+      calls.push(args);
+      throw new ChatProjectServiceError("not_found", "Project not found.", 404);
+    },
+  };
+  const handlers = createProjectChatsHandler(dependencies);
+
+  const invalid = await handlers.POST(new Request("http://test/api/projects/not!"), { params: { projectId: "not!" } });
+  assert.equal(invalid.status, 404);
+  assert.equal(calls.length, 0);
+
+  const missing = await handlers.POST(new Request("http://test/api/projects/project_1/chats", { method: "POST", body: "{}" }), { params: { projectId: "project_1" } });
+  assert.equal(missing.status, 404);
+  assert.deepEqual((await missing.json()).error, "Project not found.");
+
+  const unauthorized = await createProjectChatsHandler({
+    authorizeOwnerSession: async () => null,
+    listProjectChatsForOwner: async () => { throw new Error("must not list"); },
+    createProjectChat: async () => { throw new Error("must not create"); },
+  }).POST(new Request("http://test/api/projects/project_1/chats", { method: "POST", body: "{}" }), { params: { projectId: "project_1" } });
+  assert.equal(unauthorized.status, 401);
 });
 
 test("project file routes list, stream, and delete owner-scoped metadata", async () => {

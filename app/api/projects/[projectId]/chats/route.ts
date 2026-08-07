@@ -47,7 +47,7 @@ export function createProjectChatsHandler(dependencies = { authorizeOwnerSession
       try {
         return NextResponse.json({ chat: await dependencies.createProjectChat(owner.id, projectId, body) }, { status: 201 });
       } catch (error) {
-        return serviceError(error, "The project chat could not be created.");
+        return serviceError(error, "The project chat could not be created or moved.");
       }
     },
   };

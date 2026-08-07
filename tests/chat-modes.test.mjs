@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { chatModeCommandAtCaret, clearChatModeCommand, parseChatModeCommand } from "../lib/chat-modes.ts";
+import { filterChatComposerCommands, moveChatCommandIndex, removeChatCommandToken } from "../lib/chat-command-picker.ts";
 import { runSubagents } from "../app/server/agent/subagent-coordinator.ts";
 
 test("deep research slash command is extracted from the prompt", () => {
@@ -36,6 +37,19 @@ test("command autocomplete finds a standalone slash token at the caret", () => {
   assert.deepEqual(chatModeCommandAtCaret("compare /deep", 13), { start: 8, end: 13, query: "/deep" });
   assert.deepEqual(chatModeCommandAtCaret("compare /deep battery", 13), { start: 8, end: 13, query: "/deep" });
   assert.equal(chatModeCommandAtCaret("compare/deep", 12), null);
+});
+
+test("project autocomplete filters by the slash token and removes only that token", () => {
+  assert.deepEqual(filterChatComposerCommands("/pro").map(({ command }) => command), ["/projects"]);
+  assert.deepEqual(filterChatComposerCommands("/").map(({ command }) => command), ["/deep-research", "/projects"]);
+  const draft = "Keep this /projects beside the rest";
+  assert.equal(removeChatCommandToken(draft, { start: 10, end: 19 }), "Keep this  beside the rest");
+});
+
+test("project autocomplete index wraps in both directions", () => {
+  assert.equal(moveChatCommandIndex(0, -1, 3), 2);
+  assert.equal(moveChatCommandIndex(2, 1, 3), 0);
+  assert.equal(moveChatCommandIndex(0, 1, 0), 0);
 });
 
 test("subagent coordinator runs bounded work and preserves task order", async () => {

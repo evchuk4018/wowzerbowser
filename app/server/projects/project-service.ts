@@ -23,6 +23,7 @@ import {
   getChatProject,
   insertChatProject,
   insertProjectChat,
+  assignProjectChat,
   listChatProjects,
   listProjectChats,
   updateChatProject,
@@ -141,6 +142,21 @@ export async function createProjectChat(ownerId: string, projectId: string, valu
     protocolError(error);
   }
   await requireProject(await getChatProject(ownerId, projectId));
+  if (input.conversationId) {
+    try {
+      const chat = await assignProjectChat({
+        ownerId,
+        projectId,
+        conversationId: input.conversationId,
+        title: input.title,
+      });
+      if (!chat) throw new ChatProjectServiceError("not_found", "Conversation not found.", 404);
+      return chat;
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new ChatProjectServiceError("conflict", "The project chat could not be moved.", 409);
+      throw error;
+    }
+  }
   const chat = await insertProjectChat({
     ownerId,
     projectId,

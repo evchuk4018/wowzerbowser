@@ -23,6 +23,8 @@ import { validateChatDocument, type PendingChatDocument } from "./chat-document-
 import { DOCX_CONTENT_TYPE, DOCUMENT_CONTENT_TYPES, type ChatDocumentAttachment } from "../../lib/chat-document";
 import type { TodoList } from "../../lib/todo-protocol";
 import { CHAT_MODE_COMMANDS, chatModeCommandAtCaret, clearChatModeCommand, type ChatMode } from "../../lib/chat-modes";
+import { filterChatComposerCommands, moveChatCommandIndex, removeChatCommandToken, CHAT_PROJECT_COMMAND as PROJECT_COMMAND } from "../../lib/chat-command-picker";
+import type { ChatProject } from "../../lib/chat-project-protocol";
 
 function formatDocumentSize(size: number): string {
   if (size < 1024) return `${size} B`;
@@ -39,6 +41,17 @@ function documentType(contentType: string, name: string): "PDF" | "DOCX" {
 const REASONING_LABELS: Record<ChatReasoningEffort, string> = {
   minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra High", max: "Max",
 };
+
+type CommandView = "commands" | "projects";
+
+function FolderIcon() {
+  return (
+    <svg className="composer-folder-icon" viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M2.5 5.5h5l1.6 2h8.4v7.2a1.8 1.8 0 0 1-1.8 1.8H4.3a1.8 1.8 0 0 1-1.8-1.8V5.5Z" />
+      <path d="M2.5 7.5h15" />
+    </svg>
+  );
+}
 
 function DocumentIcon({ type }: { type: "PDF" | "DOCX" }) {
   return (
@@ -88,6 +101,15 @@ export type ChatComposerProps = {
   todos?: TodoList;
   mode: ChatMode;
   setMode: Dispatch<SetStateAction<ChatMode>>;
+  projects: readonly ChatProject[];
+  projectsLoading: boolean;
+  projectsError: string | null;
+  onLoadProjects: () => void | Promise<void>;
+  currentProjectId: string | null;
+  assigningProjectId: string | null;
+  projectAssignmentStatus: string | null;
+  projectAssignmentError: string | null;
+  onAssignProject: (project: ChatProject) => void | Promise<void>;
 };
 
 function TodoBar({ todos }: { todos?: TodoList }) {
@@ -149,6 +171,15 @@ export function ChatComposer({
   todos,
   mode,
   setMode,
+  projects,
+  projectsLoading,
+  projectsError,
+  onLoadProjects,
+  currentProjectId,
+  assigningProjectId,
+  projectAssignmentStatus,
+  projectAssignmentError,
+  onAssignProject,
 }: ChatComposerProps) {
   const [attachments, setAttachments] = useState<PendingChatImage[]>([]);
   const [documents, setDocuments] = useState<PendingChatDocument[]>([]);
@@ -160,6 +191,13 @@ export function ChatComposer({
   const disabled = isStreaming || isSubmittingAttachments || startupPending;
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [commandToken, setCommandToken] = useState<{ start: number; end: number; query: string } | null>(null);
+  const [commandView, setCommandView] = useState<CommandView>("commands");
+  const [commandIndex, setCommandIndex] = useState(0);
+  const [projectIndex, setProjectIndex] = useState(0);
+  const projectPickerDisabled = disabled || isPreparingAttachments || Boolean(assigningProjectId);
+  const matchingCommands = filterChatComposerCommands(commandToken?.query ?? "");
+  const activeCommandIndex = Math.min(commandIndex, Math.max(0, matchingCommands.length - 1));
+  const activeProjectIndex = Math.min(projectIndex, Math.max(0, projects.length - 1));
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -263,6 +301,110 @@ export function ChatComposer({
   const submitAndClose = (event?: FormEvent<HTMLFormElement>, pendingAttachments?: readonly PendingChatImage[], pendingDocuments?: readonly PendingChatDocument[]) => {
     closeExpandedEditor();
     return onSubmit(event, pendingAttachments, pendingDocuments);
+  };
+
+  const selectModeCommand = (item: (typeof CHAT_MODE_COMMANDS)[number]) => {
+    setMode(item.mode);
+    if (!commandToken) return;
+    const nextDraft = `${draft.slice(0, commandToken.start)}${item.command} ${draft.slice(commandToken.end)}`;
+    setDraft(nextDraft);
+    setCommandToken(null);
+    setCommandMenuOpen(false);
+    setCommandView("commands");
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      const caret = commandToken.start + item.command.length + 1;
+      textarea.focus();
+      textarea.setSelectionRange(caret, caret);
+    });
+  };
+
+  const enterProjectsView = () => {
+    if (projectPickerDisabled) return;
+    setCommandView("projects");
+    setProjectIndex(0);
+    void onLoadProjects();
+  };
+
+  const removeProjectCommandToken = (token: { start: number; end: number }) => {
+    const nextDraft = removeChatCommandToken(draft, token);
+    setDraft(nextDraft);
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      textarea.setSelectionRange(token.start, token.start);
+    });
+  };
+
+  const selectProject = async (project: ChatProject) => {
+    if (projectPickerDisabled || !commandToken) return;
+    const token = commandToken;
+    setCommandToken(null);
+    setCommandMenuOpen(false);
+    setCommandView("commands");
+    removeProjectCommandToken(token);
+    try {
+      await onAssignProject(project);
+    } catch {
+      // The workspace owns assignment errors. Keep the composer usable if a
+      // caller rejects without presenting its own error state.
+    }
+  };
+
+  const handleCommandMenuKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (!commandMenuOpen || !commandToken || projectPickerDisabled) return false;
+    const itemCount = commandView === "projects" ? projects.length : matchingCommands.length;
+    if (event.key === "ArrowDown" && itemCount > 0) {
+      event.preventDefault();
+      if (commandView === "projects") setProjectIndex((current) => moveChatCommandIndex(current, 1, itemCount));
+      else setCommandIndex((current) => moveChatCommandIndex(current, 1, itemCount));
+      return true;
+    }
+    if (event.key === "ArrowUp" && itemCount > 0) {
+      event.preventDefault();
+      if (commandView === "projects") setProjectIndex((current) => moveChatCommandIndex(current, -1, itemCount));
+      else setCommandIndex((current) => moveChatCommandIndex(current, -1, itemCount));
+      return true;
+    }
+    if (event.key === "Home" && itemCount > 0) {
+      event.preventDefault();
+      if (commandView === "projects") setProjectIndex(0);
+      else setCommandIndex(0);
+      return true;
+    }
+    if (event.key === "End" && itemCount > 0) {
+      event.preventDefault();
+      if (commandView === "projects") setProjectIndex(itemCount - 1);
+      else setCommandIndex(itemCount - 1);
+      return true;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (commandView === "projects") {
+        setCommandView("commands");
+        setCommandIndex(0);
+      } else {
+        setCommandMenuOpen(false);
+        setCommandToken(null);
+      }
+      return true;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      if (commandView === "projects") {
+        const project = projects[activeProjectIndex];
+        if (project) void selectProject(project);
+      } else {
+        const item = matchingCommands[activeCommandIndex];
+        if (!item) return true;
+        if (item.command === PROJECT_COMMAND.command) enterProjectsView();
+        else if ("mode" in item) selectModeCommand(item);
+      }
+      return true;
+    }
+    return false;
   };
 
   return (
@@ -427,8 +569,11 @@ export function ChatComposer({
             const token = chatModeCommandAtCaret(next, event.target.selectionStart);
             setCommandToken(token);
             setCommandMenuOpen(Boolean(token));
+            setCommandView("commands");
+            setCommandIndex(0);
           }}
           onKeyDown={(event) => {
+            if (handleCommandMenuKeyDown(event)) return;
             if (event.key === "Escape" && expanded) {
               event.preventDefault();
               closeExpandedEditor();
@@ -466,33 +611,91 @@ export function ChatComposer({
           >
             +
           </button>
-          {commandMenuOpen && commandToken && !disabled && (
-            <div className="composer-command-popover" role="listbox" aria-label="Commands">
+          {commandMenuOpen && commandToken && !projectPickerDisabled && (
+            <div
+              className="composer-command-popover"
+              role="listbox"
+              aria-label={commandView === "projects" ? "Projects" : "Commands"}
+              onKeyDown={(event) => { handleCommandMenuKeyDown(event); }}
+            >
+              {commandView === "commands" && <>
               <div className="composer-command-heading">Commands</div>
-              {CHAT_MODE_COMMANDS.filter((item) => item.command.startsWith(commandToken.query)).map((item) => (
+              {matchingCommands.filter((item) => "mode" in item).map((item, index) => (
                 <button
                   type="button"
-                  className={`composer-command-option ${mode === item.mode ? "selected" : ""}`}
+                  role="option"
+                  aria-selected={index === activeCommandIndex}
+                  className={`composer-command-option ${index === activeCommandIndex || mode === item.mode ? "selected" : ""}`}
                   key={item.command}
-                  onClick={() => {
-                    setMode(item.mode);
-                    const nextDraft = `${draft.slice(0, commandToken.start)}${item.command} ${draft.slice(commandToken.end)}`;
-                    setDraft(nextDraft);
-                    setCommandToken(null);
-                    setCommandMenuOpen(false);
-                    requestAnimationFrame(() => {
-                      const textarea = textareaRef.current;
-                      if (!textarea) return;
-                      textarea.focus();
-                      const caret = commandToken.start + item.command.length + 1;
-                      textarea.setSelectionRange(caret, caret);
-                    });
-                  }}
+                  onMouseEnter={() => setCommandIndex(index)}
+                  onClick={() => selectModeCommand(item)}
                 >
                   <span className="composer-command-icon" aria-hidden="true">⌁</span>
                   <span><strong>{item.label}</strong><small>{item.description}</small></span>
                 </button>
               ))}
+              {matchingCommands.some((item) => item.command === PROJECT_COMMAND.command) && (
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={matchingCommands.findIndex((item) => item.command === PROJECT_COMMAND.command) === activeCommandIndex}
+                  className={`composer-command-option ${matchingCommands.findIndex((item) => item.command === PROJECT_COMMAND.command) === activeCommandIndex ? "selected" : ""}`}
+                  onMouseEnter={() => setCommandIndex(matchingCommands.findIndex((item) => item.command === PROJECT_COMMAND.command))}
+                  onClick={enterProjectsView}
+                >
+                  <span className="composer-command-icon" aria-hidden="true"><FolderIcon /></span>
+                  <span><strong>{PROJECT_COMMAND.label}</strong><small>{PROJECT_COMMAND.description}</small></span>
+                </button>
+              )}
+              </>}
+              {commandView === "projects" && (
+                <>
+                  <div className="composer-command-heading composer-command-heading--projects">
+                    <button
+                      type="button"
+                      className="composer-command-back"
+                      onKeyDown={(event) => event.stopPropagation()}
+                      onClick={() => {
+                        setCommandView("commands");
+                        setCommandIndex(0);
+                      }}
+                    >
+                      <span aria-hidden="true">←</span> Commands
+                    </button>
+                    <span>Projects</span>
+                  </div>
+                  {projectsLoading && <div className="composer-command-state" role="status">Loading projects…</div>}
+                  {!projectsLoading && projectsError && (
+                    <div className="composer-command-state composer-command-state--error" role="alert">
+                      <span>{projectsError}</span>
+                      <button type="button" onKeyDown={(event) => event.stopPropagation()} onClick={() => void onLoadProjects()}>Retry</button>
+                    </div>
+                  )}
+                  {!projectsLoading && !projectsError && projects.length === 0 && (
+                    <div className="composer-command-state">No projects yet</div>
+                  )}
+                  {!projectsLoading && !projectsError && projects.map((project, index) => {
+                    const selected = index === activeProjectIndex;
+                    const current = project.id === currentProjectId;
+                    return (
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        className={`composer-command-option composer-project-option ${selected ? "selected" : ""}`}
+                        key={project.id}
+                        disabled={Boolean(assigningProjectId)}
+                        onMouseEnter={() => setProjectIndex(index)}
+                        onClick={() => void selectProject(project)}
+                      >
+                        <span className="composer-command-icon" aria-hidden="true"><FolderIcon /></span>
+                        <span className="composer-project-option-text"><strong>{project.title}</strong><small>{current ? "Current project" : "Add this chat here"}</small></span>
+                        {current && <span className="composer-project-current" aria-label="Current project">✓</span>}
+                      </button>
+                    );
+                  })}
+                </>
+              )}
             </div>
           )}
           {mode === "deep_research" && (
@@ -641,6 +844,8 @@ export function ChatComposer({
       {(attachmentError || submissionError) && (
         <p className="composer-error" role="alert">{attachmentError || submissionError}</p>
       )}
+      {projectAssignmentError && <p className="composer-error" role="alert">{projectAssignmentError}</p>}
+      {projectAssignmentStatus && <p className="helper-text composer-project-status" role="status" aria-live="polite">{projectAssignmentStatus}</p>}
       {startupPending && !attachmentError && !submissionError && (
         <p className="helper-text composer-startup-status" role="status">Restoring chat…</p>
       )}
