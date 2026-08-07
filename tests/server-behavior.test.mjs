@@ -144,6 +144,7 @@ test("web tools have bounded manifests and self-hosted stack configuration gates
   assert.deepEqual(WEB_TOOL_DEFINITIONS.map((tool) => tool.function.name), ["web_search", "fetch_page", "check_time", "check_date", "check_location"]);
   assert.equal(WEB_TOOL_DEFINITIONS[0].function.parameters.properties.count.maximum, 20);
   assert.deepEqual(WEB_TOOL_DEFINITIONS[0].function.parameters.properties.focus.enum, ["general", "news", "community", "reference"]);
+  assert.deepEqual(WEB_TOOL_DEFINITIONS[0].function.parameters.properties.freshness.enum, ["day", "week", "month", "year"]);
   assert.equal(WEB_TOOL_DEFINITIONS[1].function.parameters.properties.url.maxLength, 2_000);
   assert.equal(WEB_TOOL_DEFINITIONS[2].function.parameters.properties.timeZone.maxLength, 100);
   assert.deepEqual(WEB_TOOL_DEFINITIONS[4].function.parameters.properties, {});
@@ -192,34 +193,36 @@ test("web search queries every self-hosted provider and caps higher counts", asy
     const value = String(url);
     requestedUrls.push(value);
     requested.push({ url: value, init });
-    if (value.includes("searxng")) return Response.json({ results: [{ title: "Web result", url: "https://example.com/web", content: "Web evidence" }] });
-    if (value.includes("wikipedia")) return Response.json({ query: { pages: { "1": { title: "Reference", fullurl: "https://en.wikipedia.org/wiki/Reference", extract: "Reference evidence" } } } });
-    if (value.includes("miniflux")) return Response.json({ entries: [{ title: "News result", url: "https://news.example.com/story", content: "News evidence", published_at: "2026-08-04T12:00:00Z" }] });
+    if (value.includes("searxng")) return Response.json({ results: [{ title: "Web result", url: "https://example.com/web", content: "Current date web evidence" }] });
+    if (value.includes("wikipedia")) return Response.json({ query: { pages: { "1": { title: "Reference", fullurl: "https://en.wikipedia.org/wiki/Reference", extract: "Current date reference evidence" } } } });
+    if (value.includes("miniflux")) return Response.json({ entries: [{ title: "News result", url: "https://news.example.com/story", content: "Current date news evidence", published_at: "2026-08-04T12:00:00Z" }] });
     return Response.json({ results: [] });
   };
   try {
-    const result = await executeWebTool({ id: "search-1", name: "web_search", arguments: '{"q":"current date","count":20,"focus":"news"}' });
+    const result = await executeWebTool({ id: "search-1", name: "web_search", arguments: '{"q":"current date","count":20,"focus":"news","freshness":"day"}' });
     assert.equal(result.ok, true);
     assert.equal(result.web?.kind, "search");
     assert.equal(result.web?.query, "current date");
-    assert.equal(requestedUrls.length, 4);
+    assert.equal(requestedUrls.length, 12);
     const searxngRequests = requested.filter(({ url }) => url.includes("searxng"));
-    assert.equal(searxngRequests.length, 2);
+    assert.equal(searxngRequests.length, 6);
     for (const searxngRequest of searxngRequests) {
       assert.equal(searxngRequest.init.method, "POST");
       assert.equal(searxngRequest.init.headers["Content-Type"], "application/x-www-form-urlencoded");
       assert.equal(new URLSearchParams(searxngRequest.init.body).get("categories"), "news");
     }
-    assert.deepEqual(searxngRequests.map(({ init }) => new URLSearchParams(init.body).get("q")).sort(), ["current date", "current date reddit"]);
+    assert.deepEqual(searxngRequests.map(({ init }) => new URLSearchParams(init.body).get("q")).sort(), [
+      "current date", "current date reddit", "current date latest updates", "current date latest updates reddit", "current date recent coverage", "current date recent coverage reddit",
+    ].sort());
     assert.ok(requestedUrls.some((url) => url.includes("wikipedia")));
     assert.ok(requestedUrls.some((url) => url.includes("miniflux")));
     assert.equal(result.web?.results[0]?.url, "https://news.example.com/story");
     assert.equal("provider" in (result.web?.results[0] ?? {}), false);
     assert.equal("rank" in (result.web?.results[0] ?? {}), false);
 
-    const capped = await executeWebTool({ id: "search-2", name: "web_search", arguments: '{"query":"current date","count":21}' });
+    const capped = await executeWebTool({ id: "search-2", name: "web_search", arguments: '{"query":"current date","count":21,"focus":"news","freshness":"day"}' });
     assert.equal(capped.ok, true);
-    assert.equal(requestedUrls.length, 8);
+    assert.equal(requestedUrls.length, 12);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalStack === undefined) delete process.env.SEARCH_STACK_ENABLED; else process.env.SEARCH_STACK_ENABLED = originalStack;

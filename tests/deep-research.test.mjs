@@ -62,12 +62,19 @@ test("independent self-hosted searches query all providers concurrently", async 
   const previousFetch = globalThis.fetch;
   let active = 0;
   let maximum = 0;
-  globalThis.fetch = async () => {
+  globalThis.fetch = async (url, init = {}) => {
     active += 1;
     maximum = Math.max(maximum, active);
     await new Promise((resolve) => setTimeout(resolve, 20));
+    const requestUrl = new URL(String(url));
+    const requestQuery = init.body
+      ? new URLSearchParams(init.body).get("q") ?? ""
+      : requestUrl.searchParams.get("gsrsearch") ?? requestUrl.searchParams.get("search") ?? "";
+    const value = requestQuery || "page";
     active -= 1;
-    return Response.json({ results: [{ title: "Result", url: "https://example.com/result", content: "Evidence" }] });
+    if (requestUrl.hostname === "miniflux") return Response.json({ entries: [{ title: value, url: "https://example.com/result", content: `${value} evidence` }] });
+    if (requestUrl.hostname.includes("wikipedia")) return Response.json({ query: { pages: { "1": { title: value, fullurl: "https://example.com/result", extract: `${value} evidence` } } } });
+    return Response.json({ results: [{ title: value, url: "https://example.com/result", content: `${value} evidence` }] });
   };
   try {
     await Promise.all([
@@ -83,9 +90,16 @@ test("independent self-hosted searches query all providers concurrently", async 
 test("self-hosted search focus preserves the unified provider contract", async () => {
   const previousFetch = globalThis.fetch;
   const requested = [];
-  globalThis.fetch = async (url) => {
+  globalThis.fetch = async (url, init = {}) => {
     requested.push(new URL(String(url)));
-    return Response.json({ results: [{ title: "Result", url: "https://example.com/result", content: "Evidence" }] });
+    const requestUrl = requested.at(-1);
+    const requestQuery = init.body
+      ? new URLSearchParams(init.body).get("q") ?? ""
+      : requestUrl.searchParams.get("gsrsearch") ?? requestUrl.searchParams.get("search") ?? "";
+    const value = requestQuery || "page";
+    if (requestUrl.hostname === "miniflux") return Response.json({ entries: [{ title: value, url: "https://example.com/result", content: `${value} evidence` }] });
+    if (requestUrl.hostname.includes("wikipedia")) return Response.json({ query: { pages: { "1": { title: value, fullurl: "https://example.com/result", extract: `${value} evidence` } } } });
+    return Response.json({ results: [{ title: value, url: "https://example.com/result", content: `${value} evidence` }] });
   };
   try {
     const results = await searchSelfHosted({ query: "page", focus: "community" });

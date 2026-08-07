@@ -177,6 +177,16 @@ SearXNG stream keeps Reddit-hosted URLs, and the combined results are then
 deduplicated and ranked. Pass `focus=general`, `news`, `community`, or
 `reference` to change ranking priorities without excluding any provider.
 
+For freshness, ambiguity, recommendations, or community evidence, normal
+`web_search` adds up to two targeted query variants and fuses results with
+reciprocal-rank fusion. Every candidate receives lightweight title/snippet
+relevance scoring before ranking, alongside freshness, source quality, intent
+fit, provider focus, and domain diversity. Pass `freshness=day`, `week`,
+`month`, or `year` for time-sensitive searches. Provider requests use the
+short-lived cache and bounded reliability settings in `.env.example`, retry one
+transient HTTP failure, and open a per-provider circuit after repeated failures
+so healthy providers can continue serving results.
+
 `fetch_page` sends only the selected URL to the private Firecrawl service and
 returns bounded Markdown. Search is discovery; Firecrawl is page retrieval.
 The services have no commercial search or retrieval API-key requirement, and

@@ -3,7 +3,108 @@ import test from "node:test";
 import { extractFirecrawl } from "../app/providers/research/research-page-adapters.ts";
 import { searchMiniflux } from "../app/providers/search/miniflux-search-adapter.ts";
 import { searchSearXNG, searchSearXNGReddit } from "../app/providers/search/searxng-search-adapter.ts";
+import { searchRequest } from "../app/providers/search/search-http.ts";
 import { SearchNoResultsError, SearchUnavailableError, searchSelfHosted } from "../app/server/search/search-service.ts";
+import { isSearchCandidateRelevant, scoreSearchCandidate } from "../app/server/search/search-relevance.ts";
+import { resetSearchProviderReliability } from "../app/server/search/search-provider-reliability.ts";
+import { planSearchQueries } from "../app/server/search/search-query-planner.ts";
+
+test("normal search planning expands only intent-bearing requests", () => {
+  const lookup = planSearchQueries({ query: "what is TypeScript", focus: "general" });
+  assert.equal(lookup.length, 1);
+
+  const recommendation = planSearchQueries({ query: "best note taking apps", focus: "general" });
+  assert.equal(recommendation.length, 3);
+  assert.match(recommendation[1].query, /reviews comparison/);
+
+  const current = planSearchQueries({ query: "AI releases", focus: "news", freshness: "week" });
+  assert.equal(current.length, 3);
+  assert.deepEqual(current.map(({ queryIndex }) => queryIndex), [0, 1, 2]);
+  assert.deepEqual(current.map(({ freshness }) => freshness), ["week", "week", "week"]);
+});
+
+test("relevance scoring covers title and snippet overlap and rejects unrelated candidates", () => {
+  const relevant = { title: "Self-hosted search guide", snippet: "A practical self-hosted search discussion." };
+  const unrelated = { title: "Major League Soccer", snippet: "A professional football competition." };
+  assert.ok(scoreSearchCandidate(relevant, "self hosted search") > 0.6);
+  assert.equal(isSearchCandidateRelevant(relevant, "self hosted search"), true);
+  assert.equal(scoreSearchCandidate(unrelated, "self hosted search"), 0);
+  assert.equal(isSearchCandidateRelevant(unrelated, "self hosted search"), false);
+});
+
+test("search HTTP retries one transient failure", async () => {
+  const previousFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return calls === 1 ? new Response("temporary", { status: 503 }) : Response.json({ ok: true });
+  };
+  try {
+    const response = await searchRequest("https://example.test/search", {}, undefined, 1_000);
+    assert.equal(response.status, 200);
+    assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("successful provider results are cached for the short reliability window", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousTtl = process.env.SEARCH_PROVIDER_CACHE_TTL_MS;
+  let calls = 0;
+  process.env.SEARCH_PROVIDER_CACHE_TTL_MS = "1000";
+  resetSearchProviderReliability();
+  globalThis.fetch = async (url) => {
+    calls += 1;
+    const value = String(url);
+    if (value.includes("wikipedia")) return Response.json({ query: { pages: { "1": { title: "Cache reliability", fullurl: "https://example.com/cache", extract: "Cache reliability evidence" } } } });
+    if (value.includes("miniflux")) return Response.json({ entries: [{ title: "Cache reliability", url: "https://example.com/cache", content: "Cache reliability evidence" }] });
+    return Response.json({ results: [{ title: "Cache reliability", url: "https://example.com/cache", content: "Cache reliability evidence" }] });
+  };
+  try {
+    const input = { query: "cache reliability", focus: "general", count: 5 };
+    assert.ok((await searchSelfHosted(input)).length > 0);
+    assert.ok((await searchSelfHosted(input)).length > 0);
+    assert.equal(calls, 4);
+  } finally {
+    globalThis.fetch = previousFetch;
+    resetSearchProviderReliability();
+    if (previousTtl === undefined) delete process.env.SEARCH_PROVIDER_CACHE_TTL_MS; else process.env.SEARCH_PROVIDER_CACHE_TTL_MS = previousTtl;
+  }
+});
+
+test("a failing provider opens its circuit without taking healthy providers down", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousTtl = process.env.SEARCH_PROVIDER_CACHE_TTL_MS;
+  const previousThreshold = process.env.SEARCH_PROVIDER_FAILURE_THRESHOLD;
+  let failingNormalCalls = 0;
+  process.env.SEARCH_PROVIDER_CACHE_TTL_MS = "0";
+  process.env.SEARCH_PROVIDER_FAILURE_THRESHOLD = "3";
+  resetSearchProviderReliability();
+  globalThis.fetch = async (url, init = {}) => {
+    const value = String(url);
+    if (value.includes("searxng")) {
+      const query = new URLSearchParams(init.body).get("q") ?? "";
+      if (!query.endsWith("reddit")) {
+        failingNormalCalls += 1;
+        throw new Error("normal SearXNG unavailable");
+      }
+      return Response.json({ results: [{ title: "Circuit breaker discussion", url: "https://reddit.com/r/selfhosted/circuit", content: "Circuit breaker community evidence" }] });
+    }
+    if (value.includes("wikipedia")) return Response.json({ query: { pages: { "1": { title: "Circuit breaker", fullurl: "https://example.com/circuit", extract: "Circuit breaker reference evidence" } } } });
+    return Response.json({ entries: [{ title: "Circuit breaker", url: "https://example.com/circuit", content: "Circuit breaker news evidence" }] });
+  };
+  try {
+    const input = { query: "circuit breaker", focus: "community", count: 5 };
+    for (let attempt = 0; attempt < 4; attempt += 1) assert.ok((await searchSelfHosted(input)).length > 0);
+    assert.equal(failingNormalCalls, 6);
+  } finally {
+    globalThis.fetch = previousFetch;
+    resetSearchProviderReliability();
+    if (previousTtl === undefined) delete process.env.SEARCH_PROVIDER_CACHE_TTL_MS; else process.env.SEARCH_PROVIDER_CACHE_TTL_MS = previousTtl;
+    if (previousThreshold === undefined) delete process.env.SEARCH_PROVIDER_FAILURE_THRESHOLD; else process.env.SEARCH_PROVIDER_FAILURE_THRESHOLD = previousThreshold;
+  }
+});
 
 test("community search uses an exact SearXNG Reddit query and filters non-Reddit URLs", async () => {
   const previousFetch = globalThis.fetch;
@@ -20,8 +121,8 @@ test("community search uses an exact SearXNG Reddit query and filters non-Reddit
         { title: "Unrelated result", url: "https://example.com/not-reddit", content: "Should be filtered" },
         { title: "Self-hosted search", url: "https://www.reddit.com/r/selfhosted/comments/abc123/self_hosted_search/", content: "Community experience" },
         { title: "Suffix-confusion result", url: "https://reddit.com.evil.example/r/not-reddit", content: "Should be filtered" },
-        { title: "Short Reddit link", url: "https://redd.it/def456", content: "Another Reddit result" },
-        { title: "Trailing-dot Reddit link", url: "https://old.reddit.com./r/selfhosted/comments/ghi789/another_post", content: "A third Reddit result" },
+        { title: "Short Reddit link", url: "https://redd.it/def456", content: "Another self-hosted search result" },
+        { title: "Trailing-dot Reddit link", url: "https://old.reddit.com./r/selfhosted/comments/ghi789/another_post", content: "A third self-hosted search discussion" },
       ] });
       throw new Error(`Unexpected SearXNG query: ${query}`);
     }
@@ -194,6 +295,7 @@ test("general search does not return irrelevant MediaWiki fallback pages", async
 
 test("search returns healthy provider results when another provider is unavailable", async () => {
   const previousFetch = globalThis.fetch;
+  resetSearchProviderReliability();
   globalThis.fetch = async (url) => {
     const value = String(url);
     if (value.includes("searxng")) return Response.json({ results: [{ title: "Weather Cup guide", url: "https://example.com/weather-cup", content: "Magcargo matchup evidence" }] });
@@ -208,6 +310,7 @@ test("search returns healthy provider results when another provider is unavailab
     assert.equal(results[0].provider, "searxng");
   } finally {
     globalThis.fetch = previousFetch;
+    resetSearchProviderReliability();
   }
 });
 

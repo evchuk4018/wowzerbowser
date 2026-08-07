@@ -1,5 +1,5 @@
 import type { ChatSource } from "../../../lib/chat-citations";
-import type { SearchFocus } from "../../../lib/search-protocol";
+import type { SearchFocus, SearchFreshness } from "../../../lib/search-protocol";
 
 export const SEARCH_PROVIDER_NAMES = ["searxng", "searxng-reddit", "mediawiki", "miniflux"] as const;
 export type SearchProviderName = (typeof SEARCH_PROVIDER_NAMES)[number];
@@ -10,7 +10,8 @@ export type SearchProviderQuery = {
   count: number;
   queryIndex: number;
   intent: string;
-  freshness?: "day" | "week" | "month" | "year";
+  freshness?: SearchFreshness;
+  relevanceQuery?: string;
 };
 
 export type SearchCandidate = ChatSource & {
@@ -19,5 +20,6 @@ export type SearchCandidate = ChatSource & {
   rank: number;
   intent: string;
   extraSnippets: string[];
+  relevanceScore?: number;
   score?: number;
 };

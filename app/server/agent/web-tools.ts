@@ -2,7 +2,7 @@ import "server-only";
 
 import type { ChatToolCall, ChatToolResult } from "../../../lib/chat-protocol";
 import { CHAT_SOURCE_SNIPPET_MAX_LENGTH, sourceForUrl } from "../../../lib/chat-citations";
-import { isSearchFocus, type SearchFocus } from "../../../lib/search-protocol";
+import { isSearchFocus, isSearchFreshness, type SearchFocus, type SearchFreshness } from "../../../lib/search-protocol";
 import { SearchNoResultsError, SearchUnavailableError, searchSelfHosted } from "../search/search-service";
 import { fetchResearchPage } from "../research/research-page-service";
 
@@ -18,7 +18,7 @@ const MAX_TIME_ZONE = 100;
 const MAX_LOCATION = 300;
 
 export const WEB_TOOL_DEFINITIONS = [
-  { type: "function" as const, function: { name: WEB_SEARCH_TOOL_NAME, description: "Search the web for concise, current result snippets.", parameters: { type: "object", additionalProperties: false, required: ["query"], properties: { query: { type: "string", minLength: 1, maxLength: 400 }, count: { type: "integer", minimum: 1, maximum: MAX_RESULTS }, focus: { type: "string", enum: ["general", "news", "community", "reference"] } } } } },
+  { type: "function" as const, function: { name: WEB_SEARCH_TOOL_NAME, description: "Search the web for concise, current result snippets. The search may use a small number of intent-targeted queries when freshness, ambiguity, recommendations, or community evidence justify it.", parameters: { type: "object", additionalProperties: false, required: ["query"], properties: { query: { type: "string", minLength: 1, maxLength: 400 }, count: { type: "integer", minimum: 1, maximum: MAX_RESULTS }, focus: { type: "string", enum: ["general", "news", "community", "reference"] }, freshness: { type: "string", enum: ["day", "week", "month", "year"] } } } } },
   { type: "function" as const, function: { name: FETCH_PAGE_TOOL_NAME, description: "Read a specific public web page as bounded Markdown. Use a URL returned by web_search or explicitly supplied by the user; do not guess undocumented paths.", parameters: { type: "object", additionalProperties: false, required: ["url"], properties: { url: { type: "string", minLength: 1, maxLength: 2_000, format: "uri" } } } } },
   { type: "function" as const, function: { name: CHECK_TIME_TOOL_NAME, description: "Check the current server time, optionally in an IANA time zone.", parameters: { type: "object", additionalProperties: false, properties: { timeZone: { type: "string", minLength: 1, maxLength: MAX_TIME_ZONE } } } } },
   { type: "function" as const, function: { name: CHECK_DATE_TOOL_NAME, description: "Check the current server calendar date, optionally in an IANA time zone.", parameters: { type: "object", additionalProperties: false, properties: { timeZone: { type: "string", minLength: 1, maxLength: MAX_TIME_ZONE } } } } },
@@ -60,6 +60,11 @@ function searchFocus(input: Record<string, unknown>, tool: string): SearchFocus 
   if (input.focus === undefined) return "general";
   if (!isSearchFocus(input.focus)) throw new Error(`${tool} focus must be general, news, community, or reference.`);
   return input.focus;
+}
+function searchFreshness(input: Record<string, unknown>, tool: string): SearchFreshness | undefined {
+  if (input.freshness === undefined) return undefined;
+  if (!isSearchFreshness(input.freshness)) throw new Error(`${tool} freshness must be day, week, month, or year.`);
+  return input.freshness;
 }
 function requireOnly(input: Record<string, unknown>, allowed: readonly string[], tool: string) {
   const unexpected = Object.keys(input).find((key) => !allowed.includes(key));
@@ -112,10 +117,10 @@ export async function executeWebTool(call: ChatToolCall, signal?: AbortSignal): 
       return { id: call.id, name: call.name, ok: true, stdout: "", stderr: "", durationMs: Date.now() - startedAt, utility };
     }
     if (call.name === WEB_SEARCH_TOOL_NAME) {
-      requireOnly(input, ["query", "q", "count", "focus"], call.name);
+      requireOnly(input, ["query", "q", "count", "focus", "freshness"], call.name);
       const query = searchQuery(input); const count = Math.max(1, Math.min(MAX_RESULTS, Number(input.count) || MAX_RESULTS));
       if (!query) throw new Error("web_search requires a query.");
-      const results = (await searchSelfHosted({ query, count, focus: searchFocus(input, call.name), signal })).map(({ id, title, url, snippet, publisher, publishedAt }) => ({
+      const results = (await searchSelfHosted({ query, count, focus: searchFocus(input, call.name), freshness: searchFreshness(input, call.name), expandQueries: true, signal })).map(({ id, title, url, snippet, publisher, publishedAt }) => ({
         id,
         title,
         url,
