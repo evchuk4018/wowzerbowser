@@ -13,8 +13,6 @@ import { claimChatJob, createChatJobEventWriter, finishChatJob, renewChatJob, sa
 import { createChatEventCoalescer } from "./chat-event-coalescer";
 import { CHAT_JOB_HEARTBEAT_MS } from "./chat-job-lease";
 import type { ChatCitation, ChatSource } from "../../../lib/chat-citations";
-import { runtimeOverridesForAssignment } from "../ab-testing/ab-testing-service";
-import { withRuntimeConfigOverrides } from "../config/runtime-config-service";
 
 export type RunChatJobOptions = {
   onEvent?: (event: SequencedChatStreamEvent) => void;
@@ -164,7 +162,7 @@ export async function runClaimedChatJob(
     providerMetrics: responseMetrics(),
   });
   try {
-    const runGeneration = () => generateChatResponse(
+    const generation = await generateChatResponse(
       request,
       ownerId,
       controller.signal,
@@ -218,9 +216,6 @@ export async function runClaimedChatJob(
         runCost = refreshed ?? runCost;
       },
     );
-    const generation = request.experiment
-      ? await withRuntimeConfigOverrides(runtimeOverridesForAssignment(request.experiment), runGeneration)
-      : await runGeneration();
     await drainEventPipelines();
     runCost = await refreshPromptCost(ownerId, claim.conversationId, claim.jobId) ?? runCost;
     if (!controller.signal.aborted && generation.awaitingApproval) {

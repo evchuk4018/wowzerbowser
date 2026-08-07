@@ -1,6 +1,5 @@
 import { CHAT_SOURCE_SNIPPET_MAX_LENGTH, sourceForUrl, type ChatCitation, type ChatSource } from "./chat-citations";
 import type { TodoList } from "./todo-protocol";
-import type { AbExperimentAssignment } from "./ab-testing-protocol";
 
 export const DEFAULT_CHAT_SYSTEM_PROMPT = `<bobert_behavior>
 
@@ -277,8 +276,6 @@ export type ChatRequest = {
   jobId?: string;
   idempotencyKey?: string;
   persistence?: ChatSubmissionMetadata;
-  /** Server-authored assignment captured for this normal-chat turn. */
-  experiment?: AbExperimentAssignment;
 };
 
 export type ChatSubmissionMetadata = {
@@ -288,8 +285,6 @@ export type ChatSubmissionMetadata = {
   assistantMessageId: string;
   turnIndex: number;
   versionIndex: number;
-  /** The version being retried, when Retry is used to produce its alternate variant. */
-  retryOfVersionId?: string;
 };
 
 export type ChatJobStatus = "queued" | "running" | "awaiting_approval" | "completed" | "failed" | "cancelled";
@@ -1061,9 +1056,6 @@ export function parseChatRequest(value: unknown): ChatRequest {
       assistantMessageId: readPersistenceId("assistantMessageId"),
       turnIndex: readPosition("turnIndex"),
       versionIndex: readPosition("versionIndex"),
-      ...(persistenceValue.retryOfVersionId === undefined
-        ? {}
-        : { retryOfVersionId: readPersistenceId("retryOfVersionId") }),
     };
   }
 

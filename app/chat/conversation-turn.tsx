@@ -212,11 +212,6 @@ function ConversationTurnInner({
       </div>
       <article className="message assistant">
         <div className="message-label">Response</div>
-        {assistantMessage.experimentAssignment && (
-          <div className="experiment-assignment-badge" title="This response was generated for an A/B experiment">
-            {assistantMessage.experimentAssignment.experimentName} · {assistantMessage.experimentAssignment.variant.toUpperCase()}
-          </div>
-        )}
         {(assistantMessage.activities?.length ?? 0) > 0 || (assistantMessage.artifacts?.length ?? 0) > 0 ? (
           <AssistantActivityTimeline
             activities={assistantMessage.activities ?? []}

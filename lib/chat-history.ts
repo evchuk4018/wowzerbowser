@@ -13,7 +13,6 @@ import type {
 import type { ChatCitation, ChatSource } from "./chat-citations";
 import type { TodoList } from "./todo-protocol";
 import type { ConnectorApprovalSummary } from "./connector-protocol";
-import type { AbExperimentAssignment } from "./ab-testing-protocol";
 
 export type ChatMessageStatus = "streaming" | "complete" | "error" | "cancelled";
 
@@ -115,7 +114,6 @@ export type ChatHistoryMessage = {
   todos?: TodoList;
   connectorApproval?: ConnectorApprovalSummary;
   deepResearchPlan?: DeepResearchPlan;
-  experimentAssignment?: AbExperimentAssignment;
 };
 
 export type ChatTurnVersion = {

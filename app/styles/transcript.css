@@ -159,17 +159,6 @@
   opacity: .42;
 }
 
-.experiment-assignment-badge {
-  display: inline-block;
-  margin: 0 0 7px;
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
-  border-radius: 999px;
-  padding: 3px 7px;
-  color: var(--quiet);
-  font-size: 10px;
-  letter-spacing: .03em;
-}
-
 .deep-research-plan { margin-bottom: 12px; border: 1px solid rgba(170, 105, 255, .28); border-radius: 12px; background: rgba(100, 56, 150, .1); padding: 12px; }
 .deep-research-plan-title { color: #d6b8ff; font-size: 13px; font-weight: 700; }
 .deep-research-plan p { margin: 6px 0 10px; color: var(--muted); font-size: 12px; }

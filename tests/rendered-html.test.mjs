@@ -407,8 +407,7 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(settings, /Automations/);
   assert.match(settings, /Configurables/);
   assert.match(settings, /Security and login/);
-  assert.match(settings, /A\/B Testing/);
-  assert.doesNotMatch(settings, /id: "account"/);
+  assert.match(settings, /Account/);
   assert.match(settings, /Skills/);
   assert.match(settings, /SkillsSettings/);
   assert.doesNotMatch(settings, /label: "Keyboard"/);
