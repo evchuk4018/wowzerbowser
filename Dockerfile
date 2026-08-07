@@ -62,6 +62,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/scripts/reset-owner-password.mjs 
 COPY --from=builder --chown=nextjs:nodejs /app/database ./database
 COPY --from=builder --chown=nextjs:nodejs /app/config ./config
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/provision-miniflux-feeds.mjs ./scripts/provision-miniflux-feeds.mjs
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/export-runtime-config.mjs ./scripts/export-runtime-config.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/app/server/auth/password.mjs ./app/server/auth/password.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/app/server/auth/owner-auth-repository.mjs ./app/server/auth/owner-auth-repository.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/postgres ./node_modules/postgres

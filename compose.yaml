@@ -96,11 +96,17 @@ services:
       SEARXNG_SECRET: ${SEARXNG_SECRET:-replace-with-a-long-random-secret}
       SEARXNG_BIND_ADDRESS: 0.0.0.0
       SEARXNG_PORT: 8080
+      SEARXNG_SETTINGS_PATH: /etc/searxng/settings.yml
+      FORCE_OWNERSHIP: "false"
+    group_add:
+      - "${APP_GID:-1000}"
     volumes:
       - type: bind
-        source: ./docker/searxng/settings.yml
+        source: "/srv/storage/wowzerbowser/config/searxng/settings.yml"
         target: /etc/searxng/settings.yml
         read_only: true
+        bind:
+          create_host_path: false
       - searxng-cache:/var/cache/searxng
     expose:
       - "8080"

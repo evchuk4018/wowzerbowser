@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type {
   UsageModelSummary,
   UsageRange,
@@ -14,11 +14,12 @@ import { ConfigurablesSettings } from "./configurables-settings";
 import { SkillsSettings } from "./skills-settings";
 import { AutomationsSettings } from "./automations-settings";
 import { ConnectorsSettings } from "./connectors-settings";
+import type { RuntimeConfigValues } from "../../lib/runtime-config-protocol";
 
 export type SettingsModalProps = {
   settings: ChatSettings;
   onClose: () => void;
-  onSave: (settings: ChatSettings) => void;
+  onSave: (settings: ChatSettings, runtimeConfig?: Partial<RuntimeConfigValues>) => void;
   loadUsage?: (range: UsageRange) => Promise<UsageReport>;
   hasSession: () => Promise<boolean>;
 };
@@ -327,10 +328,14 @@ function PlaceholderSettings({ label }: { label: string }) {
 
 export function SettingsModal({ settings, onClose, onSave, loadUsage, hasSession }: SettingsModalProps) {
   const [draft, setDraft] = useState(settings);
+  const [runtimeConfigDraft, setRuntimeConfigDraft] = useState<Partial<RuntimeConfigValues> | null>(null);
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
   const [showIndex, setShowIndex] = useState(true);
   const dialogRef = useRef<HTMLElement>(null);
   const titleId = useId();
+  const handleRuntimeConfigChange = useCallback((values: Partial<RuntimeConfigValues>) => {
+    setRuntimeConfigDraft((current) => ({ ...(current ?? {}), ...values }));
+  }, []);
 
   useEffect(() => {
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
@@ -455,6 +460,7 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage, hasSession
                 onVisionModelChange={(visionModel) => setDraft((current) => ({ ...current, visionModel }))}
                 automationModel={draft.automationModel}
                 onAutomationModelChange={(automationModel) => setDraft((current) => ({ ...current, automationModel }))}
+                onRuntimeConfigChange={handleRuntimeConfigChange}
               />
             ) : (
               <PlaceholderSettings label={activeLabel} />
@@ -472,7 +478,7 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage, hasSession
                   visionModel: draft.visionModel,
                   automationModel: draft.automationModel,
                   focusedContextEnabled: draft.focusedContextEnabled,
-                })}
+                }, runtimeConfigDraft ?? undefined)}
               >
                 Save
               </button>

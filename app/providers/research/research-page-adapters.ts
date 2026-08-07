@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { JSDOM } from "jsdom";
 import type { ResearchLink } from "../../server/research/research-types";
 import { record, searchRequest, text } from "../search/search-http";
+import { runtimeConfigSnapshot } from "../../server/config/runtime-config-service";
 
 const TIMEOUT_MS = 30_000;
 const MAX_MARKDOWN = 80_000;
@@ -96,7 +97,7 @@ async function directHtmlExtraction(url: string, signal?: AbortSignal): Promise<
 
 export async function extractFirecrawl(url: string, signal?: AbortSignal): Promise<ExtractedPage> {
   await assertPublicResearchUrl(url);
-  const base = process.env.FIRECRAWL_URL?.trim() || "http://firecrawl:3002";
+  const base = runtimeConfigSnapshot().firecrawlUrl;
   const endpoint = new URL("/v2/scrape", `${base.replace(/\/$/, "")}/`);
   const apiKey = process.env.FIRECRAWL_API_KEY?.trim();
   try {

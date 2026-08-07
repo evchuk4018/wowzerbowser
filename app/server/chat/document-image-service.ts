@@ -5,9 +5,10 @@ import { MAX_DOCUMENT_IMAGE_BYTES, type ChatDocumentImage } from "../../../lib/c
 import { getStorageObjectById } from "../storage/storage-repository";
 import { deleteOwnedStorageObject, storeStorageObject } from "../storage/storage-service";
 import { analyzeDocumentImage } from "./chat-image-service";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 
 function imageConcurrency(value?: number): number {
-  const configured = value ?? Number.parseInt(process.env.PDF_IMAGE_ANALYSIS_CONCURRENCY ?? process.env.PDF_OCR_CONCURRENCY ?? "", 10);
+  const configured = value ?? runtimeConfigSnapshot().pdfImageAnalysisConcurrency;
   if (!Number.isSafeInteger(configured) || configured < 1) return 2;
   return Math.min(configured, 8);
 }

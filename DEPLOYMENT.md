@@ -39,7 +39,8 @@ The host layout is:
 /srv/storage/
 |-- media/                 # owner-managed media; never mounted by the app
 `-- wowzerbowser/          # the only application bind mount
-    `-- files/             # application files
+    |-- config/searxng/     # generated non-secret SearXNG settings
+    `-- files/              # application files
 ```
 
 The repository never mounts `/srv/storage` or `/srv/storage/media`. The
@@ -139,6 +140,38 @@ DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh
 
 The web and worker entrypoints refuse to start when a local PostgreSQL
 migration is pending.
+
+## Generated SearXNG settings
+
+SearXNG reads the application-owned settings file at
+`/srv/storage/wowzerbowser/config/searxng/settings.yml`. The web and background
+worker already have this path inside their existing application bind mount, so
+the runtime configuration service can write it with an atomic replacement.
+SearXNG receives only that file, mounted read-only at
+`/etc/searxng/settings.yml`; it never receives the rest of the application tree
+or the protected media directory. The Compose service uses
+`SEARXNG_SETTINGS_PATH` to select the generated file and adds the configured
+`APP_GID` as a supplemental read group for the service's non-root user.
+
+On a guarded `up`, `start`, `restart`, `run`, or `create`,
+`docker/compose.sh` verifies that this path is a real application-owned
+directory, rejects symlinks, and creates the file from the checked-in
+`docker/searxng/settings.yml` baseline only when it is absent. It never replaces
+an existing generated file. The baseline preserves the current JSON search
+format, disabled limiter, and private-instance defaults. Keep API keys,
+passwords, and `SEARXNG_SECRET` out of the generated file; secrets remain in
+`deployment.env`.
+
+SearXNG reads settings at process startup. After changing Configurables, use a
+guarded restart so the service remounts the new file:
+
+```bash
+DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh up -d --force-recreate searxng
+```
+
+`docker/update.sh` performs this SearXNG recreation automatically. Do not
+replace the generated path with a symlink, mount `/srv/storage` or
+`/srv/storage/media`, or bypass `docker/compose.sh` for application startup.
 
 Set `PYTHON_WORKER_SECRET` in `/srv/storage/wowzerbowser/deployment.env` to a
 new random value of at least 32 characters. The web, durable worker, and local

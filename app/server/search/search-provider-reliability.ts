@@ -1,10 +1,7 @@
 import "server-only";
 
 import type { SearchCandidate, SearchProviderName, SearchProviderQuery } from "./search-types";
-
-const DEFAULT_CACHE_TTL_MS = 15_000;
-const DEFAULT_CIRCUIT_OPEN_MS = 30_000;
-const DEFAULT_FAILURE_THRESHOLD = 3;
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 
 type CacheEntry = {
   expiresAt: number;
@@ -27,21 +24,16 @@ export class SearchProviderCircuitOpenError extends Error {
 const cache = new Map<string, CacheEntry>();
 const circuits = new Map<SearchProviderName, CircuitState>();
 
-function boundedEnvironmentInteger(name: string, fallback: number, minimum: number, maximum: number): number {
-  const value = Number(process.env[name]);
-  return Number.isInteger(value) ? Math.max(minimum, Math.min(maximum, value)) : fallback;
-}
-
 function cacheTtlMs(): number {
-  return boundedEnvironmentInteger("SEARCH_PROVIDER_CACHE_TTL_MS", DEFAULT_CACHE_TTL_MS, 0, 300_000);
+  return runtimeConfigSnapshot().searchProviderCacheTtlMs;
 }
 
 function circuitOpenMs(): number {
-  return boundedEnvironmentInteger("SEARCH_PROVIDER_CIRCUIT_OPEN_MS", DEFAULT_CIRCUIT_OPEN_MS, 1_000, 300_000);
+  return runtimeConfigSnapshot().searchProviderCircuitOpenMs;
 }
 
 function failureThreshold(): number {
-  return boundedEnvironmentInteger("SEARCH_PROVIDER_FAILURE_THRESHOLD", DEFAULT_FAILURE_THRESHOLD, 1, 10);
+  return runtimeConfigSnapshot().searchProviderFailureThreshold;
 }
 
 function circuit(provider: SearchProviderName): CircuitState {

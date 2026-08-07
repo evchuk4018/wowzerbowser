@@ -5,6 +5,7 @@ import { mkdtemp, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from
 import { tmpdir } from "node:os";
 import { extname, isAbsolute, join, relative, win32 } from "node:path";
 import { MAX_DOCUMENT_IMAGE_BYTES, MAX_DOCUMENT_IMAGE_TOTAL_BYTES, MAX_DOCUMENT_IMAGES, MAX_PDF_BYTES } from "../../../lib/chat-document";
+import { runtimeConfigSnapshot } from "../../server/config/runtime-config-service";
 
 export const OPENDATALOADER_HYBRID_URL_ENV = "OPENDATALOADER_HYBRID_URL";
 export const DEFAULT_OPENDATALOADER_HYBRID_URL = "http://opendataloader-hybrid:5002";
@@ -314,7 +315,7 @@ function markdownImageSources(markdown: string): Set<string> {
 }
 
 function getHybridUrl(): string {
-  return process.env[OPENDATALOADER_HYBRID_URL_ENV]?.trim() || DEFAULT_OPENDATALOADER_HYBRID_URL;
+  return runtimeConfigSnapshot().opendataloaderHybridUrl || DEFAULT_OPENDATALOADER_HYBRID_URL;
 }
 
 function conversionOptions(outputDirectory: string): ConvertOptions {

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { PYTHON_TOOL_INPUT_LIMITS, relativeWorkspacePath, validatePythonToolInput } from "../../../lib/python-tool-policy";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 
 export { relativeWorkspacePath, validatePythonToolInput } from "../../../lib/python-tool-policy";
 
@@ -16,7 +17,7 @@ export const PYTHON_TOOL_LIMITS = {
   maxArtifactTotalBytes: 50 * 1024 * 1024,
 } as const;
 
-export const PYTHON_WORKER_URL = process.env.PYTHON_WORKER_URL?.trim() || "http://python-worker:5003";
+export const PYTHON_WORKER_URL = "http://python-worker:5003";
 const PYTHON_WORKER_SECRET = process.env.PYTHON_WORKER_SECRET?.trim() || "";
 const PYTHON_WORKER_TIMEOUT_MESSAGE = "The local Python worker did not complete before its deadline.";
 
@@ -91,11 +92,15 @@ export type LocalCommandResult = {
 };
 
 export function isLocalPythonConfigured(): boolean {
-  return Boolean(PYTHON_WORKER_URL && PYTHON_WORKER_SECRET.length >= 32);
+  return Boolean(currentPythonWorkerUrl() && PYTHON_WORKER_SECRET.length >= 32);
+}
+
+export function currentPythonWorkerUrl(): string {
+  return runtimeConfigSnapshot().pythonWorkerUrl || PYTHON_WORKER_URL;
 }
 
 function workerUrl(path: string): string {
-  return new URL(path, `${PYTHON_WORKER_URL.replace(/\/+$/u, "")}/`).toString();
+  return new URL(path, `${currentPythonWorkerUrl().replace(/\/+$/u, "")}/`).toString();
 }
 
 function assertConfigured(): void {

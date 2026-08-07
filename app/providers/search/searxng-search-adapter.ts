@@ -3,6 +3,7 @@ import "server-only";
 import type { SearchCandidate, SearchProviderQuery } from "../../server/search/search-types";
 import { array, record, requireOk, searchRequest } from "./search-http";
 import { candidate } from "./search-candidate";
+import { runtimeConfigSnapshot } from "../../server/config/runtime-config-service";
 
 const FRESHNESS: Record<NonNullable<SearchProviderQuery["freshness"]>, string> = {
   day: "day",
@@ -29,7 +30,7 @@ async function searchSearXNGWithProvider(
   signal?: AbortSignal,
   filter?: CandidateFilter,
 ): Promise<SearchCandidate[]> {
-  const base = process.env.SEARXNG_URL?.trim() || "http://searxng:8080";
+  const base = runtimeConfigSnapshot().searxngUrl;
   const endpoint = new URL("/search", `${base.replace(/\/$/, "")}/`);
   const form = new URLSearchParams({
     q: query.query,

@@ -686,6 +686,45 @@
   line-height: 1.5;
 }
 
+.configurables-subheading {
+  margin: 24px 0 10px;
+  text-align: left;
+}
+
+.configurables-subheading h4 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.configurables-subheading p {
+  margin: 4px 0 0;
+  color: var(--quiet);
+  font-size: 12px;
+}
+
+.configurables-runtime-group {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.configurables-runtime-group .settings-field {
+  text-align: left;
+}
+
+.configurable-restart {
+  display: inline-block;
+  margin-left: 8px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 @media (max-width: 700px) {
   .settings-overlay {
     align-items: end;

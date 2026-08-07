@@ -2,6 +2,7 @@ import "server-only";
 
 import { OpenRouterImageError, askOpenRouterToOcrPdfPage } from "../../providers/openrouter/openrouter-image-adapter";
 import { ChatDocumentError, type ChatDocumentPage, type ChatDocumentPageFailure } from "../../../lib/chat-document";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 
 export const DEFAULT_PDF_OCR_CONCURRENCY = 6;
 export const MAX_PDF_OCR_CONCURRENCY = 32;
@@ -46,7 +47,7 @@ const TRANSIENT_CODES = new Set(["transport", "timeout", "rate_limit", "upstream
 const PERMANENT_CODES = new Set(["missing_api_key", "no_vision_model", "provider_validation", "malformed_response", "empty_answer", "answer_too_long", "validation", "invalid_request"]);
 
 function configuredConcurrency(value: number | undefined): number {
-  const configured = value ?? Number.parseInt(process.env.PDF_OCR_CONCURRENCY ?? "", 10);
+  const configured = value ?? runtimeConfigSnapshot().pdfOcrConcurrency;
   if (!Number.isSafeInteger(configured) || configured < 1) return DEFAULT_PDF_OCR_CONCURRENCY;
   return Math.min(configured, MAX_PDF_OCR_CONCURRENCY);
 }

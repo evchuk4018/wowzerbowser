@@ -75,9 +75,9 @@ export class BackgroundWorkerLoop<ChatClaim, DocumentClaim, ImageClaim> {
   constructor(private readonly dependencies: WorkerLoopDependencies<ChatClaim, DocumentClaim, ImageClaim>) {
     this.sleep = dependencies.sleep ?? defaultSleep;
     this.now = dependencies.now ?? Date.now;
-    this.chatConcurrency = bounded(dependencies.chatConcurrency, 1, 1, 1);
-    this.documentConcurrency = bounded(dependencies.documentConcurrency, 1, 1, 1);
-    this.imageConcurrency = bounded(dependencies.imageConcurrency, 1, 1, 1);
+    this.chatConcurrency = bounded(dependencies.chatConcurrency, 1, 1, 4);
+    this.documentConcurrency = bounded(dependencies.documentConcurrency, 1, 1, 4);
+    this.imageConcurrency = bounded(dependencies.imageConcurrency, 1, 1, 4);
     this.pollIntervalMs = bounded(dependencies.pollIntervalMs, 1_000, 250, 10_000);
     this.maintenanceIntervalMs = bounded(dependencies.maintenanceIntervalMs, 60_000, 10_000, 3_600_000);
     this.onTaskError = dependencies.onTaskError ?? (() => undefined);

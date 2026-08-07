@@ -3,6 +3,7 @@ import "server-only";
 import type { SearchCandidate, SearchProviderQuery } from "../../server/search/search-types";
 import { array, record, requireOk, searchRequest } from "./search-http";
 import { candidate } from "./search-candidate";
+import { runtimeConfigSnapshot } from "../../server/config/runtime-config-service";
 
 function broadNewsQuery(query: SearchProviderQuery): boolean {
   if (query.focus !== "news") return false;
@@ -16,7 +17,7 @@ function plainText(value: unknown): string {
 }
 
 export async function searchMiniflux(query: SearchProviderQuery, signal?: AbortSignal): Promise<SearchCandidate[]> {
-  const base = process.env.MINIFLUX_URL?.trim() || "http://miniflux:8080";
+  const base = runtimeConfigSnapshot().minifluxUrl;
   const endpoint = new URL("/v1/entries", `${base.replace(/\/$/, "")}/`);
   endpoint.search = new URLSearchParams({
     ...(broadNewsQuery(query) ? {} : { search: query.query }),

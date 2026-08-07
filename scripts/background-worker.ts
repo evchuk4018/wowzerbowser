@@ -14,6 +14,7 @@ import { runAutomationSchedulerTickForOwner } from "../app/server/automations/au
 import { runAbandonedUploadMaintenance, runIncompleteFileMaintenance as runStorageMaintenance, runStaleChatMaintenance } from "../app/server/maintenance/maintenance-service";
 import { describeBackgroundError, logBackgroundTaskFailure } from "../app/server/observability/background-error";
 import { processPendingDiscordMessage } from "../app/server/discord/discord-chat-service";
+import { ensureRuntimeConfigLoaded, runtimeConfigSnapshot } from "../app/server/config/runtime-config-service";
 
 function boundedInteger(value: string | undefined, fallback: number, minimum: number, maximum: number): number {
   const parsed = Number.parseInt(value ?? "", 10);
@@ -22,24 +23,29 @@ function boundedInteger(value: string | undefined, fallback: number, minimum: nu
 
 const ownerId = process.env.APP_OWNER_ID?.trim();
 if (!ownerId) throw new Error("APP_OWNER_ID is required for the background worker.");
+const runtimeOwnerId = ownerId;
+await ensureRuntimeConfigLoaded(runtimeOwnerId);
+const runtimeConfig = runtimeConfigSnapshot();
 const heartbeatFile = process.env.WORKER_HEARTBEAT_FILE || "/tmp/wowzerbowser-background-worker.heartbeat";
-const heartbeatIntervalMs = boundedInteger(process.env.WORKER_HEARTBEAT_INTERVAL_MS, 5_000, 1_000, 60_000);
-const pollIntervalMs = boundedInteger(process.env.WORKER_POLL_INTERVAL_MS, 1_000, 250, 10_000);
-const maintenanceIntervalMs = boundedInteger(process.env.STORAGE_MAINTENANCE_INTERVAL_MS, 60_000, 10_000, 3_600_000);
-const automationSchedulerIntervalMs = boundedInteger(process.env.AUTOMATION_SCHEDULER_INTERVAL_MS, 30_000, 5_000, 3_600_000);
-const memorySchedulerIntervalMs = boundedInteger(process.env.MEMORY_SCHEDULER_INTERVAL_MS, 60_000, 10_000, 3_600_000);
-const discordProcessingIntervalMs = boundedInteger(process.env.DISCORD_PROCESSING_INTERVAL_MS, 1_000, 1_000, 60_000);
-const schedulerBatch = boundedInteger(process.env.AUTOMATION_SCHEDULER_BATCH, 1, 1, 4);
-const maintenanceLimit = boundedInteger(process.env.WORKER_MAINTENANCE_LIMIT, 50, 1, 50);
-const chatConcurrency = boundedInteger(process.env.WORKER_CHAT_CONCURRENCY, 1, 1, 1);
-const documentConcurrency = boundedInteger(process.env.WORKER_DOCUMENT_CONCURRENCY, 1, 1, 1);
-const imageConcurrency = boundedInteger(process.env.WORKER_IMAGE_CONCURRENCY, 1, 1, 1);
-const ocrConcurrency = boundedInteger(process.env.WORKER_OCR_CONCURRENCY, 2, 1, 2);
+const heartbeatMaxAgeFile = `${heartbeatFile}.max-age`;
+const heartbeatIntervalMs = boundedInteger(String(runtimeConfig.workerHeartbeatIntervalMs), 5_000, 1_000, 60_000);
+const pollIntervalMs = boundedInteger(String(runtimeConfig.workerPollIntervalMs), 1_000, 250, 10_000);
+const maintenanceIntervalMs = boundedInteger(String(runtimeConfig.storageMaintenanceIntervalMs), 60_000, 10_000, 3_600_000);
+const automationSchedulerIntervalMs = boundedInteger(String(runtimeConfig.automationSchedulerIntervalMs), 30_000, 5_000, 3_600_000);
+const memorySchedulerIntervalMs = boundedInteger(String(runtimeConfig.memorySchedulerIntervalMs), 60_000, 10_000, 3_600_000);
+const discordProcessingIntervalMs = boundedInteger(String(runtimeConfig.discordProcessingIntervalMs), 1_000, 1_000, 60_000);
+const schedulerBatch = boundedInteger(String(runtimeConfig.automationSchedulerBatch), 1, 1, 4);
+const maintenanceLimit = boundedInteger(String(runtimeConfig.workerMaintenanceLimit), 50, 1, 50);
+const chatConcurrency = boundedInteger(String(runtimeConfig.workerChatConcurrency), 1, 1, 4);
+const documentConcurrency = boundedInteger(String(runtimeConfig.workerDocumentConcurrency), 1, 1, 4);
+const imageConcurrency = boundedInteger(String(runtimeConfig.workerImageConcurrency), 1, 1, 4);
+const ocrConcurrency = boundedInteger(String(runtimeConfig.workerOcrConcurrency), 2, 1, 2);
 const discordProcessingEnabled = Boolean(process.env.DISCORD_ALLOWED_USER_ID?.trim());
 process.env.PDF_OCR_CONCURRENCY = String(ocrConcurrency);
 
 function writeHeartbeat(): void {
   writeFileSync(heartbeatFile, `${new Date().toISOString()}\n`, "utf8");
+  writeFileSync(heartbeatMaxAgeFile, `${runtimeConfig.workerHeartbeatMaxAgeMs}\n`, "utf8");
 }
 
 const workerId = randomUUID();
@@ -66,6 +72,7 @@ function schedulerTask<T>(task: string, run: () => Promise<T>): () => Promise<T>
   return async () => {
     const startedAt = Date.now();
     try {
+      await ensureRuntimeConfigLoaded(runtimeOwnerId);
       const result = await run();
       const recordRuns = result && typeof result === "object" && "runs" in result && Array.isArray(result.runs)
         ? result.runs as Array<{ id?: unknown; outcome?: unknown; durationMs?: unknown }>
@@ -118,6 +125,7 @@ const loop = new BackgroundWorkerLoop({
     return claim;
   },
   executeChat: async (claim, shutdownSignal) => {
+    await ensureRuntimeConfigLoaded(runtimeOwnerId);
     const terminal = await runClaimedChatJob(ownerId, claim, { shutdownSignal });
     if (!terminal) return;
     console.log(JSON.stringify({ event: "background-worker-chat-terminal", workerId, conversationId: claim.conversationId, jobId: claim.jobId, status: terminal.status }));
@@ -135,6 +143,7 @@ const loop = new BackgroundWorkerLoop({
     return claim;
   },
   executeDocument: async (claim, shutdownSignal) => {
+    await ensureRuntimeConfigLoaded(runtimeOwnerId);
     const document = await runClaimedDocumentProcessingJob(ownerId, claim, { shutdownSignal });
     if (document) console.log(JSON.stringify({ event: "background-worker-document-terminal", workerId, conversationId: claim.conversationId, jobId: claim.jobId, documentId: claim.documentId, status: "completed" }));
   },
@@ -144,6 +153,7 @@ const loop = new BackgroundWorkerLoop({
     return claim;
   },
   executeImage: async (claim, shutdownSignal) => {
+    await ensureRuntimeConfigLoaded(runtimeOwnerId);
     const image = await runClaimedChatImageProcessingJob(ownerId, claim, { shutdownSignal });
     if (image) console.log(JSON.stringify({ event: "background-worker-image-terminal", workerId, conversationId: claim.conversationId, jobId: claim.jobId, imageId: claim.imageId, status: "completed" }));
   },

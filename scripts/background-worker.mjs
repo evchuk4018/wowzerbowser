@@ -1,7 +1,10 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 
 const heartbeatFile = process.env.WORKER_HEARTBEAT_FILE || "/tmp/wowzerbowser-background-worker.heartbeat";
-const heartbeatMaxAgeMs = boundedInteger(process.env.WORKER_HEARTBEAT_MAX_AGE_MS, 30_000, 5_000, 300_000);
+const configuredHeartbeatMaxAge = (() => {
+  try { return readFileSync(`${heartbeatFile}.max-age`, "utf8").trim(); } catch { return process.env.WORKER_HEARTBEAT_MAX_AGE_MS; }
+})();
+const heartbeatMaxAgeMs = boundedInteger(configuredHeartbeatMaxAge, 30_000, 5_000, 300_000);
 
 function boundedInteger(value, fallback, minimum, maximum) {
   const parsed = Number.parseInt(value || "", 10);

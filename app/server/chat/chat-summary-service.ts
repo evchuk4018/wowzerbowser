@@ -26,11 +26,11 @@ import {
   replaceChatSummaryIfCurrent,
   supersedeChatSummaryTask,
 } from "./chat-summary-store";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 
 function enabled(): boolean {
-  const summaries = ["1", "true", "yes", "on"].includes(process.env.CHAT_DURABLE_SUMMARIES_ENABLED?.trim().toLowerCase() ?? "");
-  const dreaming = !["0", "false", "no", "off"].includes(process.env.USER_MEMORY_DREAMING_ENABLED?.trim().toLowerCase() ?? "");
-  return summaries || dreaming;
+  const config = runtimeConfigSnapshot();
+  return config.chatDurableSummariesEnabled || config.userMemoryDreamingEnabled;
 }
 
 function retryableError(error: unknown): boolean {

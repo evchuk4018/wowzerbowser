@@ -3,9 +3,10 @@ import "server-only";
 import type { SearchCandidate, SearchProviderQuery } from "../../server/search/search-types";
 import { record, requireOk, searchRequest } from "./search-http";
 import { candidate } from "./search-candidate";
+import { runtimeConfigSnapshot } from "../../server/config/runtime-config-service";
 
 export async function searchMediaWiki(query: SearchProviderQuery, signal?: AbortSignal): Promise<SearchCandidate[]> {
-  const base = process.env.MEDIAWIKI_API_URL?.trim() || "https://en.wikipedia.org/w/api.php";
+  const base = runtimeConfigSnapshot().mediawikiApiUrl;
   const endpoint = new URL(base);
   endpoint.search = new URLSearchParams({
     action: "query",

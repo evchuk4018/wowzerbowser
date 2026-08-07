@@ -5,6 +5,7 @@ import { CHAT_SOURCE_SNIPPET_MAX_LENGTH, sourceForUrl } from "../../../lib/chat-
 import { isSearchFocus, isSearchFreshness, type SearchFocus, type SearchFreshness } from "../../../lib/search-protocol";
 import { SearchNoResultsError, SearchUnavailableError, searchSelfHosted } from "../search/search-service";
 import { fetchResearchPage } from "../research/research-page-service";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 
 export const WEB_SEARCH_TOOL_NAME = "web_search";
 export const FETCH_PAGE_TOOL_NAME = "fetch_page";
@@ -26,7 +27,7 @@ export const WEB_TOOL_DEFINITIONS = [
 ] as const;
 
 function configuredLocation(): string | undefined {
-  const location = process.env.DEPLOYMENT_LOCATION?.trim().slice(0, MAX_LOCATION);
+  const location = runtimeConfigSnapshot().deploymentLocation.trim().slice(0, MAX_LOCATION);
   return location || undefined;
 }
 
@@ -89,7 +90,7 @@ function dateParts(formatter: Intl.DateTimeFormat, now: Date) {
   return { year, month, day, hour: get("hour"), minute: get("minute"), second: get("second") };
 }
 function configuredSearchStack(): boolean {
-  return process.env.SEARCH_STACK_ENABLED === "true";
+  return runtimeConfigSnapshot().searchStackEnabled;
 }
 
 export async function executeWebTool(call: ChatToolCall, signal?: AbortSignal): Promise<ChatToolResult> {

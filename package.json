@@ -28,7 +28,7 @@
     "test:database": "tsx --conditions=react-server --test tests/database-integration.test.mjs",
     "test:deep-research": "tsx --conditions=react-server --test tests/deep-research.test.mjs",
     "test:search-stack": "tsx --conditions=react-server --test tests/search-stack.test.mjs",
-    "pretest": "npm run test:search-stack && npm run test:deep-research && npm run test:documents",
+    "pretest": "npm run test:search-stack && npm run test:deep-research && npm run test:documents && tsx --conditions=react-server --test tests/runtime-config.test.mjs",
     "build": "next build",
     "prebuild": "npm run verify:pdf-runtime",
     "postbuild": "node scripts/verify-pdf-runtime.mjs",

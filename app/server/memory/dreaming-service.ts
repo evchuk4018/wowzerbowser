@@ -34,13 +34,14 @@ import {
   relocateUserMemory,
   updateUserMemory,
 } from "./user-memory-service";
+import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 
 function dreamingEnabled(): boolean {
-  return !["0", "false", "no", "off"].includes(process.env.USER_MEMORY_DREAMING_ENABLED?.trim().toLowerCase() ?? "");
+  return runtimeConfigSnapshot().userMemoryDreamingEnabled;
 }
 
 function summaryEnabled(): boolean {
-  return ["1", "true", "yes", "on"].includes(process.env.CHAT_DURABLE_SUMMARIES_ENABLED?.trim().toLowerCase() ?? "");
+  return runtimeConfigSnapshot().chatDurableSummariesEnabled;
 }
 
 function enabled(): boolean {

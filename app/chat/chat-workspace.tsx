@@ -34,6 +34,7 @@ import {
   saveConversationSelection,
   saveSettings,
 } from "./conversation-storage";
+import { saveRuntimeConfig } from "../settings/configurables-service";
 import type { ConversationTurn, Message } from "./conversation-types";
 import { useChatGeneration } from "./use-chat-generation";
 import { useChatPreferences } from "./use-chat-preferences";
@@ -1018,9 +1019,13 @@ export function ChatWorkspace({
           loadUsage={loadUsage}
           hasSession={hasSession}
           onClose={closeSettings}
-          onSave={(next) => {
+          onSave={(next, runtimeConfig) => {
             setSettings(next);
-            void hasSession().then((sessionReady) => sessionReady ? saveSettings(next) : undefined);
+            void hasSession().then(async (sessionReady) => {
+              if (!sessionReady) return;
+              await saveSettings(next);
+              if (runtimeConfig) await saveRuntimeConfig(runtimeConfig);
+            }).catch(() => undefined);
             closeSettings();
           }}
         />

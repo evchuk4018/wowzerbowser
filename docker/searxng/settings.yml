@@ -1,3 +1,9 @@
+# Checked-in baseline for the application-owned generated settings file.
+# docker/compose.sh copies this file to
+# /srv/storage/wowzerbowser/config/searxng/settings.yml only when that file is
+# absent. The runtime configuration service owns later atomic replacements.
+# Keep secrets out of this file; SEARXNG_SECRET remains deployment-managed.
+
 use_default_settings: true
 
 search:

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { isLocalPythonConfigured, PYTHON_WORKER_URL } from "./local-python-executor";
+import { currentPythonWorkerUrl, isLocalPythonConfigured } from "./local-python-executor";
 
 /** Remove the private local worker workspace associated with one conversation. */
 export async function deleteConversationWorkspace(ownerId: string, conversationId: string, workspaceId = conversationId): Promise<void> {
@@ -8,7 +8,7 @@ export async function deleteConversationWorkspace(ownerId: string, conversationI
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
-    const response = await fetch(new URL("/v1/workspace/delete", `${PYTHON_WORKER_URL.replace(/\/+$/u, "")}/`), {
+    const response = await fetch(new URL("/v1/workspace/delete", `${currentPythonWorkerUrl().replace(/\/+$/u, "")}/`), {
       method: "POST",
       headers: {
         "content-type": "application/json",

@@ -5,9 +5,10 @@ import type { ConnectorProvider, ConnectorProviderContext, ConnectionSession } f
 import { redactConnectorError } from "../connector-redaction";
 import { classifyConnectorToolAccess } from "../mcp/mcp-tool-discovery";
 import { integrationCallbackUrl } from "../../integration-site-url";
+import { runtimeConfigSnapshot } from "../../config/runtime-config-service";
 
 function baseUrl(): string {
-  const value = process.env.PIPEDREAM_CONNECT_BASE_URL?.trim();
+  const value = runtimeConfigSnapshot().pipedreamConnectBaseUrl.trim();
   if (!value) throw new Error("Managed connectors are not configured.");
   return value.replace(/\/$/, "");
 }

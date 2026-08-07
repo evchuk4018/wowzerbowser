@@ -6,6 +6,7 @@ import { authorizeChatModel, ChatModelAuthorizationError } from "../../server/ch
 import { chatProviderAdapter } from "../../server/chat/chat-provider-registry";
 import { createOrGetChatJob } from "../../server/chat/chat-job-store";
 import { streamChatJob } from "../../server/chat/chat-job-stream";
+import { ensureRuntimeConfigLoaded } from "../../server/config/runtime-config-service";
 
 export const maxDuration = 300;
 const unauthorized = () => NextResponse.json({ error: "Unauthorized." }, { status: 401 });
@@ -15,6 +16,7 @@ export async function POST(request: Request) {
   const user = await authorizeOwnerSession(request);
   if (!user) return unauthorized();
   try {
+    await ensureRuntimeConfigLoaded(user.id);
     const chatRequest = parseChatRequest(await request.json());
     if (!chatRequest.conversationId || !chatRequest.jobId || !chatRequest.idempotencyKey || !chatRequest.persistence) {
       return NextResponse.json({ error: "conversationId, jobId, idempotencyKey, and persistence are required." }, { status: 400 });
