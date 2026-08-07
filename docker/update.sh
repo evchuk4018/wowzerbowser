@@ -31,7 +31,7 @@ echo "deployment-update\tstart-dependencies"
 "$compose" up -d postgres python-worker opendataloader-hybrid
 
 echo "deployment-update\tstart-search-stack"
-"$compose" up -d searxng redlib miniflux-postgres miniflux firecrawl-redis firecrawl-rabbitmq firecrawl-postgres firecrawl-playwright firecrawl
+"$compose" up -d --remove-orphans searxng miniflux-postgres miniflux firecrawl-redis firecrawl-rabbitmq firecrawl-postgres firecrawl-playwright firecrawl
 
 echo "deployment-update\tapply-migrations"
 "$compose" run --rm --no-deps -T -e SKIP_DATABASE_MIGRATION_CHECK=1 web node scripts/migrate.mjs --initialize

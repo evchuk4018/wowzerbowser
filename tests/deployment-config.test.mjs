@@ -31,7 +31,7 @@ test("Compose keeps the app port localhost-only and PostgreSQL unpublished", asy
 
 test("search and retrieval services stay private to the Compose network", async () => {
   const compose = await read("compose.yaml");
-  for (const service of ["searxng", "redlib", "miniflux", "firecrawl"]) {
+  for (const service of ["searxng", "miniflux", "firecrawl"]) {
     const start = compose.indexOf(`  ${service}:`);
     assert.ok(start >= 0, `${service} service is missing`);
     const relativeNext = compose.slice(start + 1).search(/\n  [a-z][a-z0-9-]*:\r?\n/m);
@@ -40,9 +40,19 @@ test("search and retrieval services stay private to the Compose network", async 
     assert.doesNotMatch(block, /^    ports:/m, `${service} must not publish a host port`);
   }
   assert.match(compose, /SEARXNG_URL: \$\{SEARXNG_URL:-http:\/\/searxng:8080\}/);
+  assert.match(compose, /MEDIAWIKI_API_URL: \$\{MEDIAWIKI_API_URL:-https:\/\/en\.wikipedia\.org\/w\/api\.php\}/);
   assert.match(compose, /FIRECRAWL_URL: \$\{FIRECRAWL_URL:-http:\/\/firecrawl:3002\}/);
+  assert.doesNotMatch(compose, /redlib|REDLIB/i);
   assert.match(compose, /rabbitmq-diagnostics.*\n\s+interval: 10s\n\s+timeout: 20s\n\s+retries: 6\n\s+start_period: 120s/s);
-  assert.match(compose, /wget --server-response --spider --timeout=5 http:\/\/127\.0\.0\.1:8080\/ 2>&1 \| grep -qE 'HTTP\/\[0-9\.\]\+ \[0-9\]\+'/);
+  assert.match(compose, /test: \["CMD", "wget", "--spider", "--quiet", "http:\/\/127\.0\.0\.1:8080\/" \]/);
+});
+
+test("deployment surfaces do not retain the removed Redlib provider", async () => {
+  for (const path of ["compose.yaml", ".env.example", "docker/update.sh", "DEPLOYMENT.md", "README.md"]) {
+    assert.doesNotMatch(await read(path), /redlib|REDLIB/i, `${path} retains Redlib configuration`);
+  }
+  const updateScript = await read("docker/update.sh");
+  assert.match(updateScript, /up -d --remove-orphans searxng miniflux-postgres miniflux/);
 });
 
 test("only the application storage directory is bind-mounted", async () => {

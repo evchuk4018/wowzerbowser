@@ -36,8 +36,9 @@ HDD mount is present before any application container is started.
 - edit site code under `app/`
 - Next.js API routes live under `app/api/`
 - Docker Compose runs `web`, private PostgreSQL, `background-worker`, the
-  private CPU-only `opendataloader-hybrid` PDF backend, and the self-hosted
-  SearXNG, Redlib, Miniflux, and Firecrawl search stack
+  private CPU-only `opendataloader-hybrid` PDF backend, SearXNG and Miniflux
+  search services, the MediaWiki/Wikipedia reference API, and private
+  Firecrawl page retrieval
 
 ## Authentication
 
@@ -169,11 +170,11 @@ random characters in the deployment environment.
 
 ## Web tools
 
-The web tools use the private self-hosted search stack configured in
-`.env.example`. A single `web_search` call queries SearXNG, Redlib,
-MediaWiki/Wikipedia, and Miniflux, then deduplicates and ranks the combined
-results. Pass `focus=general`, `news`, `community`, or `reference` to change
-ranking priorities without excluding any provider.
+The web tools use the private search stack configured in `.env.example`. A
+single `web_search` call queries SearXNG, MediaWiki/Wikipedia, and Miniflux,
+then deduplicates and ranks the combined results. Pass `focus=general`,
+`news`, `community`, or `reference` to change ranking priorities without
+excluding any provider.
 
 `fetch_page` sends only the selected URL to the private Firecrawl service and
 returns bounded Markdown. Search is discovery; Firecrawl is page retrieval.
@@ -192,15 +193,14 @@ DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh
 When the background todo planner creates a non-empty plan for the current
 response, the server also advertises `deep_research_search`, `find_in_page`,
 `list_page_links`, and `follow_page_link`. Prior conversation todos do not
-unlock these tools. Every research query uses the same four-provider
-self-hosted search aggregator, and every selected page is retrieved through
-Firecrawl.
+unlock these tools. Every research query uses the same SearXNG/MediaWiki/Miniflux
+search aggregator, and every selected page is retrieved through Firecrawl.
 
 Deep Research uses the limits shown in `.env.example`, stores public extracted
 pages in the server-only `research_page_cache` table, and records its cheap
 background model calls as `deep_research` usage. Academic, developer, recent,
-official, and community intents change the aggregator's ranking focus; they do
-not activate separate provider APIs.
+official, and community intents change the SearXNG/MediaWiki/Miniflux
+aggregator's ranking focus; they do not activate separate provider APIs.
 
 `check_time` and `check_date` are always available and use the server's
 `Intl.DateTimeFormat` implementation, optionally with an IANA time zone.

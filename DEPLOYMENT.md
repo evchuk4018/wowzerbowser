@@ -18,9 +18,11 @@ host Tailscale Serve -> 127.0.0.1:3000 -> web
 ```
 
 The Compose stack includes the application services plus private SearXNG,
-Redlib, Miniflux, Firecrawl, and their databases/queue/browser dependencies.
-Only `web` is reachable through the host's loopback port; the search services,
-databases, queues, and browser service are private to the Compose network.
+Miniflux, and Firecrawl services and their databases/queue/browser
+dependencies. MediaWiki/Wikipedia is accessed through its explicit upstream
+API. Only `web` is reachable through the host's loopback port; the search
+services, databases, queues, and browser service are private to the Compose
+network.
 The `python-worker` service is private to a separate execution network shared
 only with `web` and `background-worker`; it has no host port and receives only
 its named workspace volume.
@@ -175,7 +177,7 @@ application state and must be preserved during updates.
 ```bash
 DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh ps
 docker inspect --format '{{json .State.Health}}' wowzerbowser-web-1
-DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh logs --tail=200 web background-worker python-worker searxng redlib miniflux firecrawl
+DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh logs --tail=200 web background-worker python-worker searxng miniflux firecrawl
 DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh down
 DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh up -d --build
 docker volume inspect wowzerbowser-postgres
@@ -253,7 +255,8 @@ Use the guarded update procedure from the `main` checkout. It refuses tracked
 local edits, preserves untracked files, pulls only `main` with fast-forward
 semantics, builds the new image, starts PostgreSQL, applies local migrations,
 and recreates the application, OCR, and private search services only after the
-build and migration steps succeed:
+build and migration steps succeed. The search-stack start also performs
+project-scoped Compose orphan cleanup for removed service containers:
 
 ```bash
 DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/update.sh
@@ -264,7 +267,7 @@ owner-managed media directory. It does not run `docker compose down -v`.
 If it stops at a guard, configuration, storage, or migration step, inspect the
 reported condition and correct it before retrying. If the app is already down,
 check `findmnt -T /srv/storage`, `./docker/compose.sh logs --tail=200 web
-background-worker searxng redlib miniflux firecrawl`, and the migration status command above; do not
+background-worker searxng miniflux firecrawl`, and the migration status command above; do not
 create a fallback `/srv/storage` directory or bypass the startup guard.
 
 For an optional Discord update, set `ENABLE_DISCORD_PROFILE=1` only when the
@@ -301,8 +304,9 @@ ss -ltnp
 
 Expected host listeners are SSH, Tailscale-managed listeners, and the web port
 on `127.0.0.1` only. There must be no host listener for PostgreSQL,
-OpenDataLoader, SearXNG, Redlib, Miniflux, Firecrawl, or their queue/database
-dependencies. The application containers must not see `/srv/storage/media`;
+OpenDataLoader, SearXNG, Miniflux, Firecrawl, or their queue/database
+dependencies. MediaWiki/Wikipedia is an external upstream API, not a host
+listener. The application containers must not see `/srv/storage/media`;
 only `web` and `background-worker` receive the `/srv/storage/wowzerbowser`
 bind mount, while the hybrid service receives only its named model-cache volume
 and `python-worker` receives only its named workspace volume.

@@ -118,30 +118,6 @@ services:
       retries: 6
       start_period: 30s
 
-  redlib:
-    image: quay.io/redlib/redlib@sha256:e6647a94d553bf3f7c95c53fc6d9da5785e6c278d9002e99ea32abdb5e3c513a
-    environment:
-      PORT: 8080
-      ENABLE_RSS: "on"
-      FULL_URL: ${REDLIB_PUBLIC_BASE_URL:-https://www.reddit.com}
-      ROBOTS_DISABLE_INDEXING: "on"
-      REDLIB_DEFAULT_SHOW_NSFW: "off"
-    expose:
-      - "8080"
-    networks:
-      - application
-    restart: unless-stopped
-    init: true
-    cpus: "0.25"
-    mem_limit: 256m
-    pids_limit: 128
-    healthcheck:
-      test: ["CMD-SHELL", "body=$$(wget -qO- -T 5 'http://127.0.0.1:8080/search?q=healthcheck&sort=relevance') || exit 1; printf '%s' \"$$body\" | grep -q 'id=\"column_one\"'"]
-      interval: 20s
-      timeout: 5s
-      retries: 6
-      start_period: 15s
-
   miniflux-postgres:
     image: postgres:16-alpine
     environment:
@@ -333,8 +309,6 @@ services:
       OPENDATALOADER_HYBRID_URL: ${OPENDATALOADER_HYBRID_URL:-http://opendataloader-hybrid:5002}
       SEARCH_STACK_ENABLED: ${SEARCH_STACK_ENABLED:-true}
       SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
-      REDLIB_URL: ${REDLIB_URL:-http://redlib:8080}
-      REDLIB_PUBLIC_BASE_URL: ${REDLIB_PUBLIC_BASE_URL:-https://www.reddit.com}
       MEDIAWIKI_API_URL: ${MEDIAWIKI_API_URL:-https://en.wikipedia.org/w/api.php}
       MINIFLUX_URL: ${MINIFLUX_URL:-http://miniflux:8080}
       MINIFLUX_API_TOKEN: ${MINIFLUX_API_TOKEN:-}
@@ -361,8 +335,6 @@ services:
       opendataloader-hybrid:
         condition: service_healthy
       searxng:
-        condition: service_started
-      redlib:
         condition: service_started
       miniflux:
         condition: service_started
@@ -410,8 +382,6 @@ services:
       OPENDATALOADER_HYBRID_URL: ${OPENDATALOADER_HYBRID_URL:-http://opendataloader-hybrid:5002}
       SEARCH_STACK_ENABLED: ${SEARCH_STACK_ENABLED:-true}
       SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
-      REDLIB_URL: ${REDLIB_URL:-http://redlib:8080}
-      REDLIB_PUBLIC_BASE_URL: ${REDLIB_PUBLIC_BASE_URL:-https://www.reddit.com}
       MEDIAWIKI_API_URL: ${MEDIAWIKI_API_URL:-https://en.wikipedia.org/w/api.php}
       MINIFLUX_URL: ${MINIFLUX_URL:-http://miniflux:8080}
       MINIFLUX_API_TOKEN: ${MINIFLUX_API_TOKEN:-}
@@ -446,8 +416,6 @@ services:
       opendataloader-hybrid:
         condition: service_healthy
       searxng:
-        condition: service_started
-      redlib:
         condition: service_started
       miniflux:
         condition: service_started
