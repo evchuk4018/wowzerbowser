@@ -90,7 +90,8 @@ test("self-hosted search focus preserves the unified provider contract", async (
   try {
     const results = await searchSelfHosted({ query: "page", focus: "community" });
     assert.equal(results.length, 1);
-    assert.equal(new Set(requested.map((url) => url.hostname)).size, 4);
+    assert.equal(new Set(requested.map((url) => url.hostname)).size, 3);
+    assert.equal(requested.filter((url) => url.pathname === "/search").length, 2);
   } finally {
     globalThis.fetch = previousFetch;
   }

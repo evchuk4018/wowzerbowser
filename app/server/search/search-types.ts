@@ -1,7 +1,7 @@
 import type { ChatSource } from "../../../lib/chat-citations";
 import type { SearchFocus } from "../../../lib/search-protocol";
 
-export const SEARCH_PROVIDER_NAMES = ["searxng", "redlib", "mediawiki", "miniflux"] as const;
+export const SEARCH_PROVIDER_NAMES = ["searxng", "searxng-reddit", "mediawiki", "miniflux"] as const;
 export type SearchProviderName = (typeof SEARCH_PROVIDER_NAMES)[number];
 
 export type SearchProviderQuery = {

@@ -195,7 +195,7 @@ test("web search queries every self-hosted provider and caps higher counts", asy
     if (value.includes("searxng")) return Response.json({ results: [{ title: "Web result", url: "https://example.com/web", content: "Web evidence" }] });
     if (value.includes("wikipedia")) return Response.json({ query: { pages: { "1": { title: "Reference", fullurl: "https://en.wikipedia.org/wiki/Reference", extract: "Reference evidence" } } } });
     if (value.includes("miniflux")) return Response.json({ entries: [{ title: "News result", url: "https://news.example.com/story", content: "News evidence", published_at: "2026-08-04T12:00:00Z" }] });
-    return new Response("<html><body>No Reddit results</body></html>", { headers: { "content-type": "text/html" } });
+    return Response.json({ results: [] });
   };
   try {
     const result = await executeWebTool({ id: "search-1", name: "web_search", arguments: '{"q":"current date","count":20,"focus":"news"}' });
@@ -203,13 +203,14 @@ test("web search queries every self-hosted provider and caps higher counts", asy
     assert.equal(result.web?.kind, "search");
     assert.equal(result.web?.query, "current date");
     assert.equal(requestedUrls.length, 4);
-    const searxngRequest = requested.find(({ url }) => url.includes("searxng"));
-    assert.ok(searxngRequest);
-    assert.equal(searxngRequest.init.method, "POST");
-    assert.equal(searxngRequest.init.headers["Content-Type"], "application/x-www-form-urlencoded");
-    assert.equal(new URLSearchParams(searxngRequest.init.body).get("q"), "current date");
-    assert.equal(new URLSearchParams(searxngRequest.init.body).get("categories"), "news");
-    assert.ok(requestedUrls.some((url) => url.includes("redlib")));
+    const searxngRequests = requested.filter(({ url }) => url.includes("searxng"));
+    assert.equal(searxngRequests.length, 2);
+    for (const searxngRequest of searxngRequests) {
+      assert.equal(searxngRequest.init.method, "POST");
+      assert.equal(searxngRequest.init.headers["Content-Type"], "application/x-www-form-urlencoded");
+      assert.equal(new URLSearchParams(searxngRequest.init.body).get("categories"), "news");
+    }
+    assert.deepEqual(searxngRequests.map(({ init }) => new URLSearchParams(init.body).get("q")).sort(), ["current date", "current date reddit"]);
     assert.ok(requestedUrls.some((url) => url.includes("wikipedia")));
     assert.ok(requestedUrls.some((url) => url.includes("miniflux")));
     assert.equal(result.web?.results[0]?.url, "https://news.example.com/story");
@@ -235,7 +236,7 @@ test("web search snippets survive assistant-round replay at the shared boundary"
     if (value.includes("searxng")) return Response.json({ results: [{ title: "Long result", url: "https://example.com/long", content: snippet }] });
     if (value.includes("wikipedia")) return Response.json({ query: { pages: {} } });
     if (value.includes("miniflux")) return Response.json({ entries: [] });
-    return new Response("<html><body>No Reddit results</body></html>", { headers: { "content-type": "text/html" } });
+    return Response.json({ results: [] });
   };
 
   function followUpRequest(result) {

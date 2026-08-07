@@ -1,65 +1,69 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { extractFirecrawl } from "../app/providers/research/research-page-adapters.ts";
-import { searchRedlib } from "../app/providers/search/redlib-search-adapter.ts";
 import { searchMiniflux } from "../app/providers/search/miniflux-search-adapter.ts";
-import { searchSearXNG } from "../app/providers/search/searxng-search-adapter.ts";
+import { searchSearXNG, searchSearXNGReddit } from "../app/providers/search/searxng-search-adapter.ts";
 import { SearchNoResultsError, SearchUnavailableError, searchSelfHosted } from "../app/server/search/search-service.ts";
 
-test("Redlib v0.36 search HTML normalizes discussion links to public Reddit URLs", async () => {
+test("community search uses an exact SearXNG Reddit query and filters non-Reddit URLs", async () => {
   const previousFetch = globalThis.fetch;
-  const previousUrl = process.env.REDLIB_URL;
-  process.env.REDLIB_URL = "http://redlib:8080";
-  globalThis.fetch = async () => new Response(
-    '<main><div id="column_one"><article class="post"><a class="post_title" href="/r/selfhosted/comments/abc123/self_hosted_search/">Self-hosted search</a><p>Community experience</p></article></div></main>',
-    { headers: { "content-type": "text/html" } },
-  );
+  const previousUrl = process.env.SEARXNG_URL;
+  const calls = [];
+  process.env.SEARXNG_URL = "http://searxng:8080";
+  globalThis.fetch = async (url, init = {}) => {
+    const value = String(url);
+    if (value.includes("searxng")) {
+      const query = new URLSearchParams(init.body).get("q");
+      calls.push({ url: value, init, query });
+      if (query === "self hosted search") return Response.json({ results: [] });
+      if (query === "self hosted search reddit") return Response.json({ results: [
+        { title: "Unrelated result", url: "https://example.com/not-reddit", content: "Should be filtered" },
+        { title: "Self-hosted search", url: "https://www.reddit.com/r/selfhosted/comments/abc123/self_hosted_search/", content: "Community experience" },
+        { title: "Suffix-confusion result", url: "https://reddit.com.evil.example/r/not-reddit", content: "Should be filtered" },
+        { title: "Short Reddit link", url: "https://redd.it/def456", content: "Another Reddit result" },
+        { title: "Trailing-dot Reddit link", url: "https://old.reddit.com./r/selfhosted/comments/ghi789/another_post", content: "A third Reddit result" },
+      ] });
+      throw new Error(`Unexpected SearXNG query: ${query}`);
+    }
+    if (value.includes("wikipedia")) return Response.json({ query: { pages: {} } });
+    return Response.json({ entries: [] });
+  };
   try {
-    const results = await searchRedlib({ query: "self hosted search", focus: "community", count: 20, queryIndex: 0, intent: "community" });
-    assert.equal(results.length, 1);
-    assert.equal(results[0].provider, "redlib");
+    const results = await searchSelfHosted({ query: "self hosted search", focus: "community", count: 3, queryIndex: 0, intent: "community" });
+    assert.equal(calls.length, 2);
+    assert.deepEqual(calls.map(({ query }) => query).sort(), ["self hosted search", "self hosted search reddit"]);
+    assert.equal(results.length, 3);
+    assert.equal(results[0].provider, "searxng-reddit");
+    assert.equal(results[0].rank, 2);
     assert.equal(results[0].url, "https://www.reddit.com/r/selfhosted/comments/abc123/self_hosted_search");
     assert.match(results[0].snippet, /Community experience/);
+    assert.equal(results[1].provider, "searxng-reddit");
+    assert.equal(results[1].rank, 4);
+    assert.equal(results[1].url, "https://redd.it/def456");
+    assert.equal(results[2].provider, "searxng-reddit");
+    assert.equal(results[2].rank, 5);
+    assert.equal(results[2].url, "https://old.reddit.com./r/selfhosted/comments/ghi789/another_post");
   } finally {
     globalThis.fetch = previousFetch;
-    if (previousUrl === undefined) delete process.env.REDLIB_URL; else process.env.REDLIB_URL = previousUrl;
+    if (previousUrl === undefined) delete process.env.SEARXNG_URL; else process.env.SEARXNG_URL = previousUrl;
   }
 });
 
-test("Redlib search preserves upstream HTTP failures", async () => {
+test("SearXNG Reddit-query failures preserve upstream HTTP statuses", async () => {
   const previousFetch = globalThis.fetch;
-  const previousUrl = process.env.REDLIB_URL;
-  process.env.REDLIB_URL = "http://redlib:8080";
+  const previousUrl = process.env.SEARXNG_URL;
+  process.env.SEARXNG_URL = "http://searxng:8080";
   try {
     for (const status of [403, 404]) {
-      globalThis.fetch = async () => new Response("upstream failure", { status, headers: { "content-type": "text/html" } });
+      globalThis.fetch = async () => new Response("upstream failure", { status, headers: { "content-type": "application/json" } });
       await assert.rejects(
-        searchRedlib({ query: "weather cup", focus: "community", count: 5, queryIndex: 0, intent: "community" }),
+        searchSearXNGReddit({ query: "weather cup", focus: "community", count: 5, queryIndex: 0, intent: "community" }),
         new RegExp(`status ${status}`),
       );
     }
   } finally {
     globalThis.fetch = previousFetch;
-    if (previousUrl === undefined) delete process.env.REDLIB_URL; else process.env.REDLIB_URL = previousUrl;
-  }
-});
-
-test("Redlib search rejects a 200 upstream-error page instead of returning empty results", async () => {
-  const previousFetch = globalThis.fetch;
-  const previousUrl = process.env.REDLIB_URL;
-  process.env.REDLIB_URL = "http://redlib:8080";
-  globalThis.fetch = async () => new Response(
-    '<main><div id="error"><h1>Failed to parse page JSON data</h1></div></main>',
-    { headers: { "content-type": "text/html" } },
-  );
-  try {
-    await assert.rejects(
-      searchRedlib({ query: "weather cup", focus: "community", count: 5, queryIndex: 0, intent: "community" }),
-      /upstream error page/i,
-    );
-  } finally {
-    globalThis.fetch = previousFetch;
-    if (previousUrl === undefined) delete process.env.REDLIB_URL; else process.env.REDLIB_URL = previousUrl;
+    if (previousUrl === undefined) delete process.env.SEARXNG_URL; else process.env.SEARXNG_URL = previousUrl;
   }
 });
 
@@ -172,10 +176,6 @@ test("general search does not return irrelevant MediaWiki fallback pages", async
   globalThis.fetch = async (url) => {
     const value = String(url);
     if (value.includes("searxng")) return Response.json({ results: [] });
-    if (value.includes("redlib")) return new Response(
-      '<main><div id="column_one"><center>No posts were found.</center></div></main>',
-      { headers: { "content-type": "text/html" } },
-    );
     if (value.includes("wikipedia")) return Response.json({ query: { pages: {
       "1": { title: "Major League Soccer", fullurl: "https://en.wikipedia.org/wiki/Major_League_Soccer", extract: "The league is a professional soccer competition." },
       "2": { title: "FC Bayern Munich", fullurl: "https://en.wikipedia.org/wiki/FC_Bayern_Munich", extract: "A football club based in Munich." },
@@ -197,7 +197,6 @@ test("search returns healthy provider results when another provider is unavailab
   globalThis.fetch = async (url) => {
     const value = String(url);
     if (value.includes("searxng")) return Response.json({ results: [{ title: "Weather Cup guide", url: "https://example.com/weather-cup", content: "Magcargo matchup evidence" }] });
-    if (value.includes("redlib")) return new Response("Reddit unavailable", { status: 404, headers: { "content-type": "text/html" } });
     if (value.includes("wikipedia")) return Response.json({ query: { pages: {
       "1": { title: "Major League Soccer", fullurl: "https://en.wikipedia.org/wiki/Major_League_Soccer", extract: "The league is a professional soccer competition." },
     } } });
@@ -220,7 +219,7 @@ test("search reports rejected provider names when no provider has usable results
       searchSelfHosted({ query: "weather cup", focus: "general", count: 10 }),
       (error) => error instanceof SearchUnavailableError
         && /searxng/.test(error.message)
-        && /redlib/.test(error.message)
+        && /searxng-reddit/.test(error.message)
         && /mediawiki/.test(error.message)
         && /miniflux/.test(error.message),
     );

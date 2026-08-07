@@ -4,15 +4,14 @@ import type { SearchFocus } from "../../../lib/search-protocol";
 import { canonicalSourceUrl } from "../../../lib/chat-citations";
 import { searchMediaWiki } from "../../providers/search/mediawiki-search-adapter";
 import { searchMiniflux } from "../../providers/search/miniflux-search-adapter";
-import { searchRedlib } from "../../providers/search/redlib-search-adapter";
-import { searchSearXNG } from "../../providers/search/searxng-search-adapter";
+import { searchSearXNG, searchSearXNGReddit } from "../../providers/search/searxng-search-adapter";
 import type { SearchCandidate, SearchProviderName, SearchProviderQuery } from "./search-types";
 
 const PROVIDER_WEIGHTS: Record<SearchFocus, Record<SearchProviderName, number>> = {
-  general: { searxng: 1, redlib: 0.9, mediawiki: 0.9, miniflux: 0.9 },
-  news: { searxng: 1, redlib: 0.65, mediawiki: 0.55, miniflux: 1.55 },
-  community: { searxng: 0.85, redlib: 1.55, mediawiki: 0.6, miniflux: 0.65 },
-  reference: { searxng: 0.85, redlib: 0.55, mediawiki: 1.6, miniflux: 0.6 },
+  general: { searxng: 1, "searxng-reddit": 0.9, mediawiki: 0.9, miniflux: 0.9 },
+  news: { searxng: 1, "searxng-reddit": 0.65, mediawiki: 0.55, miniflux: 1.55 },
+  community: { searxng: 0.85, "searxng-reddit": 1.55, mediawiki: 0.6, miniflux: 0.65 },
+  reference: { searxng: 0.85, "searxng-reddit": 0.55, mediawiki: 1.6, miniflux: 0.6 },
 };
 
 const RELEVANCE_STOP_WORDS = new Set([
@@ -113,7 +112,7 @@ export async function searchSelfHosted(input: {
   };
   const providers: Array<[SearchProviderName, Promise<SearchCandidate[]>]> = [
     ["searxng", searchSearXNG(query, input.signal)],
-    ["redlib", searchRedlib(query, input.signal)],
+    ["searxng-reddit", searchSearXNGReddit(query, input.signal)],
     ["mediawiki", searchMediaWiki(query, input.signal)],
     ["miniflux", searchMiniflux(query, input.signal)],
   ];

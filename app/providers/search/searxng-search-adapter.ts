@@ -11,7 +11,24 @@ const FRESHNESS: Record<NonNullable<SearchProviderQuery["freshness"]>, string> =
   year: "year",
 };
 
-export async function searchSearXNG(query: SearchProviderQuery, signal?: AbortSignal): Promise<SearchCandidate[]> {
+type SearXNGProvider = Extract<SearchCandidate["provider"], "searxng" | "searxng-reddit">;
+type CandidateFilter = (item: SearchCandidate) => boolean;
+
+function isRedditUrl(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
+    return hostname === "reddit.com" || hostname.endsWith(".reddit.com") || hostname === "redd.it";
+  } catch {
+    return false;
+  }
+}
+
+async function searchSearXNGWithProvider(
+  query: SearchProviderQuery,
+  provider: SearXNGProvider,
+  signal?: AbortSignal,
+  filter?: CandidateFilter,
+): Promise<SearchCandidate[]> {
   const base = process.env.SEARXNG_URL?.trim() || "http://searxng:8080";
   const endpoint = new URL("/search", `${base.replace(/\/$/, "")}/`);
   const form = new URLSearchParams({
@@ -33,17 +50,33 @@ export async function searchSearXNG(query: SearchProviderQuery, signal?: AbortSi
   const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
   if (!contentType.includes("json")) throw new Error("SearXNG search returned a non-JSON response.");
   const body = record(await response.json());
-  return array(body.results).map((item, index) => {
+  const results: SearchCandidate[] = [];
+  let upstreamRank = 0;
+  for (const item of array(body.results)) {
+    upstreamRank += 1;
     const row = record(item);
-    return candidate({
+    const result = candidate({
       title: row.title,
       url: row.url,
       snippet: row.content ?? row.description,
       publishedAt: row.publishedDate ?? row.published_at,
-      provider: "searxng",
+      provider,
       query,
-      rank: index + 1,
+      rank: upstreamRank,
       extraSnippets: row.engines,
     });
-  }).filter((item): item is SearchCandidate => Boolean(item)).slice(0, query.count);
+    if (!result || (filter && !filter(result))) continue;
+    results.push(result);
+    if (results.length >= query.count) break;
+  }
+  return results;
+}
+
+export async function searchSearXNG(query: SearchProviderQuery, signal?: AbortSignal): Promise<SearchCandidate[]> {
+  return searchSearXNGWithProvider(query, "searxng", signal);
+}
+
+export async function searchSearXNGReddit(query: SearchProviderQuery, signal?: AbortSignal): Promise<SearchCandidate[]> {
+  const redditQuery: SearchProviderQuery = { ...query, query: `${query.query.trim()} reddit` };
+  return searchSearXNGWithProvider(redditQuery, "searxng-reddit", signal, (item) => isRedditUrl(item.url));
 }

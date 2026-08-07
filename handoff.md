@@ -9,6 +9,14 @@ and the production checks performed against `homelab`.
 
 Investigation snapshot: 2026-08-05 Eastern Time / 2026-08-06 UTC.
 
+## Resolution
+
+The former Redlib integration has been removed. `searchSelfHosted()` now runs
+the original SearXNG query and a second SearXNG query with `reddit` appended,
+then keeps Reddit-hosted results from the second stream. MediaWiki/Wikipedia
+and Miniflux remain in the provider fan-out. The remaining Redlib references
+below are historical incident evidence, not active deployment instructions.
+
 No application code was changed during the diagnosis. The local worktree was
 clean before this handoff was written. `main` and `origin/main` were both at
 `b49384f` (`Fix web snippet replay limit`).
@@ -176,7 +184,7 @@ Required changes:
 Do not “fix” this by merely adding a broader HTML parser. The provider contract
 is JSON, and accepting the UI page would hide configuration/API regressions.
 
-### Redlib adapter, availability, and deployment image
+### Historical Redlib adapter incident (resolved by removal)
 
 Primary files:
 
@@ -185,24 +193,24 @@ Primary files:
 - `.env.example:45-58`
 - `tests/search-stack.test.mjs:8-26`
 
-Required investigation and change:
+The former Redlib adapter and Compose service are no longer deployed. The
+replacement is the shared SearXNG JSON adapter with a literal `reddit` query
+suffix and Reddit-host filtering. The historical evidence below explains why
+the proxy was removed; do not use these old Redlib remediation steps for the
+current deployment.
 
-1. Confirm the supported search route and response shape for the exact Redlib
-   image that will be deployed. The current live `v0.36.0` image returns 404
-   for the adapter's `/search` request, so do not assume the route is valid.
-2. Either update the adapter to the supported route/HTML structure and add a
-   fixture for it, or disable Redlib search until a supported route is
-   available. Do not silently turn a 404 error page into zero results.
+1. The former investigation confirmed that the supported search route for the
+   exact Redlib image returned 404 for the adapter's `/search` request.
+2. The adapter and service were removed rather than updated. Do not silently
+   turn a provider failure into zero results.
 3. Keep non-2xx responses as provider failures, but include the status in the
    provider log so the search service can distinguish route mismatch, upstream
    blocking, and an empty result page.
-4. Replace `quay.io/redlib/redlib:latest` with a tested immutable digest.
-5. Improve the Redlib healthcheck so it detects the capability required by the
-   adapter, not merely that the root page returns an HTTP response. If the
-   supported search route itself depends on Reddit availability, document that
-   dependency and avoid treating a green root probe as search readiness.
-6. Add tests for HTTP 404/403, an upstream-error HTML page, and a valid search
-   result page. Preserve the existing public Reddit URL normalization test.
+4. The former image and healthcheck were removed with the service.
+5. SearXNG's JSON healthcheck and the shared adapter now cover the active
+   Reddit search path.
+6. Tests cover the suffixed SearXNG request, JSON parsing, Reddit filtering,
+   and provider failures.
 
 The Redlib logs show that image/route compatibility is only part of the
 problem: Reddit is also returning 403 and OAuth setup is returning 401. If the
@@ -311,18 +319,18 @@ ssh -o BatchMode=yes -o ConnectTimeout=10 evanh@100.98.43.68 \
   "docker logs --since 15m wowzerbowser-searxng-1 2>&1 | tail -200"
 
 ssh -o BatchMode=yes -o ConnectTimeout=10 evanh@100.98.43.68 \
-  "docker logs --since 15m wowzerbowser-redlib-1 2>&1 | tail -200"
+  "docker ps --format '{{.Names}}' | grep -q 'redlib' && exit 1 || true"
 ```
 
 For SearXNG, execute the same POST form request used by the adapter from
-inside the Compose network and verify that the response is JSON. For Redlib,
-execute the exact supported search request and verify a 2xx response plus at
-least one parseable result fixture or an explicit no-results response.
+inside the Compose network and verify that the response is JSON. There must be
+no Redlib container; verify that the suffixed SearXNG request returns JSON and
+that any accepted Reddit results are Reddit-hosted URLs.
 
 Also verify that:
 
 - SearXNG health is not green when its JSON API is unusable.
-- Redlib restart count is stable.
+- No obsolete Redlib container remains after the deployment update.
 - `web_search` returns relevant results or a precise no-results/provider-error
   response.
 - A follow-up message after a maximum-length web snippet does not produce
@@ -357,7 +365,7 @@ After application changes are implemented and tests pass:
 5. Record the final Compose status, provider smoke results, migration check,
    and deployed image digests in the implementation PR/commit handoff.
 
-Completion means the code tests pass, SearXNG POST/JSON behavior is verified,
-Redlib is either working on a tested route or explicitly unavailable without a
-restart loop, irrelevant fallback results are suppressed, and the snippet
-replay regression remains green.
+Completion means the code tests pass, SearXNG POST/JSON behavior and the
+Reddit-suffixed query are verified, no Redlib service/container remains,
+irrelevant fallback results are suppressed, and the snippet replay regression
+remains green.
