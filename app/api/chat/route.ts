@@ -7,6 +7,7 @@ import { chatProviderAdapter } from "../../server/chat/chat-provider-registry";
 import { createOrGetChatJob } from "../../server/chat/chat-job-store";
 import { streamChatJob } from "../../server/chat/chat-job-stream";
 import { ensureRuntimeConfigLoaded } from "../../server/config/runtime-config-service";
+import { prepareChatRequestWithExperiment } from "../../server/ab-testing/ab-testing-service";
 
 export const maxDuration = 300;
 const unauthorized = () => NextResponse.json({ error: "Unauthorized." }, { status: 401 });
@@ -17,16 +18,18 @@ export async function POST(request: Request) {
   if (!user) return unauthorized();
   try {
     await ensureRuntimeConfigLoaded(user.id);
-    const chatRequest = parseChatRequest(await request.json());
+    let chatRequest = parseChatRequest(await request.json());
     if (!chatRequest.conversationId || !chatRequest.jobId || !chatRequest.idempotencyKey || !chatRequest.persistence) {
       return NextResponse.json({ error: "conversationId, jobId, idempotencyKey, and persistence are required." }, { status: 400 });
     }
+    const conversationId = chatRequest.conversationId;
+    chatRequest = await prepareChatRequestWithExperiment(user.id, chatRequest);
     const selectedModel = await authorizeChatModel(user.id, chatRequest.model);
     if (selectedModel.reasoningRequired && !chatRequest.thinking) return NextResponse.json({ error: "Reasoning is required for this model." }, { status: 400 });
     if (chatRequest.thinking && !selectedModel.supportedEfforts.includes(chatRequest.reasoningEffort)) return NextResponse.json({ error: "Reasoning effort is not supported." }, { status: 400 });
     chatProviderAdapter(chatRequest.model.provider).assertConfigured();
     const submission = await createOrGetChatJob(user.id, chatRequest);
-    const stream = streamChatJob(user.id, chatRequest.conversationId, submission, request.signal);
+    const stream = streamChatJob(user.id, conversationId, submission, request.signal);
     return new Response(stream, {
       status: submission.resumed ? 200 : 202,
       headers: {

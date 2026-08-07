@@ -14,6 +14,7 @@ import { ConfigurablesSettings } from "./configurables-settings";
 import { SkillsSettings } from "./skills-settings";
 import { AutomationsSettings } from "./automations-settings";
 import { ConnectorsSettings } from "./connectors-settings";
+import { AbTestingSettings } from "./ab-testing-settings";
 import type { RuntimeConfigValues } from "../../lib/runtime-config-protocol";
 
 export type SettingsModalProps = {
@@ -34,10 +35,11 @@ type SettingsSection =
   | "automations"
   | "safety"
   | "security"
-  | "account"
+  | "experiments"
   | "skills";
 
 const sections: Array<{ id: SettingsSection; label: string; description: string; icon: string }> = [
+  { id: "experiments", label: "A/B Testing", description: "Compare temporary configuration candidates with real chat turns.", icon: "A/B" },
   { id: "general", label: "General", description: "Conversation context and app preferences.", icon: "settings" },
   { id: "usage", label: "Usage", description: "Review token volume and estimated costs.", icon: "◫" },
   { id: "tools", label: "Tools", description: "Create Python tools and securely connect APIs.", icon: "♢" },
@@ -47,7 +49,6 @@ const sections: Array<{ id: SettingsSection; label: string; description: string;
   { id: "automations", label: "Automations", description: "Schedule reports and conditional live checks.", icon: "▱" },
   { id: "safety", label: "Configurables", description: "Choose runtime models and provider behavior.", icon: "◇" },
   { id: "security", label: "Security and login", description: "Protect your account and active sessions.", icon: "⌾" },
-  { id: "account", label: "Account", description: "Manage your profile and account details.", icon: "◎" },
   { id: "skills", label: "Skills", description: "Create reusable instructions the assistant loads on demand.", icon: "✦" },
 ];
 
@@ -453,6 +454,8 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage, hasSession
               <SkillsSettings hasSession={hasSession} />
             ) : activeSection === "automations" ? (
               <AutomationsSettings hasSession={hasSession} />
+            ) : activeSection === "experiments" ? (
+              <AbTestingSettings hasSession={hasSession} />
             ) : activeSection === "safety" ? (
               <ConfigurablesSettings
                 hasSession={hasSession}

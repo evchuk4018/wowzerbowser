@@ -16,6 +16,7 @@ import { databaseOwnerId, isoTimestamp, jsonb, query } from "../database/databas
 import { attachmentFromUploadRecord, listChatImageUploadRecords } from "./chat-image-store";
 import type { ChatSearchResult } from "../../../lib/chat-search";
 import type { TodoList } from "../../../lib/todo-protocol";
+import { recordAbVersionPreference } from "../ab-testing/ab-testing-service";
 
 type MessageRow = {
   owner_id: string;
@@ -41,6 +42,7 @@ type MessageRow = {
   annotations: unknown;
   sources: unknown;
   todos: unknown;
+  experiment_assignment: unknown;
 };
 
 export async function chatConversationExists(ownerId: string, conversationId: string): Promise<boolean> {
@@ -87,6 +89,9 @@ function messageFromRow(row: MessageRow): ChatHistoryMessage {
     ...(Array.isArray(row.annotations) && row.annotations.length ? { annotations: row.annotations } : {}),
     ...(Array.isArray(row.sources) && row.sources.length ? { sources: row.sources } : {}),
     ...(row.todos && typeof row.todos === "object" ? { todos: row.todos as TodoList } : {}),
+    ...(row.experiment_assignment && typeof row.experiment_assignment === "object" && !Array.isArray(row.experiment_assignment)
+      ? { experimentAssignment: row.experiment_assignment as ChatHistoryMessage["experimentAssignment"] }
+      : {}),
   };
 }
 
@@ -121,13 +126,14 @@ function messageRow(
     annotations: message.annotations ?? [],
     sources: message.sources ?? [],
     todos: message.todos ?? null,
+    experiment_assignment: message.experimentAssignment ?? null,
     updated_at: new Date().toISOString(),
   };
 }
 
 async function insertIfAbsent(tableName: "chat_conversations" | "chat_turns" | "chat_message_versions" | "chat_messages", row: Record<string, unknown>) {
   const entries = Object.entries(row);
-  const jsonColumns = new Set(["attachments", "documents", "activities", "artifacts", "annotations", "sources", "todos", "stream_metrics"]);
+  const jsonColumns = new Set(["attachments", "documents", "activities", "artifacts", "annotations", "sources", "todos", "stream_metrics", "experiment_assignment"]);
   const values = entries.map(([key, value]) => jsonColumns.has(key) ? jsonb(value) : value);
   const placeholders = entries.map(([key], index) => jsonColumns.has(key) ? `$${index + 1}::jsonb` : `$${index + 1}`);
   try {
@@ -489,6 +495,7 @@ export async function ensureChatSubmission(ownerId: string, request: ChatRequest
     activities: [],
     artifacts: [],
     thinkingEnabled: request.thinking,
+    ...(request.experiment ? { experimentAssignment: request.experiment } : {}),
     status: "streaming",
     jobId,
     lastSequence: 0,
@@ -513,7 +520,7 @@ export async function finalizeChatJobMessage(
   const row = data;
   const next = finalizeChatHistoryMessage(messageFromRow(row), status, values);
   const replacement = messageRow(owner, conversationId, row.turn_id, row.version_id, next);
-  await query(`update chat_messages set content=$1,reasoning=$2,attachments=$3::jsonb,documents=$4::jsonb,activities=$5::jsonb,artifacts=$6::jsonb,thinking_enabled=$7,thinking_duration_ms=$8,status=$9,error=$10,job_id=$11,last_sequence=$12,trace_round=$13,annotations=$14::jsonb,sources=$15::jsonb,todos=$16::jsonb,updated_at=$17 where owner_id=$18 and conversation_id=$19 and message_id=$20`, [replacement.content, replacement.reasoning, jsonb(replacement.attachments), jsonb(replacement.documents), jsonb(replacement.activities), jsonb(replacement.artifacts), replacement.thinking_enabled, replacement.thinking_duration_ms, replacement.status, replacement.error, replacement.job_id, replacement.last_sequence, replacement.trace_round, jsonb(replacement.annotations), jsonb(replacement.sources), jsonb(replacement.todos), replacement.updated_at, owner, conversationId, next.id]);
+  await query(`update chat_messages set content=$1,reasoning=$2,attachments=$3::jsonb,documents=$4::jsonb,activities=$5::jsonb,artifacts=$6::jsonb,experiment_assignment=$7::jsonb,thinking_enabled=$8,thinking_duration_ms=$9,status=$10,error=$11,job_id=$12,last_sequence=$13,trace_round=$14,annotations=$15::jsonb,sources=$16::jsonb,todos=$17::jsonb,updated_at=$18 where owner_id=$19 and conversation_id=$20 and message_id=$21`, [replacement.content, replacement.reasoning, jsonb(replacement.attachments), jsonb(replacement.documents), jsonb(replacement.activities), jsonb(replacement.artifacts), jsonb(replacement.experiment_assignment), replacement.thinking_enabled, replacement.thinking_duration_ms, replacement.status, replacement.error, replacement.job_id, replacement.last_sequence, replacement.trace_round, jsonb(replacement.annotations), jsonb(replacement.sources), jsonb(replacement.todos), replacement.updated_at, owner, conversationId, next.id]);
   await touchConversation(ownerId, conversationId);
 }
 
@@ -663,4 +670,5 @@ export async function updateChatActiveVersion(ownerId: string, conversationId: s
   if (!turn) throw new Error("Conversation turn not found.");
   await materializePersistedLineage(ownerId, conversationId, Number(turn.position));
   await query("update chat_turns set active_version=$1,updated_at=$2 where owner_id=$3 and conversation_id=$4 and turn_id=$5", [version.version_index, new Date().toISOString(), owner, conversationId, turnId]);
+  await recordAbVersionPreference(ownerId, conversationId, turnId, versionId);
 }

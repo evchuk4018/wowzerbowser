@@ -1,8 +1,11 @@
 import "server-only";
 
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import {
   RUNTIME_CONFIG_DESCRIPTORS,
   type RuntimeConfigDescriptor,
+  type RuntimeConfigKey,
   type RuntimeConfigResponse,
   type RuntimeConfigValue,
   type RuntimeConfigValues,
@@ -19,6 +22,7 @@ type RuntimeConfigGlobals = typeof globalThis & {
 };
 
 const globals = globalThis as RuntimeConfigGlobals;
+const runtimeConfigScope = new AsyncLocalStorage<RuntimeConfigValues>();
 
 export class RuntimeConfigValidationError extends Error {
   constructor(message: string) {
@@ -89,6 +93,12 @@ function normalizeValue(descriptor: RuntimeConfigDescriptor, value: unknown): Ru
   return validateText(descriptor, value);
 }
 
+export function normalizeRuntimeConfigValue(key: RuntimeConfigKey, value: unknown): RuntimeConfigValue {
+  const descriptor = RUNTIME_CONFIG_DESCRIPTORS.find((item) => item.key === key);
+  if (!descriptor) throw new RuntimeConfigValidationError(`Unknown runtime configuration key: ${key}.`);
+  return normalizeValue(descriptor, value);
+}
+
 export function defaultRuntimeConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfigValues {
   const result = {} as RuntimeConfigValues;
   for (const descriptor of RUNTIME_CONFIG_DESCRIPTORS) {
@@ -107,7 +117,17 @@ export function resolveRuntimeConfig(overrides: Record<string, unknown> = {}, en
 }
 
 export function runtimeConfigSnapshot(): RuntimeConfigValues {
+  const scoped = runtimeConfigScope.getStore();
+  if (scoped) return scoped;
   return resolveRuntimeConfig(globals.runtimeConfigOverrides ?? {});
+}
+
+export function withRuntimeConfigOverrides<T>(
+  overrides: Partial<Record<RuntimeConfigKey, unknown>>,
+  operation: () => T,
+): T {
+  const current = runtimeConfigSnapshot();
+  return runtimeConfigScope.run(resolveRuntimeConfig({ ...current, ...overrides }), operation);
 }
 
 function sanitizedOverrides(values: Record<string, unknown>): Record<string, unknown> {
@@ -141,7 +161,7 @@ export async function saveRuntimeConfig(ownerId: string, patch: unknown): Promis
   const next = { ...current.values };
   for (const [key, value] of entries) {
     if (!isRuntimeConfigKey(key)) throw new RuntimeConfigValidationError(`Unknown runtime configuration key: ${key}.`);
-    next[key] = normalizeValue(RUNTIME_CONFIG_DESCRIPTORS.find((item) => item.key === key)!, value);
+    next[key] = normalizeRuntimeConfigValue(key, value);
   }
   const updatedAt = await saveRuntimeConfigOverrides(ownerId, sanitizedOverrides(next));
   globals.runtimeConfigOwnerId = ownerId;

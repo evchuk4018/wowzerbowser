@@ -139,6 +139,7 @@ function cloneMessage(value: ChatHistoryMessage): ChatHistoryMessage {
     ...(value.tracePhase !== undefined ? { tracePhase: value.tracePhase } : {}),
     ...(value.annotations ? { annotations: safeValue(value.annotations) as ChatHistoryMessage["annotations"] } : {}),
     ...(value.sources ? { sources: safeValue(value.sources) as ChatHistoryMessage["sources"] } : {}),
+    ...(value.experimentAssignment ? { experimentAssignment: safeValue(value.experimentAssignment) as ChatHistoryMessage["experimentAssignment"] } : {}),
   };
 }
 
@@ -254,6 +255,10 @@ function parseMessage(value: unknown): ChatHistoryMessage | null {
   if (value.sources !== undefined) {
     if (!Array.isArray(value.sources)) return null;
     message.sources = safeValue(value.sources) as ChatHistoryMessage["sources"];
+  }
+  if (value.experimentAssignment !== undefined) {
+    if (!isRecord(value.experimentAssignment)) return null;
+    message.experimentAssignment = safeValue(value.experimentAssignment) as ChatHistoryMessage["experimentAssignment"];
   }
   if (value.thinkingEnabled !== undefined && typeof value.thinkingEnabled !== "boolean") return null;
   if (value.thinkingDurationMs !== undefined && typeof value.thinkingDurationMs !== "number") return null;

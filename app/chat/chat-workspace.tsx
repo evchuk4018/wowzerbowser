@@ -823,6 +823,8 @@ export function ChatWorkspace({
       version.user.attachments ?? [],
       [],
       version.user.documents ?? [],
+      undefined,
+      version.id,
     );
   };
   const sharePrompt = async (message: Message) => {

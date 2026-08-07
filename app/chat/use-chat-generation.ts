@@ -88,6 +88,7 @@ export type SendMessage = (
   documents?: readonly PendingChatDocument[],
   preservedDocuments?: readonly ChatDocumentAttachment[],
   requestedMode?: ChatMode,
+  retryOfVersionId?: string,
 ) => Promise<void>;
 
 export type ChatGenerationResult = {
@@ -155,6 +156,7 @@ export function buildChatGenerationRequest(input: {
   attachments?: UploadedChatImage[];
   documents?: ChatDocumentAttachment[];
   projectId?: string | null;
+  retryOfVersionId?: string;
 }): ChatRequest {
   const activeTurns = getActiveConversationTurns(input.conversation);
   const targetTurnIndex = input.editingTurnIndex >= 0
@@ -198,6 +200,7 @@ export function buildChatGenerationRequest(input: {
       assistantMessageId: input.assistantMessageId,
       turnIndex: targetTurnIndex,
       versionIndex,
+      ...(input.retryOfVersionId ? { retryOfVersionId: input.retryOfVersionId } : {}),
     },
   };
 }
@@ -268,6 +271,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     pendingDocuments = [],
     preservedDocuments = [],
     requestedMode,
+    retryOfVersionId,
   ) => {
     const input = optionsRef.current;
     const authoredContent = rawContent.trim();
@@ -483,6 +487,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         attachments: uploadedImages,
         documents: uploadedDocuments,
         projectId: conversation.projectId,
+        retryOfVersionId,
       });
       let submissionAccepted = false;
       for await (const event of streamChatResponse(request, controller.signal)) {
