@@ -69,6 +69,46 @@ function streamResponse(text) {
   );
 }
 
+test("DeepSeek streaming requests include usage and split reasoning from visible completion tokens", async () => {
+  const responseText = [
+    sseChunk({ choices: [{ delta: { content: "answer" } }] }),
+    sseChunk({
+      choices: [],
+      usage: {
+        prompt_tokens: 11,
+        completion_tokens: 9,
+        total_tokens: 20,
+        completion_tokens_details: { reasoning_tokens: 4 },
+      },
+    }),
+    "data: [DONE]\n\n",
+  ].join("");
+  const originalFetch = globalThis.fetch;
+  const originalApiKey = process.env.DEEPSEEK_API_KEY;
+  let requestBody;
+  process.env.DEEPSEEK_API_KEY = "test-key";
+  globalThis.fetch = async (_url, init) => {
+    requestBody = JSON.parse(init.body);
+    return streamResponse(responseText);
+  };
+  try {
+    const events = [];
+    for await (const event of streamDeepSeekChatRound(request)) events.push(event);
+
+    assert.deepEqual(requestBody.stream_options, { include_usage: true });
+    const usage = events.find(({ type }) => type === "done")?.usage;
+    assert.ok(usage);
+    assert.equal(usage.promptTokens, 11);
+    assert.equal(usage.completionTokens, 5);
+    assert.equal(usage.reasoningTokens, 4);
+    assert.equal(usage.totalTokens, 20);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalApiKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+    else process.env.DEEPSEEK_API_KEY = originalApiKey;
+  }
+});
+
 test("DSML parses fragmented full-width markers, multiple invokes, and typed parameters", () => {
   const bar = "\uFF5C";
   const block = [

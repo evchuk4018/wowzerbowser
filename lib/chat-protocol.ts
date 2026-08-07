@@ -475,7 +475,7 @@ export const DEFAULT_CHAT_MODELS: ChatModelInfo[] = [
     defaultReasoningEffort: "high",
     contextLength: 1_000_000,
     createdAt: null,
-    pricing: { inputUsdPerMillion: 0.14, cachedInputUsdPerMillion: 0.0028, outputUsdPerMillion: 0.28, requestUsd: null, reasoningUsdPerMillion: null },
+    pricing: { inputUsdPerMillion: 0.14, cachedInputUsdPerMillion: 0.0028, outputUsdPerMillion: 0.28, requestUsd: null, reasoningUsdPerMillion: 0.28 },
   },
   {
     ref: { provider: "deepseek", model: "deepseek-v4-pro" },
@@ -492,7 +492,7 @@ export const DEFAULT_CHAT_MODELS: ChatModelInfo[] = [
     defaultReasoningEffort: "high",
     contextLength: 1_000_000,
     createdAt: null,
-    pricing: { inputUsdPerMillion: 0.435, cachedInputUsdPerMillion: 0.003625, outputUsdPerMillion: 0.87, requestUsd: null, reasoningUsdPerMillion: null },
+    pricing: { inputUsdPerMillion: 0.435, cachedInputUsdPerMillion: 0.003625, outputUsdPerMillion: 0.87, requestUsd: null, reasoningUsdPerMillion: 0.87 },
   },
 ];
 

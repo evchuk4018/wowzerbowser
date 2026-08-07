@@ -14,6 +14,16 @@ test("calculates separate input, cached-input, and output costs", () => {
   assert.equal(cost, 0.14 * 0.8 + 0.0028 * 0.2 + 0.28 * 0.1);
 });
 
+test("DeepSeek reasoning tokens use the output pricing rate", () => {
+  for (const pricing of DEFAULT_DEEPSEEK_USAGE_PRICING) {
+    assert.equal(pricing.reasoningUsdPerMillion, pricing.outputUsdPerMillion);
+    assert.equal(
+      calculateUsageCost({ promptTokens: 0, completionTokens: 6, reasoningTokens: 4, totalTokens: 10 }, pricing),
+      (10 * pricing.outputUsdPerMillion) / 1_000_000,
+    );
+  }
+});
+
 test("estimates missing provider usage and keeps the estimate bounded", () => {
   const estimate = estimateUsageFromText("a".repeat(9), "b".repeat(5));
   assert.deepEqual(estimate, { promptTokens: 3, completionTokens: 2, totalTokens: 5 });

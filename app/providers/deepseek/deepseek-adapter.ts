@@ -68,12 +68,22 @@ function numberOrUndefined(candidate: unknown): number | undefined {
 
 function usageFromChunk(value: DeepSeekChunk["usage"]): ChatUsage | null {
   if (!value || typeof value !== "object") return null;
+  const promptTokens = numberOrUndefined(value.prompt_tokens);
+  const rawCompletionTokens = numberOrUndefined(value.completion_tokens);
+  const reasoningTokens = numberOrUndefined(value.completion_tokens_details?.reasoning_tokens);
+
+  // DeepSeek reports completion_tokens as the complete generated output. Its
+  // reasoning_tokens field is a breakdown of that total, while the shared
+  // pricing calculator treats reasoning as a separately priced component.
+  // Normalize the provider response to that shared representation here.
   const usage: ChatUsage = {
-    promptTokens: numberOrUndefined(value.prompt_tokens),
-    completionTokens: numberOrUndefined(value.completion_tokens),
+    promptTokens,
+    completionTokens: rawCompletionTokens === undefined
+      ? undefined
+      : Math.max(0, rawCompletionTokens - (reasoningTokens ?? 0)),
     totalTokens: numberOrUndefined(value.total_tokens),
     cachedPromptTokens: numberOrUndefined(value.prompt_tokens_details?.cached_tokens),
-    reasoningTokens: numberOrUndefined(value.completion_tokens_details?.reasoning_tokens),
+    reasoningTokens,
   };
   return Object.values(usage).some((item) => item !== undefined) ? usage : null;
 }
@@ -279,6 +289,7 @@ export async function* streamDeepSeekChatRound(
       model: typeof request.model === "string" ? request.model : request.model.model,
       messages: options.messages ?? buildDeepSeekMessages(request, options),
       stream: true,
+      stream_options: { include_usage: true },
       thinking: { type: request.thinking ? "enabled" : "disabled" },
       ...(request.thinking ? { reasoning_effort: request.reasoningEffort } : {}),
       ...(options.tools?.length ? { tools: options.tools, tool_choice: "auto" } : {}),
