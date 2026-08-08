@@ -645,7 +645,7 @@ create table if not exists public.connector_definitions (
   description text not null,
   icon_url text,
   version text not null,
-  provider text not null check (provider in ('managed','remote_mcp')),
+  provider text not null check (provider in ('managed','google_gmail','remote_mcp')),
   auth_type text not null check (auth_type in ('oauth2','api_key','none')),
   capabilities jsonb not null default '[]'::jsonb,
   default_approval jsonb not null,

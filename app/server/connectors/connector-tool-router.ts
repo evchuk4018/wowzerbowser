@@ -12,6 +12,7 @@ import { redactConnectorError, redactConnectorValue } from "./connector-redactio
 import { requiresConnectorApproval } from "./connector-policy";
 import { ManagedConnectorProvider } from "./providers/managed-provider";
 import { RemoteMcpProvider } from "./providers/remote-mcp-provider";
+import { GoogleGmailProvider } from "./providers/google-gmail-provider";
 
 export const SEARCH_CONNECTOR_TOOLS_NAME = "search_connector_tools";
 export const SEARCH_CONNECTOR_TOOLS_DEFINITION = {
@@ -42,7 +43,11 @@ export async function executeSearchConnectorTools(call: ChatToolCall, ownerId: s
   } catch (error) { return { result: failed(call, redactConnectorError(error)), tools: [] as ConnectorTool[] }; }
 }
 
-function providerFor(id: string, provider: "managed" | "remote_mcp") { return provider === "managed" ? new ManagedConnectorProvider((connectorId) => connectorManifest(connectorId)) : new RemoteMcpProvider(); }
+function providerFor(id: string, provider: "managed" | "google_gmail" | "remote_mcp") {
+  if (provider === "managed") return new ManagedConnectorProvider((connectorId) => connectorManifest(connectorId));
+  if (provider === "google_gmail") return new GoogleGmailProvider();
+  return new RemoteMcpProvider();
+}
 
 export async function executeConnectorTool(call: ChatToolCall, context: { ownerId: string; conversationId?: string; jobId?: string; signal?: AbortSignal; onApproval?: (summary: import("../../../lib/connector-protocol").ConnectorApprovalSummary) => Promise<void> }): Promise<ChatToolResult> {
   const startedAt = Date.now();

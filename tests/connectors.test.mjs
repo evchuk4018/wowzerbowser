@@ -5,15 +5,24 @@ import { assertSafeMcpUrl, McpClient } from "../app/server/connectors/mcp/mcp-cl
 import { discoveredMcpTools } from "../app/server/connectors/mcp/mcp-tool-discovery.ts";
 import { normalizeMcpResult } from "../app/server/connectors/mcp/mcp-result-normalizer.ts";
 import { redactConnectorError, redactConnectorValue } from "../app/server/connectors/connector-redaction.ts";
+import { GoogleGmailProvider } from "../app/server/connectors/providers/google-gmail-provider.ts";
 
 test("managed connector registry exposes the initial catalog", () => {
   assert.deepEqual(MANAGED_CONNECTOR_MANIFESTS.map(({ id }) => id), ["gmail", "google_drive", "notion", "slack"]);
-  assert.equal(MANAGED_CONNECTOR_MANIFESTS.every(({ provider }) => provider === "managed"), true);
+  assert.equal(MANAGED_CONNECTOR_MANIFESTS.find(({ id }) => id === "gmail").provider, "google_gmail");
+  assert.deepEqual(MANAGED_CONNECTOR_MANIFESTS.find(({ id }) => id === "gmail").capabilities, ["search", "read"]);
 });
 
 test("connector tool namespacing prevents collisions", () => {
   assert.equal(namespaceConnectorTool("gmail", "search_messages"), "connector__gmail__search_messages");
   assert.notEqual(namespaceConnectorTool("gmail", "search_messages"), namespaceConnectorTool("slack", "search_messages"));
+});
+
+test("Gmail exposes only read-only tools", async () => {
+  const tools = await new GoogleGmailProvider().listTools();
+  assert.deepEqual(tools.map(({ name }) => name), ["search_emails", "search_email_ids", "read_email_thread", "batch_read_email"]);
+  assert.equal(tools.every(({ access }) => access === "read"), true);
+  assert.equal(tools.some(({ name }) => /send|draft|label|archive|delete|trash/i.test(name)), false);
 });
 
 test("MCP discovery classifies read, write, and destructive actions", () => {

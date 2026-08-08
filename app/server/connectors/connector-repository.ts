@@ -1,11 +1,11 @@
 import "server-only";
 
-import type { ConnectorManifest } from "../../../lib/connector-protocol";
+import type { ConnectorManifest, ConnectorProviderKind } from "../../../lib/connector-protocol";
 import { databaseOwnerId, isoTimestamp, jsonb, query, withTransaction } from "../database/database";
 
 export type ConnectorDefinitionRow = {
   id: string; owner_id: string | null; name: string; description: string; icon_url: string | null;
-  version: string; provider: "managed" | "remote_mcp"; auth_type: "oauth2" | "api_key" | "none";
+  version: string; provider: ConnectorProviderKind; auth_type: "oauth2" | "api_key" | "none";
   capabilities: unknown; default_approval: unknown; endpoint_url: string | null; health_status: string;
 };
 export type ConnectorConnectionRow = {

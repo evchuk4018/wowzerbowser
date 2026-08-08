@@ -86,6 +86,7 @@ connected account's primary calendar.
 4. Add the applicable authorized redirect URIs:
    - `http://localhost:3000/api/integrations/google-calendar/callback`
    - `https://homelab.tail861ffd.ts.net/api/integrations/google-calendar/callback`
+   - `https://homelab.tail861ffd.ts.net/api/connectors/callback`
 5. Configure:
 
    ```dotenv
@@ -94,6 +95,9 @@ connected account's primary calendar.
    GOOGLE_OAUTH_STATE_SECRET=at-least-32-random-characters
    GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEY=base64-or-hex-encoded-32-byte-key
    ```
+
+   Enable the Gmail API and grant the OAuth client the Gmail read-only scope when
+   connecting Gmail from Settings → Connectors.
 
    Generate the encryption key with
    `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.

@@ -2,7 +2,7 @@ import type { ModelToolDefinition } from "./model-tool-protocol";
 
 export const CONNECTOR_CAPABILITIES = ["search", "read", "write", "destructive", "sync"] as const;
 export type ConnectorCapability = (typeof CONNECTOR_CAPABILITIES)[number];
-export type ConnectorProviderKind = "managed" | "remote_mcp";
+export type ConnectorProviderKind = "managed" | "google_gmail" | "remote_mcp";
 export type ConnectorAuthType = "oauth2" | "api_key" | "none";
 export type ConnectorAccess = "read" | "write" | "destructive";
 export type ApprovalMode = "never" | "always";

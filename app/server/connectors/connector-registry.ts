@@ -4,8 +4,8 @@ import type { ConnectorManifest } from "../../../lib/connector-protocol";
 
 export const MANAGED_CONNECTOR_MANIFESTS: ConnectorManifest[] = [
   {
-    id: "gmail", name: "Gmail", description: "Search, read, and manage messages from a connected Gmail account.", version: "1.0.0", provider: "managed", auth: { type: "oauth2" },
-    capabilities: ["search", "read", "write", "destructive"], defaultApproval: { read: "never", write: "always", destructive: "always" },
+    id: "gmail", name: "Gmail", description: "Search and read messages from a connected Gmail account.", version: "1.0.0", provider: "google_gmail", auth: { type: "oauth2" },
+    capabilities: ["search", "read"], defaultApproval: { read: "never", write: "always", destructive: "always" },
   },
   {
     id: "google_drive", name: "Google Drive", description: "Find and read files from a connected Google Drive account.", version: "1.0.0", provider: "managed", auth: { type: "oauth2" },
