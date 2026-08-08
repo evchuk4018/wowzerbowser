@@ -504,6 +504,11 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         pendingEvents.push(event);
         if (isStructuralStreamEvent(event)) {
           flushPendingEventsNow();
+          // A durable terminal event means generation is over. Release the
+          // composer immediately; late metrics are independent metadata.
+          if (event.type === "done" || event.type === "cancelled") {
+            clearRequestState(conversation.id, assistantMessage.id);
+          }
         } else if (streamTimer === null) {
           streamTimer = window.setTimeout(flushPendingEvents, STREAM_RENDER_INTERVAL_MS);
         }

@@ -9,7 +9,7 @@ import {
 } from "./chat-job-recovery";
 import type { ConversationAction } from "./conversation-state";
 
-export { findPersistedJobCandidates, recoverPersistedJob } from "./chat-job-recovery";
+export { findPersistedJobCandidates, recoverPersistedJob, reconcileStreamingConversations } from "./chat-job-recovery";
 export type { PersistedJobCandidate, RecoverPersistedJobOptions, FetchPersistedJob } from "./chat-job-recovery";
 
 export type PersistedJobRecoveryOptions = {

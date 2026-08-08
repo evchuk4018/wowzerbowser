@@ -41,6 +41,7 @@ import { useChatPreferences } from "./use-chat-preferences";
 import { useChatShortcuts } from "./use-chat-shortcuts";
 import { useMobileHistoryNavigation } from "./use-mobile-history-navigation";
 import { usePersistedJobRecovery } from "./use-persisted-job-recovery";
+import { reconcileStreamingConversations } from "./chat-job-recovery";
 import type { ChatImageAttachment } from "../../lib/chat-protocol";
 import type { ChatDocumentAttachment } from "../../lib/chat-document";
 import { getActiveConversationTurns, type ChatConversationSummary } from "../../lib/chat-history";
@@ -425,9 +426,13 @@ export function ChatWorkspace({
     updateArtifactPreview,
     saveArtifactPreview,
   } = useChatPreviews({ conversationId: active.id, hasSession });
+  const reconciledRecoveredStreaming = useMemo(
+    () => reconcileStreamingConversations(state.conversations, recoveredStreaming),
+    [recoveredStreaming, state.conversations],
+  );
   const streamingByConversation = useMemo(
-    () => ({ ...recoveredStreaming, ...generation.streamingByConversation }),
-    [generation.streamingByConversation, recoveredStreaming],
+    () => ({ ...reconciledRecoveredStreaming, ...generation.streamingByConversation }),
+    [generation.streamingByConversation, reconciledRecoveredStreaming],
   );
   const activeStreaming = Boolean(streamingByConversation[state.activeId]);
   const startupPending = startupStage !== "remote" || !remoteAuthorized;
@@ -605,7 +610,7 @@ export function ChatWorkspace({
     persistSnapshot({
       userId: user.id,
       summaries: source.conversationSummaries,
-      streamingByConversation: source.recoveredStreaming,
+      streamingByConversation: reconcileStreamingConversations(source.state.conversations, source.recoveredStreaming),
       activeConversation: current,
       activeConversationId: current.id,
       userPresence: source.settings.userPresence,

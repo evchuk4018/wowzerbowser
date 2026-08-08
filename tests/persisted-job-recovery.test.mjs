@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   findPersistedJobCandidates,
+  reconcileStreamingConversations,
   recoverPersistedJob,
 } from "../app/chat/chat-job-recovery.ts";
 
@@ -79,6 +80,27 @@ test("retries when the session is temporarily unavailable", async () => {
   assert.equal(sessionChecks, 2);
   assert.deepEqual(changes, [true, false]);
   assert.equal(actions[0].type, "MARK_MESSAGE_COMPLETE");
+});
+
+test("reconciles stale recovery markers against completed messages", () => {
+  const conversations = [{
+    id: "conversation-1",
+    title: "Chat",
+    turns: [{
+      id: "turn-1",
+      activeVersion: 0,
+      versions: [{
+        id: "version-1",
+        user: { id: "user-1", role: "user", content: "hello" },
+        assistant: message("assistant-1", "complete", "job-1"),
+      }],
+    }],
+  }];
+
+  assert.deepEqual(
+    reconcileStreamingConversations(conversations, { "conversation-1": "persisted" }),
+    {},
+  );
 });
 
 test("restores response metrics when a completed job is recovered", async () => {

@@ -27,6 +27,19 @@ export function findPersistedJobCandidates(conversations: ChatConversation[]): P
   );
 }
 
+/** Keep client-side recovery markers aligned with the message lifecycle. */
+export function reconcileStreamingConversations(
+  conversations: ChatConversation[],
+  streaming: Record<string, "persisted">,
+): Record<string, "persisted"> {
+  const activeConversationIds = new Set(
+    findPersistedJobCandidates(conversations).map(({ conversationId }) => conversationId),
+  );
+  return Object.fromEntries(
+    Object.entries(streaming).filter(([conversationId]) => activeConversationIds.has(conversationId)),
+  );
+}
+
 function isSequencedEvent(value: unknown): value is SequencedChatStreamEvent {
   return typeof value === "object" && value !== null
     && "sequence" in value
