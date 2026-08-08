@@ -40,7 +40,7 @@ async function tokenRequest(body: URLSearchParams): Promise<Record<string, unkno
   return value;
 }
 
-export async function exchangeGoogleGmailCode(code: string): Promise<{ refreshToken: string; scope: string }> {
+export async function exchangeGoogleGmailCode(code: string): Promise<{ accessToken: string; refreshToken: string; scope: string }> {
   const value = await tokenRequest(new URLSearchParams({
     code,
     client_id: required("GOOGLE_OAUTH_CLIENT_ID"),
@@ -48,8 +48,9 @@ export async function exchangeGoogleGmailCode(code: string): Promise<{ refreshTo
     redirect_uri: googleGmailRedirectUri(),
     grant_type: "authorization_code",
   }));
+  if (typeof value.access_token !== "string" || !value.access_token) throw new Error("Google did not return an access token.");
   if (typeof value.refresh_token !== "string" || !value.refresh_token) throw new Error("Google did not return offline access. Reconnect and approve Gmail access.");
-  return { refreshToken: value.refresh_token, scope: typeof value.scope === "string" ? value.scope : GOOGLE_GMAIL_SCOPE };
+  return { accessToken: value.access_token, refreshToken: value.refresh_token, scope: typeof value.scope === "string" ? value.scope : GOOGLE_GMAIL_SCOPE };
 }
 
 export async function refreshGoogleGmailAccessToken(refreshToken: string): Promise<string> {

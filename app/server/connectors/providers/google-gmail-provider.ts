@@ -23,8 +23,7 @@ export class GoogleGmailProvider implements ConnectorProvider {
 
   async completeConnection(context: ConnectorProviderContext & { code: string; state: string }) {
     const token = await exchangeGoogleGmailCode(context.code);
-    const accessToken = await refreshGoogleGmailAccessToken(token.refreshToken);
-    const profile = await gmailProfile(accessToken);
+    const profile = await gmailProfile(token.accessToken);
     return { accountLabel: profile.emailAddress ?? undefined, accountEmail: profile.emailAddress ?? undefined, credentials: { refresh_token: token.refreshToken }, metadata: { scope: token.scope } };
   }
 

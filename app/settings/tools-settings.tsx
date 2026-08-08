@@ -182,7 +182,7 @@ export function ToolsSettings({ hasSession, connectorStatus }: { hasSession: () 
         <button type="button" className="settings-save" onClick={() => { setDraft(blankDraft()); setError(""); }}>Create tool</button>
       </div>
       {connectorStatus === "connected" && <p className="settings-status" role="status">Gmail connected successfully.</p>}
-      {connectorStatus === "error" && <p className="settings-status settings-error" role="alert">Gmail could not be connected. Check the server logs for the OAuth completion error, then try again.</p>}
+      {connectorStatus === "error" && <p className="settings-status settings-error" role="alert">Gmail could not be connected. Confirm that the Gmail API is enabled and Gmail read-only access was approved, then try again. The server log includes the specific provider error.</p>}
       {error && <p className="settings-status settings-error" role="alert">{error}</p>}
       {status === "loading" && <p className="settings-status" role="status">Loading tools...</p>}
       {calendar && (

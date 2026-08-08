@@ -74,12 +74,14 @@ node scripts/reset-owner-password.mjs --env-file /srv/storage/wowzerbowser/deplo
 
 For local testing, set `NEXT_PUBLIC_SITE_URL` to `http://localhost:3000`.
 
-## Google Calendar
+## Google Calendar and Gmail
 
-The built-in calendar tools use per-user Google OAuth and operate on the
-connected account's primary calendar.
+The built-in calendar tools and read-only Gmail connector use per-user Google
+OAuth. Calendar operates on the connected account's primary calendar; Gmail can
+search and read messages but cannot send or modify them.
 
-1. In Google Cloud, create or select a project and enable the **Google Calendar API**.
+1. In Google Cloud, create or select a project and enable both the
+   **Google Calendar API** and **Gmail API**.
 2. Open **Google Auth Platform**, configure Branding, Audience, and Data Access.
    For an External app in testing, add the app owner as a test user.
 3. Create an OAuth 2.0 client with application type **Web application**.
@@ -94,21 +96,23 @@ connected account's primary calendar.
    GOOGLE_OAUTH_CLIENT_SECRET=your-web-client-secret
    GOOGLE_OAUTH_STATE_SECRET=at-least-32-random-characters
    GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEY=base64-or-hex-encoded-32-byte-key
+   CONNECTOR_CREDENTIAL_ENCRYPTION_KEY=another-base64-or-hex-encoded-32-byte-key
    ```
 
-   Enable the Gmail API and grant the OAuth client the Gmail read-only scope when
-   connecting Gmail from Settings → Connectors.
+   Add the Gmail read-only scope under Google Auth Platform → Data Access and,
+   for an External app in testing, make sure the Gmail account is a test user.
+   The connector encryption key is separate from the Calendar token key.
 
    Generate the encryption key with
    `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
    `NEXT_PUBLIC_SITE_URL` must exactly match the origin used in the registered
    callback URI.
 6. Apply the local PostgreSQL migrations, deploy or restart the app, then open
-   **Settings → Tools → Google Calendar → Connect** and approve access.
+   **Settings → Tools** and connect Google Calendar and/or Gmail.
 
-The OAuth request uses offline access and the narrow
-`https://www.googleapis.com/auth/calendar.events` scope. Refresh tokens are
-encrypted at rest and are never sent to the browser or model.
+The OAuth requests use offline access and the narrow Calendar events or Gmail
+read-only scope. Refresh tokens are encrypted at rest and are never sent to the
+browser or model.
 
 ## Outlook email
 

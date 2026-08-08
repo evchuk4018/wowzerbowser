@@ -6,6 +6,51 @@ type GmailHeader = { name?: string; value?: string };
 type GmailMessage = { id?: string; threadId?: string; labelIds?: string[]; internalDate?: string; snippet?: string; payload?: GmailPayload; sizeEstimate?: number; historyId?: string };
 type GmailPayload = { mimeType?: string; filename?: string; headers?: GmailHeader[]; body?: { data?: string; size?: number }; parts?: GmailPayload[] };
 
+type GmailApiDenialReason = "SERVICE_DISABLED" | "ACCESS_TOKEN_SCOPE_INSUFFICIENT";
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function normalizedGoogleReason(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim()
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toUpperCase();
+  return normalized || null;
+}
+
+function gmailApiDenialReason(value: unknown): GmailApiDenialReason | null {
+  const error = record(record(value)?.error);
+  if (!error) return null;
+  const reasons = [
+    error.status,
+    ...(Array.isArray(error.errors) ? error.errors.map((item) => record(item)?.reason) : []),
+    ...(Array.isArray(error.details) ? error.details.map((item) => record(item)?.reason) : []),
+  ].map(normalizedGoogleReason);
+  if (reasons.some((reason) => reason === "SERVICE_DISABLED" || reason === "ACCESS_NOT_CONFIGURED")) return "SERVICE_DISABLED";
+  if (reasons.some((reason) => reason === "ACCESS_TOKEN_SCOPE_INSUFFICIENT" || reason === "INSUFFICIENT_PERMISSIONS")) return "ACCESS_TOKEN_SCOPE_INSUFFICIENT";
+  return null;
+}
+
+function gmailApiDeniedMessage(value: unknown): string {
+  const reason = gmailApiDenialReason(value);
+  if (reason === "SERVICE_DISABLED") {
+    return "Gmail API access was denied (SERVICE_DISABLED). Enable the Gmail API (gmail.googleapis.com) for the OAuth project, then reconnect Gmail.";
+  }
+  if (reason === "ACCESS_TOKEN_SCOPE_INSUFFICIENT") {
+    return "Gmail API access was denied (ACCESS_TOKEN_SCOPE_INSUFFICIENT). Reconnect Gmail and approve the Gmail read-only permission.";
+  }
+  return "Gmail API access was denied. Verify that the Gmail API is enabled and that the account granted the Gmail read-only permission, then reconnect Gmail.";
+}
+
+function googleErrorMessage(value: unknown): string | null {
+  const message = record(record(value)?.error)?.message;
+  return typeof message === "string" && message.trim() ? message : null;
+}
+
 export type GmailMessageSummary = {
   id: string;
   threadId: string | null;
@@ -61,9 +106,10 @@ function read(message: GmailMessage): GmailMessageRead {
 
 async function gmailRequest(accessToken: string, path: string): Promise<unknown> {
   const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me${path}`, { headers: { authorization: `Bearer ${accessToken}` } });
-  if (response.status === 401 || response.status === 403) throw new GoogleGmailAuthorizationError("Gmail must be reconnected.");
-  const value = await response.json().catch(() => ({})) as { error?: { message?: string } };
-  if (!response.ok) throw new Error(value.error?.message ?? "Gmail request failed.");
+  const value = await response.json().catch(() => ({})) as unknown;
+  if (response.status === 401) throw new GoogleGmailAuthorizationError("Gmail must be reconnected.");
+  if (response.status === 403) throw new Error(gmailApiDeniedMessage(value));
+  if (!response.ok) throw new Error(googleErrorMessage(value) ?? "Gmail request failed.");
   return value;
 }
 
