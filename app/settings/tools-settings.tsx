@@ -12,10 +12,14 @@ import {
 } from "./google-calendar-service";
 import type { GoogleCalendarConnection } from "../../lib/google-calendar-protocol";
 import type { ConnectorCatalogItem } from "../../lib/connector-protocol";
-import { fetchConnectors } from "./connectors-service";
-import { ConnectorCard } from "./connector-card";
+import {
+  disconnectConnectorConnection,
+  fetchConnectors,
+  startConnectorConnection,
+} from "./connectors-service";
 import { ConnectorDetailModal } from "./connector-detail-modal";
 import { isToolsConnector } from "./connector-placement";
+import { ToolConnectorRow } from "./tool-connector-row";
 
 const DEFAULT_SCHEMA = '{\n  "type": "object",\n  "properties": {},\n  "additionalProperties": false\n}';
 const DEFAULT_SOURCE = 'import json, sys\n\narguments = json.load(sys.stdin)\nprint(json.dumps({"ok": True}))';
@@ -46,6 +50,7 @@ export function ToolsSettings({ hasSession }: { hasSession: () => Promise<boolea
   const [calendarBusy, setCalendarBusy] = useState(false);
   const [connectors, setConnectors] = useState<ConnectorCatalogItem[]>([]);
   const [selectedConnector, setSelectedConnector] = useState<ConnectorCatalogItem | null>(null);
+  const [connectorBusyId, setConnectorBusyId] = useState<string | null>(null);
 
   const ensureSession = useCallback(async () => {
     const value = await hasSession();
@@ -101,6 +106,27 @@ export function ToolsSettings({ hasSession }: { hasSession: () => Promise<boolea
     await ensureSession();
     setConnectors(await fetchConnectors());
   }, [ensureSession]);
+
+  async function connectConnector(connectorId: string) {
+    setConnectorBusyId(connectorId); setError("");
+    try { await ensureSession(); window.location.assign(await startConnectorConnection(connectorId)); }
+    catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Connection could not start.");
+      setConnectorBusyId(null);
+    }
+  }
+
+  async function disconnectConnector(connector: ConnectorCatalogItem, connectionId: string) {
+    if (!window.confirm(`Disconnect ${connector.name}?`)) return;
+    setConnectorBusyId(connector.id); setError("");
+    try {
+      await ensureSession();
+      await disconnectConnectorConnection(connector.id, connectionId);
+      await refreshConnectors();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Connection could not be disconnected.");
+    } finally { setConnectorBusyId(null); }
+  }
 
   async function edit(id: string) {
     setError(""); setTestResult(null); setStatus("loading");
@@ -177,9 +203,16 @@ export function ToolsSettings({ hasSession }: { hasSession: () => Promise<boolea
         <div className="settings-panel-heading">
           <div><h4 id="connected-services-heading">Connected services</h4><p>Connect accounts and manage the tools available to the assistant.</p></div>
         </div>
-        <div className="connector-catalog">
+        <div className="tools-list">
           {connectors.filter(isToolsConnector).map((connector) => (
-            <ConnectorCard key={connector.id} connector={connector} onOpen={() => setSelectedConnector(connector)} />
+            <ToolConnectorRow
+              key={connector.id}
+              connector={connector}
+              busy={connectorBusyId === connector.id}
+              onConnect={() => void connectConnector(connector.id)}
+              onDisconnect={(connectionId) => void disconnectConnector(connector, connectionId)}
+              onManage={() => setSelectedConnector(connector)}
+            />
           ))}
         </div>
       </section>

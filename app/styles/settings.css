@@ -1004,6 +1004,9 @@
   flex: 0 0 auto;
 }
 
+.tool-connector-row { cursor: default; }
+.tool-connector-actions { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+
 .connector-catalog { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; }
 .connector-card { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: start; gap: 11px; width: 100%; border: 1px solid var(--line); border-radius: 11px; padding: 13px; color: var(--text); background: rgba(255,255,255,.018); text-align: left; cursor: pointer; }
 .connector-card:hover { background: var(--panel-hover); }
