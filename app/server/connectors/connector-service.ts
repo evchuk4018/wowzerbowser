@@ -124,7 +124,8 @@ export async function listConnectorTools(ownerId: string, connectorId: string): 
   const manifest = await getConnectorManifestForOwner(ownerId, connectorId);
   if (!manifest) throw new Error("Connector not found.");
   const cached = await listTools(ownerId, connectorId);
-  return Promise.all(cached.map(async (tool) => ({ ...publicTool(tool, manifest), approvalMode: (await getPermission(ownerId, connectorId, tool.name))?.approval_mode ?? manifest.defaultApproval[tool.access] })));
+  const allowed = manifest.id === "gmail" ? cached.filter((tool) => tool.access === "read") : cached;
+  return Promise.all(allowed.map(async (tool) => ({ ...publicTool(tool, manifest), approvalMode: (await getPermission(ownerId, connectorId, tool.name))?.approval_mode ?? manifest.defaultApproval[tool.access] })));
 }
 
 export async function updateConnectorTool(ownerId: string, connectorId: string, toolName: string, values: { enabled?: boolean; approvalMode?: "never" | "always" }): Promise<void> {

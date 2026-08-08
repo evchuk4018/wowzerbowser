@@ -65,7 +65,7 @@ export async function executeConnectorTool(call: ChatToolCall, context: { ownerI
       const discovered = await discoverConnectorTools(context.ownerId, connectorId, connection.id);
       row = discovered.find((tool) => tool.namespacedName === call.name) as typeof row;
     }
-    if (!row || row.enabled === false || (await getPermission(context.ownerId, connectorId, row.name))?.enabled === false) return failed(call, "This connector tool is disabled.");
+    if (!row || row.enabled === false || (connectorId === "gmail" && row.access !== "read") || (await getPermission(context.ownerId, connectorId, row.name))?.enabled === false) return failed(call, "This connector tool is disabled.");
     const tool: ConnectorTool = { id: row.id, connectorId: row.connector_id, name: row.name, namespacedName: call.name, description: row.description, inputSchema: row.input_schema, access: row.access, enabled: row.enabled, connectorVersion: row.connector_version, discoveredAt: row.discovered_at, ...(row.connection_id ? { connectionId: row.connection_id } : {}) };
     const argumentsValue = parsedArguments(call);
     if (await requiresConnectorApproval(context.ownerId, manifest, row.name, row.access)) {

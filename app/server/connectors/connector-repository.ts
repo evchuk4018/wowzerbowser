@@ -96,7 +96,7 @@ export async function insertConnection(ownerId: string, values: {
     values.connectorId,
     values.accountLabel ?? null,
     values.accountEmail ?? null,
-    existing.length === 0,
+    !existing.some((connection) => connection.status === "connected"),
     values.credentials.ciphertext,
     values.credentials.nonce,
     values.credentials.authTag,
