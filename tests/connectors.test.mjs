@@ -9,6 +9,7 @@ import { GoogleGmailProvider } from "../app/server/connectors/providers/google-g
 import { MicrosoftOutlookProvider } from "../app/server/connectors/providers/microsoft-outlook-provider.ts";
 import { exchangeMicrosoftOutlookCode, microsoftOutlookAuthorizationUrl, refreshMicrosoftOutlookAccessToken } from "../app/server/connectors/providers/microsoft-outlook-oauth.ts";
 import { outlookGetMessage, outlookSearch, MicrosoftOutlookAuthorizationError } from "../app/server/connectors/providers/microsoft-outlook-adapter.ts";
+import { isToolsConnector } from "../app/settings/connector-placement.ts";
 
 test("managed connector registry exposes the initial catalog", () => {
   assert.deepEqual(MANAGED_CONNECTOR_MANIFESTS.map(({ id }) => id), ["gmail", "outlook", "google_drive", "notion", "slack"]);
@@ -16,6 +17,13 @@ test("managed connector registry exposes the initial catalog", () => {
   assert.deepEqual(MANAGED_CONNECTOR_MANIFESTS.find(({ id }) => id === "gmail").capabilities, ["search", "read"]);
   assert.equal(MANAGED_CONNECTOR_MANIFESTS.find(({ id }) => id === "outlook").provider, "microsoft_outlook");
   assert.deepEqual(MANAGED_CONNECTOR_MANIFESTS.find(({ id }) => id === "outlook").capabilities, ["search", "read"]);
+});
+
+test("email connectors are placed in Tools", () => {
+  assert.equal(isToolsConnector({ id: "gmail" }), true);
+  assert.equal(isToolsConnector({ id: "outlook" }), true);
+  assert.equal(isToolsConnector({ id: "google_drive" }), false);
+  assert.equal(isToolsConnector({ id: "mcp_demo" }), false);
 });
 
 test("connector tool namespacing prevents collisions", () => {

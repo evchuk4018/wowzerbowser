@@ -40,8 +40,8 @@ type SettingsSection =
 const sections: Array<{ id: SettingsSection; label: string; description: string; icon: string }> = [
   { id: "general", label: "General", description: "Conversation context and app preferences.", icon: "settings" },
   { id: "usage", label: "Usage", description: "Review token volume and estimated costs.", icon: "◫" },
-  { id: "tools", label: "Tools", description: "Create Python tools and securely connect APIs.", icon: "♢" },
-  { id: "connectors", label: "Connectors", description: "Connect Gmail, Outlook, Drive, Notion, Slack, and MCP servers.", icon: "↗" },
+  { id: "tools", label: "Tools", description: "Create tools and connect Gmail, Outlook, and Calendar.", icon: "♢" },
+  { id: "connectors", label: "Connectors", description: "Connect Drive, Notion, Slack, and MCP servers.", icon: "↗" },
   { id: "models", label: "Models", description: "Enable built-in and OpenRouter chat models.", icon: "✦" },
   { id: "memory", label: "Memory", description: "Review what the model remembers about you.", icon: "◉" },
   { id: "automations", label: "Automations", description: "Schedule reports and conditional live checks.", icon: "▱" },

@@ -11,6 +11,11 @@ import {
   startGoogleCalendarConnection,
 } from "./google-calendar-service";
 import type { GoogleCalendarConnection } from "../../lib/google-calendar-protocol";
+import type { ConnectorCatalogItem } from "../../lib/connector-protocol";
+import { fetchConnectors } from "./connectors-service";
+import { ConnectorCard } from "./connector-card";
+import { ConnectorDetailModal } from "./connector-detail-modal";
+import { isToolsConnector } from "./connector-placement";
 
 const DEFAULT_SCHEMA = '{\n  "type": "object",\n  "properties": {},\n  "additionalProperties": false\n}';
 const DEFAULT_SOURCE = 'import json, sys\n\narguments = json.load(sys.stdin)\nprint(json.dumps({"ok": True}))';
@@ -39,6 +44,8 @@ export function ToolsSettings({ hasSession }: { hasSession: () => Promise<boolea
   const [testResult, setTestResult] = useState<CustomToolTestResult | null>(null);
   const [calendar, setCalendar] = useState<GoogleCalendarConnection | null>(null);
   const [calendarBusy, setCalendarBusy] = useState(false);
+  const [connectors, setConnectors] = useState<ConnectorCatalogItem[]>([]);
+  const [selectedConnector, setSelectedConnector] = useState<ConnectorCatalogItem | null>(null);
 
   const ensureSession = useCallback(async () => {
     const value = await hasSession();
@@ -54,11 +61,12 @@ export function ToolsSettings({ hasSession }: { hasSession: () => Promise<boolea
     void (async () => {
       try {
         await ensureSession();
-        const [values, connection] = await Promise.all([
+        const [values, connection, connectorValues] = await Promise.all([
           fetchCustomTools(),
           fetchGoogleCalendarConnection(),
+          fetchConnectors(),
         ]);
-        if (active) { setTools(values); setCalendar(connection); }
+        if (active) { setTools(values); setCalendar(connection); setConnectors(connectorValues); }
       } catch (reason) {
         if (active) setError(reason instanceof Error ? reason.message : "Tools could not be loaded.");
       } finally {
@@ -88,6 +96,11 @@ export function ToolsSettings({ hasSession }: { hasSession: () => Promise<boolea
       setError(reason instanceof Error ? reason.message : "Google Calendar could not be disconnected.");
     } finally { setCalendarBusy(false); }
   }
+
+  const refreshConnectors = useCallback(async () => {
+    await ensureSession();
+    setConnectors(await fetchConnectors());
+  }, [ensureSession]);
 
   async function edit(id: string) {
     setError(""); setTestResult(null); setStatus("loading");
@@ -160,6 +173,16 @@ export function ToolsSettings({ hasSession }: { hasSession: () => Promise<boolea
           </button>
         </div>
       )}
+      <section className="tools-connected-services" aria-labelledby="connected-services-heading">
+        <div className="settings-panel-heading">
+          <div><h4 id="connected-services-heading">Connected services</h4><p>Connect accounts and manage the tools available to the assistant.</p></div>
+        </div>
+        <div className="connector-catalog">
+          {connectors.filter(isToolsConnector).map((connector) => (
+            <ConnectorCard key={connector.id} connector={connector} onOpen={() => setSelectedConnector(connector)} />
+          ))}
+        </div>
+      </section>
       <div className="tools-list">
         {tools.map((tool) => (
           <button type="button" className="tool-list-item" key={tool.id} onClick={() => void edit(tool.id)}>
@@ -169,6 +192,7 @@ export function ToolsSettings({ hasSession }: { hasSession: () => Promise<boolea
         ))}
         {status !== "loading" && !tools.length && <p className="settings-status">No custom tools yet.</p>}
       </div>
+      {selectedConnector && <ConnectorDetailModal connector={selectedConnector} onClose={() => setSelectedConnector(null)} onChanged={refreshConnectors} />}
     </div>
   );
 
