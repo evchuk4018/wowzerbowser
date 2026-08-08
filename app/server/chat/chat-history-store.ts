@@ -17,6 +17,7 @@ import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 import { attachmentFromUploadRecord, listChatImageUploadRecords } from "./chat-image-store";
 import type { ChatSearchResult } from "../../../lib/chat-search";
 import type { TodoList } from "../../../lib/todo-protocol";
+import type { AbTestVariantKey } from "../../../lib/ab-test-protocol";
 
 type MessageRow = {
   owner_id: string;
@@ -501,6 +502,103 @@ export async function ensureChatSubmission(ownerId: string, request: ChatRequest
   await query("update chat_conversations set updated_at=$1 where owner_id=$2 and conversation_id=$3", [now, owner, conversationId]);
 }
 
+/**
+ * Persist the non-canonical side of a paired response as a sibling version.
+ * The durable job owns one event sequence, so B is reconstructed by replaying
+ * only events carrying its variant tag before the sibling row is written.
+ */
+export async function persistAbTestVariantMessage(input: {
+  ownerId: string;
+  conversationId: string;
+  turnId: string;
+  canonicalVersionId: string;
+  versionId: string;
+  responseId: string;
+  userMessageId: string;
+  jobId: string;
+  variant: AbTestVariantKey;
+  thinking: boolean;
+  finalOutput: string;
+  status: "complete" | "error" | "cancelled";
+  error?: string | null;
+  streamMetrics?: ChatStreamMetrics | null;
+}): Promise<void> {
+  const owner = databaseOwnerId(input.ownerId);
+  const [canonicalVersion] = await query<{ version_index: number | string; parent_version_id: string | null }>(
+    "select version_index,parent_version_id from chat_message_versions where owner_id=$1 and conversation_id=$2 and turn_id=$3 and version_id=$4",
+    [owner, input.conversationId, input.turnId, input.canonicalVersionId],
+  );
+  if (!canonicalVersion) return;
+
+  const [existingVariant] = await query<{ message_id: string }>(
+    "select message_id from chat_messages where owner_id=$1 and conversation_id=$2 and message_id=$3 and role='assistant'",
+    [owner, input.conversationId, input.responseId],
+  );
+  const [nextVersion] = await query<{ next_index: number }>(
+    "select coalesce(max(version_index),-1)::integer + 1 as next_index from chat_message_versions where owner_id=$1 and conversation_id=$2 and turn_id=$3",
+    [owner, input.conversationId, input.turnId],
+  );
+  const now = new Date().toISOString();
+  const variantUserId = input.userMessageId;
+  const variantVersionIndex = Number(nextVersion?.next_index ?? Number(canonicalVersion.version_index) + 1);
+
+  if (!existingVariant) {
+    const [canonicalUser] = await query<{ content: string; attachments: unknown; documents: unknown }>(
+      "select content,attachments,documents from chat_messages where owner_id=$1 and conversation_id=$2 and version_id=$3 and role='user'",
+      [owner, input.conversationId, input.canonicalVersionId],
+    );
+    await insertIfAbsent("chat_message_versions", {
+      owner_id: owner,
+      conversation_id: input.conversationId,
+      turn_id: input.turnId,
+      version_id: input.versionId,
+      version_index: variantVersionIndex,
+      parent_version_id: canonicalVersion.parent_version_id,
+      created_at: now,
+    });
+    await insertIfAbsent("chat_messages", messageRow(owner, input.conversationId, input.turnId, input.versionId, {
+      id: variantUserId,
+      role: "user",
+      content: canonicalUser?.content ?? "",
+      ...(Array.isArray(canonicalUser?.attachments) && canonicalUser.attachments.length ? { attachments: canonicalUser.attachments as ChatImageAttachment[] } : {}),
+      ...(Array.isArray(canonicalUser?.documents) && canonicalUser.documents.length ? { documents: canonicalUser.documents as ChatDocumentAttachment[] } : {}),
+    }));
+  }
+
+  let variantMessage: ChatHistoryMessage = {
+    id: input.responseId,
+    role: "assistant",
+    content: "",
+    reasoning: "",
+    activities: [],
+    artifacts: [],
+    thinkingEnabled: input.thinking,
+    status: "streaming",
+    lastSequence: 0,
+  };
+  const events = await query<{ event_index: number | string; event: ChatStreamEvent }>(
+    "select event_index,event from chat_job_events where owner_id=$1 and conversation_id=$2 and job_id=$3 order by event_index",
+    [owner, input.conversationId, input.jobId],
+  );
+  for (const row of events) {
+    const event = row.event as ChatStreamEvent & { abVariant?: unknown };
+    if (event.abVariant !== input.variant) continue;
+    variantMessage = applyChatStreamEvent(variantMessage, event, Number(row.event_index));
+  }
+  const finalized = finalizeChatHistoryMessage(variantMessage, input.status, {
+    error: input.error,
+    finalOutput: input.finalOutput,
+    streamMetrics: input.streamMetrics,
+  });
+  const replacement = messageRow(owner, input.conversationId, input.turnId, input.versionId, finalized);
+  if (!existingVariant) {
+    await insertIfAbsent("chat_messages", replacement);
+  } else {
+    await query(`update chat_messages set content=$1,reasoning=$2,attachments=$3::jsonb,documents=$4::jsonb,activities=$5::jsonb,artifacts=$6::jsonb,thinking_enabled=$7,thinking_duration_ms=$8,status=$9,error=$10,job_id=$11,last_sequence=$12,trace_round=$13,annotations=$14::jsonb,sources=$15::jsonb,todos=$16::jsonb,updated_at=$17 where owner_id=$18 and conversation_id=$19 and message_id=$20`, [replacement.content, replacement.reasoning, jsonb(replacement.attachments), jsonb(replacement.documents), jsonb(replacement.activities), jsonb(replacement.artifacts), replacement.thinking_enabled, replacement.thinking_duration_ms, replacement.status, replacement.error, replacement.job_id, replacement.last_sequence, replacement.trace_round, jsonb(replacement.annotations), jsonb(replacement.sources), jsonb(replacement.todos), replacement.updated_at, owner, input.conversationId, input.responseId]);
+  }
+  await touchConversation(input.ownerId, input.conversationId);
+}
+
 export async function finalizeChatJobMessage(
   ownerId: string,
   conversationId: string,
@@ -593,7 +691,9 @@ export async function getChatConversation(ownerId: string, conversationId: strin
       if (!row.job_id) return row;
       let projected = messageFromRow(row);
       for (const item of eventsByJob.get(row.job_id) ?? []) {
-        if (item.sequence > (projected.lastSequence ?? 0)) projected = applyChatStreamEvent(projected, item.event, item.sequence);
+        const event = item.event as ChatStreamEvent & { abVariant?: unknown };
+        if (event.abVariant === "b") continue;
+        if (item.sequence > (projected.lastSequence ?? 0)) projected = applyChatStreamEvent(projected, event, item.sequence);
       }
       const job = jobsById.get(row.job_id);
       const messageStatus = job ? messageStatusForJob(job.status as ChatJobStatus) : null;
@@ -611,6 +711,44 @@ export async function getChatConversation(ownerId: string, conversationId: strin
         ...messageRow(ownerId, conversationId, row.turn_id, row.version_id, projected),
       } as MessageRow;
     });
+  }
+  let pendingAbComparisons: Array<{
+    comparison_id: string;
+    trial_id: string;
+    turn_id: string;
+    display_a_variant: AbTestVariantKey;
+    option_a_response_id: string | null;
+    option_b_response_id: string | null;
+  }> = [];
+  try {
+    pendingAbComparisons = await query(
+      "select comparison_id,trial_id,turn_id,display_a_variant,option_a_response_id,option_b_response_id from ab_test_comparisons where owner_id=$1 and conversation_id=$2 and selected_label is null",
+      [owner, conversationId],
+    );
+  } catch {
+    // The A/B migration is optional for normal conversation history.
+  }
+  const comparisonByResponseId = new Map<string, {
+    id: string;
+    trialId: string;
+    turnId: string;
+    displayAVariant: AbTestVariantKey;
+    options: { a: { responseId: string }; b: { responseId: string } };
+  }>();
+  for (const comparison of pendingAbComparisons) {
+    if (!comparison.option_a_response_id || !comparison.option_b_response_id) continue;
+    const metadata = {
+      id: comparison.comparison_id,
+      trialId: comparison.trial_id,
+      turnId: comparison.turn_id,
+      displayAVariant: comparison.display_a_variant,
+      options: {
+        a: { responseId: comparison.option_a_response_id },
+        b: { responseId: comparison.option_b_response_id },
+      },
+    };
+    comparisonByResponseId.set(comparison.option_a_response_id, metadata);
+    comparisonByResponseId.set(comparison.option_b_response_id, metadata);
   }
   const messagesByVersion = new Map<string, { user?: ChatHistoryMessage; assistant?: ChatHistoryMessage }>();
   for (const row of messages) {
@@ -637,14 +775,27 @@ export async function getChatConversation(ownerId: string, conversationId: strin
       activeVersion: turn.active_version,
       versions: (versionsByTurn.get(turn.turn_id) ?? []).sort((left, right) => left.index - right.index).flatMap((version) => {
         const pair = messagesByVersion.get(version.id);
-        return pair?.user && pair.assistant ? [{
+        if (!pair?.user || !pair.assistant) return [];
+        const comparison = comparisonByResponseId.get(pair.assistant.id);
+        const assistant = comparison
+          ? {
+              ...pair.assistant,
+              abTestComparison: {
+                ...comparison,
+                status: "pending" as const,
+                selected: null,
+                variantKey: comparison.options.a.responseId === pair.assistant.id ? "a" as const : "b" as const,
+              },
+            }
+          : pair.assistant;
+        return [{
           id: version.id,
           user: pair.user,
-          assistant: pair.assistant,
+          assistant,
           ...(version.parentVersionId
             ? { parentVersionId: version.parentVersionId }
             : {}),
-        }] : [];
+        }];
       }),
     })),
   };

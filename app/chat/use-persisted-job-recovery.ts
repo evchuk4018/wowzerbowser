@@ -19,6 +19,7 @@ export type PersistedJobRecoveryOptions = {
   dispatch: (action: ConversationAction) => void;
   scopeKey?: string;
   onConversationStreamingChange?: (conversationId: string, streaming: boolean) => void;
+  reloadConversation?: (conversationId: string) => Promise<ChatConversation | null>;
 };
 
 export function usePersistedJobRecovery({
@@ -28,17 +29,20 @@ export function usePersistedJobRecovery({
   dispatch,
   scopeKey = "default",
   onConversationStreamingChange,
+  reloadConversation,
 }: PersistedJobRecoveryOptions): void {
   const conversationsRef = useRef(conversations);
   const hasSessionRef = useRef(hasSession);
   const dispatchRef = useRef(dispatch);
   const streamingChangeRef = useRef(onConversationStreamingChange);
+  const reloadConversationRef = useRef(reloadConversation);
   useEffect(() => {
     conversationsRef.current = conversations;
     hasSessionRef.current = hasSession;
     dispatchRef.current = dispatch;
     streamingChangeRef.current = onConversationStreamingChange;
-  }, [conversations, dispatch, hasSession, onConversationStreamingChange]);
+    reloadConversationRef.current = reloadConversation;
+  }, [conversations, dispatch, hasSession, onConversationStreamingChange, reloadConversation]);
 
   useEffect(() => {
     if (!enabled) return undefined;
@@ -55,6 +59,7 @@ export function usePersistedJobRecovery({
           hasSession: hasSessionRef.current,
           dispatch: dispatchRef.current,
           onConversationStreamingChange: streamingChangeRef.current,
+          reloadConversation: reloadConversationRef.current,
         });
       } finally {
         runningJobs.delete(jobKey);

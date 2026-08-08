@@ -35,7 +35,7 @@ import {
   saveSettings,
 } from "./conversation-storage";
 import { saveRuntimeConfig } from "../settings/configurables-service";
-import type { ConversationTurn, Message } from "./conversation-types";
+import type { ConversationAbTestComparison, ConversationTurn, Message } from "./conversation-types";
 import { useChatGeneration } from "./use-chat-generation";
 import { useChatPreferences } from "./use-chat-preferences";
 import { useChatShortcuts } from "./use-chat-shortcuts";
@@ -48,6 +48,7 @@ import {
   fetchChatArtifact,
   fetchChatBootstrap,
   ChatRequestError,
+  voteForChatAbTestComparison,
 } from "./chat-service";
 import {
   modelPreferencesRecord,
@@ -106,6 +107,8 @@ export function ChatWorkspace({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_CHAT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [abTestVoteError, setAbTestVoteError] = useState<string | null>(null);
+  const [votingComparisonId, setVotingComparisonId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [openMenu, setOpenMenu] = useState<"model" | "thinking" | null>(null);
   const [openConversationActions, setOpenConversationActions] = useState<string | null>(null);
@@ -425,6 +428,7 @@ export function ChatWorkspace({
         return next;
       });
     },
+    reloadConversation: loadConversation,
   });
 
   const active = state.conversations.find(({ id }) => id === state.activeId)!;
@@ -432,7 +436,10 @@ export function ChatWorkspace({
     () => ({ ...recoveredStreaming, ...generation.streamingByConversation }),
     [generation.streamingByConversation, recoveredStreaming],
   );
-  const activeStreaming = Boolean(streamingByConversation[state.activeId]);
+  const activeHasPendingAbTest = Boolean(active?.turns.some((turn) =>
+    turn.versions.some((version) => version.assistant.abTestComparison?.status === "pending"),
+  ));
+  const activeStreaming = Boolean(streamingByConversation[state.activeId]) || activeHasPendingAbTest;
   const startupPending = startupStage !== "remote" || !remoteAuthorized;
   const assignActiveChatToProject = useCallback(async (project: ChatProject) => {
     const conversation = state.conversations.find(({ id }) => id === state.activeId);
@@ -806,6 +813,38 @@ export function ChatWorkspace({
       sessionReady ? saveConversationSelection(state.activeId, turnId, version.id) : undefined,
     );
   };
+  const voteForComparison = async (comparison: ConversationAbTestComparison, selection: "a" | "b") => {
+    if (votingComparisonId) return;
+    const turn = activeTurns.find(({ id }) => id === comparison.turnId);
+    if (!turn) return;
+    const selectedResponseId = comparison.options[selection].responseId;
+    const selectedVersion = turn.versions.find((version) => version.assistant.id === selectedResponseId);
+    if (!selectedVersion) {
+      setAbTestVoteError("The selected response is no longer available. Reload the conversation and try again.");
+      return;
+    }
+    setAbTestVoteError(null);
+    setVotingComparisonId(comparison.id);
+    try {
+      await voteForChatAbTestComparison({
+        trialId: comparison.trialId,
+        comparisonId: comparison.id,
+        selection,
+      });
+      dispatch({
+        type: "SELECT_TURN_VERSION",
+        conversationId: state.activeId,
+        turnId: comparison.turnId,
+        versionIndex: selectedVersion ? turn.versions.indexOf(selectedVersion) : turn.activeVersion,
+        versionId: selectedVersion.id,
+      });
+      void saveConversationSelection(state.activeId, comparison.turnId, selectedVersion.id);
+    } catch (error) {
+      setAbTestVoteError(error instanceof Error ? error.message : "Your A/B preference could not be saved.");
+    } finally {
+      setVotingComparisonId(null);
+    }
+  };
   const copyPrompt = async (message: Message) => {
     try {
       await navigator.clipboard.writeText(message.content);
@@ -1018,6 +1057,9 @@ export function ChatWorkspace({
           settings={settings}
           loadUsage={loadUsage}
           hasSession={hasSession}
+          currentModel={preferences.model}
+          currentThinking={preferences.effectiveThinking}
+          currentReasoningEffort={preferences.effectiveEffort}
           onClose={closeSettings}
           onSave={(next, runtimeConfig) => {
             setSettings(next);
@@ -1086,8 +1128,10 @@ export function ChatWorkspace({
             onEdit={editTurn}
             onShare={sharePrompt}
             onOpenArtifact={openArtifactPreview}
+            onVoteComparison={voteForComparison}
           />
         )}
+        {abTestVoteError && <div className="message-error ab-test-vote-error" role="alert">{abTestVoteError}</div>}
         {conversationLoadError && !loadingConversationId && (
           <div role="alert">{conversationLoadError}</div>
         )}

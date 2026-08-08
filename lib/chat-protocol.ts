@@ -1,5 +1,6 @@
 import { CHAT_SOURCE_SNIPPET_MAX_LENGTH, sourceForUrl, type ChatCitation, type ChatSource } from "./chat-citations";
 import type { TodoList } from "./todo-protocol";
+import type { AbTestExecution, AbTestSubmission, AbTestVariantKey } from "./ab-test-protocol";
 
 export const DEFAULT_CHAT_SYSTEM_PROMPT = `<bobert_behavior>
 
@@ -276,6 +277,8 @@ export type ChatRequest = {
   jobId?: string;
   idempotencyKey?: string;
   persistence?: ChatSubmissionMetadata;
+  /** Server-owned execution metadata for a sampled blind comparison. */
+  abTest?: AbTestExecution;
 };
 
 export type ChatSubmissionMetadata = {
@@ -288,7 +291,7 @@ export type ChatSubmissionMetadata = {
 };
 
 export type ChatJobStatus = "queued" | "running" | "awaiting_approval" | "completed" | "failed" | "cancelled";
-export type SequencedChatStreamEvent = ChatStreamEvent & { sequence: number; jobId: string };
+export type SequencedChatStreamEvent = ChatStreamEvent & { sequence: number; jobId: string; abVariant?: AbTestVariantKey };
 export type ChatJobResumeResponse = {
   jobId: string;
   conversationId: string;
@@ -300,12 +303,14 @@ export type ChatJobResumeResponse = {
   usage: ChatUsage | null;
   providerMetrics?: ChatStreamMetrics | null;
   finalOutput: string | null;
+  /** Server-owned blind comparison metadata for an A/B chat job. */
+  comparison?: AbTestSubmission;
   annotations?: ChatCitation[];
   sources?: ChatSource[];
   createdAt: string;
   updatedAt: string;
 };
-export type ChatJobSubmissionResponse = { jobId: string; status: ChatJobStatus; resumed: boolean };
+export type ChatJobSubmissionResponse = { jobId: string; status: ChatJobStatus; resumed: boolean; comparison?: AbTestSubmission };
 export type ChatJobTerminalResponse = {
   jobId: string;
   status: ChatJobStatus;

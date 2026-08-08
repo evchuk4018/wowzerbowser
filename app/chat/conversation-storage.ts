@@ -353,6 +353,47 @@ export function normalizeStoredMessage(
     message.status = candidate.status as Message["status"];
   }
   if (typeof candidate.error === "string") message.error = candidate.error;
+  if (candidate.role === "assistant") {
+    const comparison = asRecord(candidate.abTestComparison);
+    const options = asRecord(comparison?.options);
+    const optionA = asRecord(options?.a);
+    const optionB = asRecord(options?.b);
+    const selected = comparison?.selected === null || comparison?.selected === "a" || comparison?.selected === "b"
+      ? comparison.selected
+      : undefined;
+    const comparisonId = nonEmptyString(comparison?.id);
+    const trialId = nonEmptyString(comparison?.trialId);
+    const turnId = nonEmptyString(comparison?.turnId);
+    const responseA = nonEmptyString(optionA?.responseId);
+    const responseB = nonEmptyString(optionB?.responseId);
+    if (
+      comparison
+      && options
+      && (comparison.status === "pending" || comparison.status === "voted")
+      && (comparison.variantKey === "a" || comparison.variantKey === "b")
+      && (comparison.displayAVariant === "a" || comparison.displayAVariant === "b")
+      && selected !== undefined
+      && comparisonId
+      && trialId
+      && turnId
+      && responseA
+      && responseB
+    ) {
+      message.abTestComparison = {
+        id: comparisonId,
+        trialId,
+        turnId,
+        displayAVariant: comparison.displayAVariant,
+        options: {
+          a: { responseId: responseA },
+          b: { responseId: responseB },
+        },
+        status: comparison.status,
+        selected,
+        variantKey: comparison.variantKey,
+      };
+    }
+  }
   if (candidate.todos && typeof candidate.todos === "object") message.todos = normalizeTodoList(candidate.todos);
   if (candidate.deepResearchPlan && typeof candidate.deepResearchPlan === "object") message.deepResearchPlan = candidate.deepResearchPlan as Message["deepResearchPlan"];
   if (typeof candidate.jobId === "string" && candidate.jobId.length > 0) message.jobId = candidate.jobId;

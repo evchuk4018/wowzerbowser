@@ -2,7 +2,7 @@
 
 import type { RefObject } from "react";
 import { ConversationTurn, type ThinkingTiming } from "./conversation-turn";
-import type { ConversationTurn as ConversationTurnType, Message } from "./conversation-types";
+import type { ConversationTurn as ConversationTurnType, Message, ConversationAbTestComparison } from "./conversation-types";
 import type { ChatArtifact } from "../../lib/chat-protocol";
 
 export type ChatTranscriptProps = {
@@ -26,6 +26,7 @@ export type ChatTranscriptProps = {
   onEdit: (turn: ConversationTurnType) => void;
   onShare: (message: Message) => void | Promise<void>;
   onOpenArtifact: (artifact: ChatArtifact) => void;
+  onVoteComparison: (comparison: ConversationAbTestComparison, selection: "a" | "b") => void | Promise<void>;
 };
 
 /** Transcript and empty state; state and network behavior stay in workspace. */
@@ -50,6 +51,7 @@ export function ChatTranscript({
   onEdit,
   onShare,
   onOpenArtifact,
+  onVoteComparison,
 }: ChatTranscriptProps) {
   if (turns.length === 0) {
     return (
@@ -92,6 +94,7 @@ export function ChatTranscript({
           onEdit={onEdit}
           onShare={onShare}
           onOpenArtifact={onOpenArtifact}
+          onVoteComparison={onVoteComparison}
         />
       ))}
     </div>

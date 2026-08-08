@@ -377,3 +377,99 @@
     height: 34px;
   }
 }
+
+.ab-test-comparison {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.ab-test-comparison-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.ab-test-comparison-heading p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ab-test-comparison-status {
+  flex: none;
+  color: var(--quiet);
+  font-size: 11px;
+}
+
+.ab-test-response-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ab-test-response-card {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 13px;
+  background: rgba(255, 255, 255, .018);
+}
+
+.ab-test-response-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.ab-test-response-card-heading span {
+  color: var(--quiet);
+  font-size: 10px;
+}
+
+.ab-test-response-card .message-bubble {
+  max-width: none;
+}
+
+.ab-test-choice-button {
+  min-height: 34px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: transparent;
+  padding: 0 11px;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.ab-test-choice-button:hover:not(:disabled) {
+  background: rgba(212, 255, 112, .1);
+}
+
+.ab-test-choice-button:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+
+.ab-test-vote-error {
+  margin: 0 18px 12px;
+}
+
+@media (max-width: 700px) {
+  .ab-test-response-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ab-test-comparison-heading {
+    flex-direction: column;
+  }
+}

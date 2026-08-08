@@ -7,6 +7,7 @@ import { chatProviderAdapter } from "../../server/chat/chat-provider-registry";
 import { createOrGetChatJob } from "../../server/chat/chat-job-store";
 import { streamChatJob } from "../../server/chat/chat-job-stream";
 import { ensureRuntimeConfigLoaded } from "../../server/config/runtime-config-service";
+import { prepareAbTestExecution } from "../../server/ab-testing/ab-test-execution-service";
 
 export const maxDuration = 300;
 const unauthorized = () => NextResponse.json({ error: "Unauthorized." }, { status: 401 });
@@ -21,11 +22,32 @@ export async function POST(request: Request) {
     if (!chatRequest.conversationId || !chatRequest.jobId || !chatRequest.idempotencyKey || !chatRequest.persistence) {
       return NextResponse.json({ error: "conversationId, jobId, idempotencyKey, and persistence are required." }, { status: 400 });
     }
-    const selectedModel = await authorizeChatModel(user.id, chatRequest.model);
-    if (selectedModel.reasoningRequired && !chatRequest.thinking) return NextResponse.json({ error: "Reasoning is required for this model." }, { status: 400 });
-    if (chatRequest.thinking && !selectedModel.supportedEfforts.includes(chatRequest.reasoningEffort)) return NextResponse.json({ error: "Reasoning effort is not supported." }, { status: 400 });
-    chatProviderAdapter(chatRequest.model.provider).assertConfigured();
-    const submission = await createOrGetChatJob(user.id, chatRequest);
+    let abTest: Awaited<ReturnType<typeof prepareAbTestExecution>> = null;
+    try {
+      abTest = await prepareAbTestExecution(user.id, chatRequest);
+    } catch (error) {
+      // A/B testing is optional for the normal chat path. A deployment with
+      // the feature migration still pending must continue to accept chats.
+      console.warn({ event: "ab-test-selection-unavailable", failure: error instanceof Error ? error.name : "UnknownError" });
+    }
+    const effectiveRequest = abTest
+      ? {
+          ...chatRequest,
+          systemPrompt: abTest.variantA.snapshot.systemPrompt,
+          userPresence: abTest.variantA.snapshot.userPresence,
+          model: abTest.variantA.snapshot.model,
+          thinking: abTest.variantA.snapshot.thinking,
+          reasoningEffort: abTest.variantA.snapshot.reasoningEffort,
+          contextMode: abTest.variantA.snapshot.contextMode,
+          mode: abTest.variantA.snapshot.mode,
+          abTest,
+        }
+      : chatRequest;
+    const selectedModel = await authorizeChatModel(user.id, effectiveRequest.model);
+    if (selectedModel.reasoningRequired && !effectiveRequest.thinking) return NextResponse.json({ error: "Reasoning is required for this model." }, { status: 400 });
+    if (effectiveRequest.thinking && !selectedModel.supportedEfforts.includes(effectiveRequest.reasoningEffort)) return NextResponse.json({ error: "Reasoning effort is not supported." }, { status: 400 });
+    chatProviderAdapter(effectiveRequest.model.provider).assertConfigured();
+    const submission = await createOrGetChatJob(user.id, effectiveRequest);
     const stream = streamChatJob(user.id, chatRequest.conversationId, submission, request.signal);
     return new Response(stream, {
       status: submission.resumed ? 200 : 202,

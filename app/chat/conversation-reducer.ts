@@ -1,27 +1,23 @@
-import type {
-  ChatConversation,
-  ChatConversationTurn,
-  ChatHistoryMessage,
-} from "../../lib/chat-history";
 import { getActiveConversationTurns } from "../../lib/chat-history";
 import {
   initialConversationState,
   type ConversationAction,
   type ConversationState,
 } from "./conversation-state";
+import type { Conversation, Message } from "./conversation-types";
 
 export type { ConversationAction, ConversationState } from "./conversation-state";
 export { initialConversationState } from "./conversation-state";
 
 const conversationAt = (
-  conversations: ChatConversation[],
+  conversations: Conversation[],
   conversationId: string,
-): ChatConversation | undefined => conversations.find(({ id }) => id === conversationId);
+): Conversation | undefined => conversations.find(({ id }) => id === conversationId);
 
 const updateConversation = (
   state: ConversationState,
   conversationId: string,
-  update: (conversation: ChatConversation) => ChatConversation,
+  update: (conversation: Conversation) => Conversation,
 ): ConversationState => {
   let changed = false;
   const conversations = state.conversations.map((conversation) => {
@@ -34,10 +30,10 @@ const updateConversation = (
 };
 
 const updateMessage = (
-  conversation: ChatConversation,
+  conversation: Conversation,
   messageId: string,
-  update: (message: ChatHistoryMessage) => ChatHistoryMessage,
-): ChatConversation => {
+  update: (message: Message) => Message,
+): Conversation => {
   let changed = false;
   const turns = conversation.turns.map((turn) => {
     let turnChanged = false;
@@ -63,7 +59,7 @@ const withMessageUpdate = (
   state: ConversationState,
   conversationId: string,
   messageId: string,
-  update: (message: ChatHistoryMessage) => ChatHistoryMessage,
+  update: (message: Message) => Message,
 ): ConversationState => updateConversation(state, conversationId, (conversation) =>
   updateMessage(conversation, messageId, update));
 
@@ -73,9 +69,9 @@ const withMessageUpdate = (
  * version, but the active linear path at migration time is unambiguous.
  */
 function materializeLegacyLineage(
-  conversation: ChatConversation,
+  conversation: Conversation,
   startIndex: number,
-): ChatConversation {
+): Conversation {
   const activeTurns = getActiveConversationTurns(conversation);
   let parentVersionId = startIndex > 0
     ? activeTurns[startIndex - 1]?.versions[activeTurns[startIndex - 1].activeVersion]?.id ?? null
@@ -218,7 +214,15 @@ export function conversationReducer(
             ? { ...action.version, parentVersionId }
             : action.version;
           const versions = [...turn.versions, appendedVersion];
-          return { ...turn, versions, activeVersion: versions.length - 1 };
+          return {
+            ...turn,
+            versions,
+            // A paired response is presented as a pending comparison; keep
+            // canonical A active until the user votes.
+            activeVersion: action.version.assistant.abTestComparison
+              ? turn.activeVersion
+              : versions.length - 1,
+          };
         });
         return { ...materialized, turns };
       });
@@ -238,9 +242,15 @@ export function conversationReducer(
             turn.versions.length - 1,
             requestedIndex < 0 ? 0 : requestedIndex,
           ));
-          if (activeVersion === turn.activeVersion) return turn;
+          if (activeVersion === turn.activeVersion && !turn.versions.some((version) => version.assistant.abTestComparison)) return turn;
           changed = true;
-          return { ...turn, activeVersion };
+          return {
+            ...turn,
+            activeVersion,
+            versions: action.preserveAbTestComparison ? turn.versions : turn.versions.map((version) => version.assistant.abTestComparison
+              ? { ...version, assistant: { ...version.assistant, abTestComparison: undefined } }
+              : version),
+          };
         });
         return changed || materialized !== conversation
           ? { ...materialized, turns }
@@ -298,7 +308,7 @@ export function createInitialConversationState(): ConversationState {
 export function appendTurn(
   state: ConversationState,
   conversationId: string,
-  turn: ChatConversationTurn,
+  turn: import("./conversation-types").ConversationTurn,
 ): ConversationState {
   return conversationReducer(state, { type: "APPEND_TURN", conversationId, turn });
 }

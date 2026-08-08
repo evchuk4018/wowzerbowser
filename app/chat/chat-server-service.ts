@@ -320,6 +320,9 @@ export async function generateChatResponse(
   const activeUserMemoryTools = selected("user-memory") ? userMemoryTools : [];
   const activeCustomTools = customTools.filter((tool) => selected(`custom:${tool.name}`));
   let discoveredConnectorTools: ConnectorTool[] = [];
+  const comparisonToolAllowed = (name: string, connectorTools: readonly ConnectorTool[] = discoveredConnectorTools): boolean =>
+    !chatRequest.abTest
+    || (name !== RUN_SUBAGENT_TOOL_NAME && toolExecutionMetadata(name, connectorTools).executionPolicy === "parallel-safe");
   const customDefinitions = customToolDefinitions(activeCustomTools);
   const skillTools = selected("skills") && !automationExecution ? SKILL_TOOL_DEFINITIONS : [];
   const todoTools = selected("todos") && !automationExecution && (planner.plannedThisTurn || Boolean(planner.list?.items.length)) ? TODO_TOOL_DEFINITIONS : [];
@@ -339,7 +342,8 @@ export async function generateChatResponse(
   }));
   chatRequest = { ...chatRequest, messages: contextualMessages };
   const allowedProjectIds = new Set([...authoritativePdfs.values()].map((document) => document.projectId).filter((projectId): projectId is string => Boolean(projectId)));
-  const baseToolDefinitions = [...activePythonTools, ...activeWorkspaceTools, ...activeImageTools, ...activeWebTools, ...activeDeepResearchTools, ...pdfEditTools, ...activePhaseTools, ...customDefinitions, ...activeChatMemoryTools, ...activeUserMemoryTools, ...skillTools, ...todoTools, ...automationResultTools, ...contextTools, ...(connectorDiscoveryAvailable && selected("connectors") ? [SEARCH_CONNECTOR_TOOLS_DEFINITION] : []), ...(subagentExecution ? [] : [subagentToolDefinition()])];
+  const baseToolDefinitions = [...activePythonTools, ...activeWorkspaceTools, ...activeImageTools, ...activeWebTools, ...activeDeepResearchTools, ...pdfEditTools, ...activePhaseTools, ...customDefinitions, ...activeChatMemoryTools, ...activeUserMemoryTools, ...skillTools, ...todoTools, ...automationResultTools, ...contextTools, ...(connectorDiscoveryAvailable && selected("connectors") ? [SEARCH_CONNECTOR_TOOLS_DEFINITION] : []), ...(subagentExecution ? [] : [subagentToolDefinition()])]
+    .filter((tool) => comparisonToolAllowed(tool.function.name));
   const imageToolAdvertised = activeImageTools.some((tool) => tool.function.name === INSPECT_IMAGE_TOOL_NAME);
 
   const enqueue = async (event: ChatStreamEvent) => {
@@ -425,7 +429,8 @@ export async function generateChatResponse(
             ? activePdfReadTools.filter((tool) => !baseToolDefinitions.some((base) => base.function.name === tool.function.name))
             : [];
           const dynamicConnectorTools = selected("connectors") ? connectorModelTools : [];
-          const toolDefinitions = [...baseToolDefinitions, ...automationDefinitions, ...calendarDefinitions, ...dynamicPdfTools, ...dynamicConnectorTools];
+          const toolDefinitions = [...baseToolDefinitions, ...automationDefinitions, ...calendarDefinitions, ...dynamicPdfTools, ...dynamicConnectorTools]
+            .filter((tool) => comparisonToolAllowed(tool.function.name));
 
           const runDelegatedTask = async (
             input: { task: string; context?: string; callId: string; signal: AbortSignal },
@@ -678,6 +683,9 @@ export async function generateChatResponse(
             break;
           }
           const executeToolCall = async (call: ChatToolCall, callIndex: number): Promise<ChatToolResult> => {
+            if (!comparisonToolAllowed(call.name)) {
+              throw new Error("This tool is not available during an A/B comparison.");
+            }
             if (activeWorkspaceTools.some((tool) => tool.function.name === call.name)) {
               if (!isLocalPythonConfigured()) throw new Error("Workspace tools are not configured.");
                   if (!executor) executor = new LocalPythonExecutor(ownerId, conversationId, responseDeadlineAt).withWorkspaceId(chatRequest.projectId ?? conversationId);

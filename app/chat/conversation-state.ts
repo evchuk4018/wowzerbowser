@@ -1,34 +1,29 @@
-import type {
-  ChatConversation,
-  ChatConversationTurn,
-  ChatHistoryMessage,
-  ChatTurnVersion,
-} from "../../lib/chat-history";
+import type { Conversation, ConversationTurn, Message, TurnVersion } from "./conversation-types";
 
 export { getActiveConversationTurns } from "../../lib/chat-history";
 
 /** The state owned by the conversation workspace. */
 export type ConversationState = {
-  conversations: ChatConversation[];
+  conversations: Conversation[];
   /** The selected conversation id, or an empty string while none is selected. */
   activeId: string;
 };
 
 export type LoadConversationsAction = {
   type: "LOAD_CONVERSATIONS";
-  conversations: ChatConversation[];
+  conversations: Conversation[];
   activeId?: string | null;
 };
 
 export type HydrateConversationAction = {
   type: "HYDRATE_CONVERSATION";
-  conversation: ChatConversation;
+  conversation: Conversation;
   select?: boolean;
 };
 
 export type CreateConversationAction = {
   type: "CREATE_CONVERSATION";
-  conversation: ChatConversation;
+  conversation: Conversation;
 };
 
 export type SelectConversationAction = {
@@ -40,7 +35,7 @@ export type RemoveConversationAction = {
   type: "REMOVE_CONVERSATION";
   conversationId: string;
   /** A replacement is used when the deleted conversation was active. */
-  replacement?: ChatConversation;
+  replacement?: Conversation;
 };
 
 export type UpdateTitleAction = {
@@ -58,14 +53,14 @@ export type SetProjectAction = {
 export type AppendTurnAction = {
   type: "APPEND_TURN";
   conversationId: string;
-  turn: ChatConversationTurn;
+  turn: ConversationTurn;
 };
 
 export type AppendTurnVersionAction = {
   type: "APPEND_TURN_VERSION";
   conversationId: string;
   turnId: string;
-  version: ChatTurnVersion;
+  version: TurnVersion;
 };
 
 export type SelectTurnVersionAction = {
@@ -76,6 +71,8 @@ export type SelectTurnVersionAction = {
   versionIndex: number;
   /** Prefer the stable id when the transcript is a branch projection. */
   versionId?: string;
+  /** Keep the blind comparison metadata while the user is deciding. */
+  preserveAbTestComparison?: boolean;
 };
 
 export type UpdateMessageAction = {
@@ -83,7 +80,7 @@ export type UpdateMessageAction = {
   conversationId: string;
   messageId: string;
   /** A serializable partial message update; callbacks are intentionally not supported. */
-  patch: Partial<ChatHistoryMessage>;
+  patch: Partial<Message>;
 };
 
 export type MarkMessageCompleteAction = {
@@ -91,7 +88,7 @@ export type MarkMessageCompleteAction = {
   conversationId: string;
   messageId: string;
   finalOutput?: string | null;
-  streamMetrics?: ChatHistoryMessage["streamMetrics"];
+  streamMetrics?: Message["streamMetrics"];
 };
 
 export type MarkMessageCancelledAction = {

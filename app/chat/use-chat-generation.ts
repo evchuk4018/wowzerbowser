@@ -15,8 +15,10 @@ import type {
 } from "../../lib/chat-protocol";
 import {
   cancelChatJob,
+  chatEventAbVariant,
   streamChatResponse,
   watchChatJobCost,
+  type ChatAbTestSubmission,
 } from "./chat-service";
 import { toChatMessageInput } from "./chat-message-input";
 import { generateChatTitle } from "./chat-title-service";
@@ -54,6 +56,7 @@ import type { ChatMode } from "../../lib/chat-modes";
 export type ActiveChatRequest = {
   conversationId: string;
   messageId: string;
+  messageIds?: string[];
   jobId: string;
   controller: AbortController;
 };
@@ -135,6 +138,19 @@ function messageById(state: ConversationState, conversationId: string, messageId
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError"
     || error instanceof Error && error.name === "AbortError";
+}
+
+function comparisonForMessage(submission: ChatAbTestSubmission, variant: "a" | "b") {
+  return {
+    id: submission.comparisonId,
+    trialId: submission.trialId,
+    turnId: submission.turnId,
+    displayAVariant: submission.displayAVariant,
+    options: submission.options,
+    status: "pending" as const,
+    selected: null,
+    variantKey: variant,
+  };
 }
 
 /** Build the durable request context used by both normal and edited prompts. */
@@ -376,6 +392,8 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
       jobId: effectiveJobId,
       lastSequence: 0,
     };
+    let comparisonSubmission: ChatAbTestSubmission | null = null;
+    let comparisonAssistant: Message | null = null;
 
     if (existingTargetTurn) {
       input.dispatch({
@@ -415,6 +433,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
     setStreamingByConversation((current) => ({ ...current, [conversation.id]: assistantMessage.id }));
     setWaitingByMessage((current) => ({ ...current, [assistantMessage.id]: true }));
     const thinkingStartedAt = input.thinking ? performance.now() : null;
+    const thinkingStartedAtByVariant: Partial<Record<"a" | "b", number | null>> = { a: thinkingStartedAt };
     if (thinkingStartedAt !== null) {
       setThinkingByMessage((current) => ({
         ...current,
@@ -422,35 +441,46 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
       }));
     }
 
-    let streamState = createChatStreamState(assistantMessage);
-    const pendingEvents: SequencedChatStreamEvent[] = [];
+    const streamStates: Record<"a" | "b", ReturnType<typeof createChatStreamState> | null> = {
+      a: createChatStreamState(assistantMessage),
+      b: null,
+    };
+    const pendingEventsByVariant: Record<"a" | "b", SequencedChatStreamEvent[]> = { a: [], b: [] };
+    const pendingEvents = pendingEventsByVariant.a;
     let streamTimer: number | null = null;
     const flushPendingEvents = () => {
       streamTimer = null;
-      const events = pendingEvents.splice(0);
-      if (!events.length) return;
-      streamState = reduceChatStreamEvents(streamState, events, { thinkingStartedAt });
-      inputRefDispatch(input, {
-        type: "UPDATE_MESSAGE",
-        conversationId: conversation.id,
-        messageId: assistantMessage.id,
-        patch: streamState.message,
-      });
-      if (!streamState.waiting) {
-        setWaitingByMessage((current) => {
-          if (!(assistantMessage.id in current)) return current;
-          const next = { ...current };
-          delete next[assistantMessage.id];
-          return next;
+      for (const variant of ["a", "b"] as const) {
+        const state = streamStates[variant];
+        const events = pendingEventsByVariant[variant].splice(0);
+        if (!state || !events.length) continue;
+        const startedAt = thinkingStartedAtByVariant[variant] ?? null;
+        const nextState = reduceChatStreamEvents(state, events, { thinkingStartedAt: startedAt });
+        streamStates[variant] = nextState;
+        const messageId = variant === "a" ? assistantMessage.id : comparisonAssistant?.id;
+        if (!messageId) continue;
+        inputRefDispatch(input, {
+          type: "UPDATE_MESSAGE",
+          conversationId: conversation.id,
+          messageId,
+          patch: nextState.message,
         });
-      }
-      if (streamState.thinkingFinished) {
-        setThinkingByMessage((current) => {
-          if (!(assistantMessage.id in current)) return current;
-          const next = { ...current };
-          delete next[assistantMessage.id];
-          return next;
-        });
+        if (!nextState.waiting) {
+          setWaitingByMessage((current) => {
+            if (!(messageId in current)) return current;
+            const next = { ...current };
+            delete next[messageId];
+            return next;
+          });
+        }
+        if (nextState.thinkingFinished) {
+          setThinkingByMessage((current) => {
+            if (!(messageId in current)) return current;
+            const next = { ...current };
+            delete next[messageId];
+            return next;
+          });
+        }
       }
     };
     const flushPendingEventsNow = () => {
@@ -485,7 +515,64 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         projectId: conversation.projectId,
       });
       let submissionAccepted = false;
-      for await (const event of streamChatResponse(request, controller.signal)) {
+      for await (const event of streamChatResponse(request, controller.signal, {
+        onSubmission: (submission) => {
+          if (comparisonSubmission?.comparisonId === submission.comparisonId) return;
+          comparisonSubmission = submission;
+          const bMessage: Message = {
+            id: submission.variantResponses.b.responseId,
+            role: "assistant",
+            content: "",
+            reasoning: "",
+            activities: [],
+            artifacts: [],
+            thinkingEnabled: input.thinking,
+            status: "streaming",
+            jobId: effectiveJobId,
+            lastSequence: 0,
+            abTestComparison: comparisonForMessage(submission, "b"),
+          };
+          comparisonAssistant = bMessage;
+          inputRefDispatch(input, {
+            type: "UPDATE_MESSAGE",
+            conversationId: conversation.id,
+            messageId: assistantMessage.id,
+            patch: { abTestComparison: comparisonForMessage(submission, "a") },
+          });
+          input.dispatch({
+            type: "APPEND_TURN_VERSION",
+            conversationId: conversation.id,
+            turnId,
+            version: {
+              id: submission.variantResponses.b.versionId,
+              user: userMessage,
+              assistant: bMessage,
+              parentVersionId,
+            },
+          });
+          input.dispatch({
+            type: "SELECT_TURN_VERSION",
+            conversationId: conversation.id,
+            turnId,
+            versionIndex: 0,
+            versionId: assistantMessage.id,
+            preserveAbTestComparison: true,
+          });
+          streamStates.b = createChatStreamState(bMessage);
+          thinkingStartedAtByVariant.b = input.thinking ? performance.now() : null;
+          if (input.thinking && thinkingStartedAtByVariant.b !== null) {
+            setThinkingByMessage((current) => ({
+              ...current,
+              [bMessage.id]: { startedAt: thinkingStartedAtByVariant.b!, now: thinkingStartedAtByVariant.b! },
+            }));
+          }
+          setWaitingByMessage((current) => ({ ...current, [bMessage.id]: true }));
+          const activeRequest = activeRequestsRef.current[conversation.id];
+          if (activeRequest) {
+            activeRequest.messageIds = [assistantMessage.id, bMessage.id];
+          }
+        },
+      })) {
         if (!submissionAccepted) {
           submissionAccepted = true;
           pendingDocuments.forEach((document) => { document.consumed = true; });
@@ -497,11 +584,15 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
           imageDraftRef.current = null;
           documentDraftRef.current = null;
         }
-        const lastPendingSequence = pendingEvents.at(-1)?.sequence
+        const variant = chatEventAbVariant(event) ?? "a";
+        const streamState = streamStates[variant];
+        if (!streamState) continue;
+        const variantPendingEvents = pendingEventsByVariant[variant];
+        const lastPendingSequence = variantPendingEvents.at(-1)?.sequence
           ?? streamState.message.lastSequence
           ?? 0;
         if (event.sequence <= lastPendingSequence) continue;
-        pendingEvents.push(event);
+        variantPendingEvents.push(event);
         if (isStructuralStreamEvent(event)) {
           flushPendingEventsNow();
         } else if (streamTimer === null) {
@@ -529,6 +620,7 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
         if (streamTimer !== null) window.clearTimeout(streamTimer);
         streamTimer = null;
         pendingEvents.length = 0;
+        for (const events of Object.values(pendingEventsByVariant)) events.length = 0;
       } else {
         flushPendingEventsNow();
         const message = error instanceof Error ? error.message : "The response failed.";
@@ -541,7 +633,20 @@ export function useChatGeneration(options: ChatGenerationOptions): ChatGeneratio
       }
     } finally {
       const isCurrentRequest = activeRequestsRef.current[conversation.id]?.messageId === assistantMessage.id;
-      if (isCurrentRequest && thinkingStartedAt !== null && !streamState.thinkingFinished) {
+      const finalAState = streamStates.a;
+      if (comparisonSubmission && (
+        finalAState?.message.status !== "complete"
+        || streamStates.b?.message.status !== "complete"
+      )) {
+        inputRefDispatch(input, {
+          type: "SELECT_TURN_VERSION",
+          conversationId: conversation.id,
+          turnId,
+          versionIndex: 0,
+          versionId: assistantMessage.id,
+        });
+      }
+      if (isCurrentRequest && thinkingStartedAt !== null && !(finalAState?.thinkingFinished ?? false)) {
         inputRefDispatch(input, {
           type: "UPDATE_MESSAGE",
           conversationId: conversation.id,

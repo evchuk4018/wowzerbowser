@@ -33,6 +33,17 @@ function isSequencedEvent(value: unknown): value is SequencedChatStreamEvent {
     && typeof value.sequence === "number";
 }
 
+function messageIdForVariant(candidate: PersistedJobCandidate, event: SequencedChatStreamEvent): string | null {
+  if (event.abVariant !== "b") return candidate.message.id;
+  const comparison = (candidate.message as ChatHistoryMessage & {
+    abTestComparison?: { options?: { a?: { responseId?: string }; b?: { responseId?: string } } };
+  }).abTestComparison;
+  const optionA = comparison?.options?.a?.responseId;
+  const optionB = comparison?.options?.b?.responseId;
+  if (!optionA || !optionB) return null;
+  return optionA === candidate.message.id ? optionB : optionA;
+}
+
 function terminalAction(candidate: PersistedJobCandidate, snapshot: ChatJobResumeResponse): ConversationAction | null {
   if (snapshot.status === "completed") {
     return {
@@ -57,6 +68,7 @@ export type RecoverPersistedJobOptions = {
   fetchJob?: FetchPersistedJob;
   resumeJob?: (conversationId: string, jobId: string) => Promise<void>;
   waitForRetry?: (signal: AbortSignal, attempt: number) => Promise<boolean>;
+  reloadConversation?: (conversationId: string) => Promise<ChatConversation | null>;
 };
 
 /** Replay durable events and ask the server to reclaim an expired lease when necessary. */
@@ -69,11 +81,13 @@ export async function recoverPersistedJob({
   fetchJob = fetchChatJob,
   resumeJob = resumeChatJob,
   waitForRetry = (retrySignal, attempt) => waitForChatRetry(retrySignal, attempt),
+  reloadConversation,
 }: RecoverPersistedJobOptions): Promise<void> {
   if (!candidate.message.jobId || signal.aborted) return;
   onConversationStreamingChange?.(candidate.conversationId, true);
   let after = candidate.message.lastSequence ?? 0;
   let currentMessage = candidate.message;
+  let shadowMessage: ChatHistoryMessage | null = null;
   let retryAttempt = 0;
   while (!signal.aborted) {
     let sessionReady = false;
@@ -89,8 +103,16 @@ export async function recoverPersistedJob({
         for (const event of existing.events) {
           if (!isSequencedEvent(event) || event.sequence <= after) continue;
           after = event.sequence;
-          currentMessage = applyChatStreamEvent(currentMessage, event, event.sequence);
-          dispatch({ type: "UPDATE_MESSAGE", conversationId: candidate.conversationId, messageId: candidate.message.id, patch: currentMessage });
+          const messageId = messageIdForVariant(candidate, event);
+          if (!messageId) continue;
+          if (messageId === candidate.message.id) {
+            currentMessage = applyChatStreamEvent(currentMessage, event, event.sequence);
+            dispatch({ type: "UPDATE_MESSAGE", conversationId: candidate.conversationId, messageId, patch: currentMessage });
+          } else {
+            shadowMessage ??= { ...candidate.message, id: messageId, content: "", reasoning: "", activities: [], artifacts: [], status: "streaming", lastSequence: 0 };
+            shadowMessage = applyChatStreamEvent(shadowMessage, event, event.sequence);
+            dispatch({ type: "UPDATE_MESSAGE", conversationId: candidate.conversationId, messageId, patch: shadowMessage });
+          }
         }
         dispatch({ type: "UPDATE_MESSAGE", conversationId: candidate.conversationId, messageId: candidate.message.id, patch: { status: "complete" } });
         void watchChatJobCost(candidate.conversationId, candidate.message.jobId, (streamMetrics) => {
@@ -115,8 +137,16 @@ export async function recoverPersistedJob({
     for (const event of snapshot.events) {
       if (!isSequencedEvent(event) || event.sequence <= after) continue;
       after = event.sequence;
-      currentMessage = applyChatStreamEvent(currentMessage, event, event.sequence);
-      dispatch({ type: "UPDATE_MESSAGE", conversationId: candidate.conversationId, messageId: candidate.message.id, patch: currentMessage });
+      const messageId = messageIdForVariant(candidate, event);
+      if (!messageId) continue;
+      if (messageId === candidate.message.id) {
+        currentMessage = applyChatStreamEvent(currentMessage, event, event.sequence);
+        dispatch({ type: "UPDATE_MESSAGE", conversationId: candidate.conversationId, messageId, patch: currentMessage });
+      } else {
+        shadowMessage ??= { ...candidate.message, id: messageId, content: "", reasoning: "", activities: [], artifacts: [], status: "streaming", lastSequence: 0 };
+        shadowMessage = applyChatStreamEvent(shadowMessage, event, event.sequence);
+        dispatch({ type: "UPDATE_MESSAGE", conversationId: candidate.conversationId, messageId, patch: shadowMessage });
+      }
     }
     if (snapshot.hasMore) {
       retryAttempt = 0;
@@ -126,6 +156,16 @@ export async function recoverPersistedJob({
     if (terminal) {
       if (signal.aborted) return;
       dispatch(terminal);
+      if (reloadConversation) {
+        try {
+          const conversation = await reloadConversation(candidate.conversationId);
+          if (conversation && !signal.aborted) {
+            dispatch({ type: "HYDRATE_CONVERSATION", conversation, select: false });
+          }
+        } catch {
+          // The terminal reducer state remains usable if the follow-up reload is transiently unavailable.
+        }
+      }
       void watchChatJobCost(candidate.conversationId, candidate.message.jobId, (streamMetrics) => {
         dispatch({ type: "UPDATE_MESSAGE", conversationId: candidate.conversationId, messageId: candidate.message.id, patch: { streamMetrics } });
       }, signal);

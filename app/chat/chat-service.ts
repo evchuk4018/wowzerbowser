@@ -16,6 +16,78 @@ import { chatTerminalEvents } from "./chat-terminal-events";
 import { waitForChatRetry } from "./chat-retry-backoff";
 import { authFetch } from "../auth/auth-fetch";
 import type { WorkspaceFile, WorkspaceSearchMatch } from "../../lib/workspace-protocol";
+import type { AbTestDisplayLabel, AbTestVariantKey } from "../../lib/ab-test-protocol";
+
+export type ChatAbTestSubmission = {
+  trialId: string;
+  comparisonId: string;
+  turnId: string;
+  displayAVariant: AbTestVariantKey;
+  variantResponses: {
+    a: { responseId: string; versionId: string };
+    b: { responseId: string; versionId: string };
+  };
+  options: {
+    a: { responseId: string };
+    b: { responseId: string };
+  };
+};
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function boundedId(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 && value.length <= 128 ? value : null;
+}
+
+/** Parse the optional blind-comparison metadata without affecting normal jobs. */
+export function parseChatAbTestSubmission(value: unknown): ChatAbTestSubmission | null {
+  const root = recordValue(value);
+  const candidate = recordValue(root?.comparison ?? root?.abTest ?? root?.abTestSubmission);
+  if (!candidate) return null;
+  const options = recordValue(candidate.options);
+  const optionA = recordValue(options?.a);
+  const optionB = recordValue(options?.b);
+  const trialId = boundedId(candidate.trialId);
+  const comparisonId = boundedId(candidate.comparisonId);
+  const turnId = boundedId(candidate.turnId);
+  const displayAVariant = candidate.displayAVariant;
+  const variants = recordValue(candidate.variants);
+  const variantA = recordValue(variants?.a);
+  const variantB = recordValue(variants?.b);
+  const actualResponseA = boundedId(variantA?.assistantMessageId);
+  const actualResponseB = boundedId(variantB?.assistantMessageId);
+  const responseA = boundedId(optionA?.responseId)
+    ?? (displayAVariant === "a" ? actualResponseA : actualResponseB);
+  const responseB = boundedId(optionB?.responseId)
+    ?? (displayAVariant === "a" ? actualResponseB : actualResponseA);
+  const resolvedResponseA = actualResponseA ?? (displayAVariant === "a" ? responseA : responseB);
+  const resolvedResponseB = actualResponseB ?? (displayAVariant === "a" ? responseB : responseA);
+  const actualVersionA = boundedId(variantA?.versionId) ?? resolvedResponseA;
+  const actualVersionB = boundedId(variantB?.versionId) ?? resolvedResponseB;
+  if (!trialId || !comparisonId || !turnId || !responseA || !responseB || !resolvedResponseA || !resolvedResponseB || !actualVersionA || !actualVersionB) return null;
+  if (displayAVariant !== "a" && displayAVariant !== "b") return null;
+  return {
+    trialId,
+    comparisonId,
+    turnId,
+    displayAVariant,
+    variantResponses: {
+      a: { responseId: resolvedResponseA, versionId: actualVersionA },
+      b: { responseId: resolvedResponseB, versionId: actualVersionB },
+    },
+    options: { a: { responseId: responseA }, b: { responseId: responseB } },
+  };
+}
+
+export function chatEventAbVariant(value: unknown): AbTestVariantKey | null {
+  const event = recordValue(value);
+  const variant = event?.abVariant;
+  return variant === "a" || variant === "b" ? variant : null;
+}
 
 async function readError(response: Response): Promise<string> {
   const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
@@ -97,6 +169,22 @@ export async function fetchChatJob(conversationId: string, jobId: string, after:
   const response = await authFetch(`/api/chat/jobs/${encodeURIComponent(conversationId)}/${encodeURIComponent(jobId)}?after=${after}`, { signal });
   if (!response.ok) throw new Error(await readError(response));
   return response.json() as Promise<ChatJobResumeResponse>;
+}
+
+export async function voteForChatAbTestComparison(input: {
+  trialId: string;
+  comparisonId: string;
+  selection: AbTestDisplayLabel;
+}): Promise<void> {
+  const response = await authFetch(
+    `/api/ab-tests/${encodeURIComponent(input.trialId)}/comparisons/${encodeURIComponent(input.comparisonId)}/vote`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ selection: input.selection }),
+    },
+  );
+  if (!response.ok) throw new Error(await readError(response));
 }
 
 /** Polls only the durable snapshot so late title/summary/analysis usage can
@@ -190,6 +278,7 @@ export async function resumeChatJob(conversationId: string, jobId: string): Prom
 export async function* streamChatResponse(
   request: ChatRequest,
   signal?: AbortSignal,
+  options: { onSubmission?: (submission: ChatAbTestSubmission) => void } = {},
 ): AsyncGenerator<SequencedChatStreamEvent> {
   let sequence = 0;
   let streamCompleted = false;
@@ -201,6 +290,8 @@ export async function* streamChatResponse(
     for await (const envelope of readChatLiveStream(response)) {
       if (envelope.type === "submission") {
         activeJobId = envelope.submission.jobId;
+        const abTest = parseChatAbTestSubmission(envelope.submission);
+        if (abTest) options.onSubmission?.(abTest);
       } else if (envelope.type === "event") {
         if (envelope.event.sequence <= sequence) continue;
         sequence = envelope.event.sequence;
@@ -250,6 +341,8 @@ export async function* streamChatResponse(
       if (!(await waitForChatRetry(retrySignal, retryAttempt++))) return;
       continue; // transient network loss: replay resumes strictly after sequence
     }
+    const recoveredAbTest = parseChatAbTestSubmission(snapshot);
+    if (recoveredAbTest) options.onSubmission?.(recoveredAbTest);
     for (const event of snapshot.events) {
       if (event.sequence <= sequence) continue;
       sequence = event.sequence;

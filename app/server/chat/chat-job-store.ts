@@ -9,6 +9,7 @@ import { CHAT_JOB_LEASE_MS, CHAT_JOB_MAX_ATTEMPTS } from "./chat-job-lease";
 import { withChatPersistenceRetry } from "./chat-persistence-retry";
 import { getConversationProjectId } from "../projects/project-repository";
 import { ensureProjectConversation } from "../projects/project-service";
+import { abTestSubmissionForRequest } from "../ab-testing/ab-test-execution-service";
 
 const CHAT_EVENT_BATCH_SIZE = 32;
 const CHAT_EVENT_FLUSH_INTERVAL_MS = 16;
@@ -55,7 +56,12 @@ export async function createOrGetChatJob(ownerId: string, request: ChatRequest) 
     "select submit_and_claim_chat_job($1,$2::jsonb,$3::jsonb) as result",
     [owner, jsonb(request), jsonb(requestedAttachments)],
   ));
-  return row.result as { jobId: string; status: ChatJobStatus; resumed: boolean; request?: ChatRequest };
+  const result = row.result as { jobId: string; status: ChatJobStatus; resumed: boolean; request?: ChatRequest };
+  const comparison = abTestSubmissionForRequest(result.request ?? request);
+  return {
+    ...result,
+    ...(comparison ? { comparison } : {}),
+  };
 }
 
 export async function claimChatJob(ownerId: string, conversationId: string, jobId: string) {
@@ -151,8 +157,8 @@ export async function finishChatJob(ownerId: string, conversationId: string, job
 export async function getChatJob(ownerId: string, conversationId: string, jobId: string, after = 0): Promise<ChatJobResumeResponse | null> {
   const databaseOwner = databaseOwnerId(ownerId);
   const [jobRows, eventRows] = await Promise.all([
-    query<{ job_id: string; conversation_id: string; status: ChatJobStatus; error: string | null; usage: unknown; provider_metrics: unknown; final_output: string | null; created_at: unknown; updated_at: unknown }>(
-      "select job_id,conversation_id,status,error,usage,provider_metrics,final_output,created_at,updated_at from chat_jobs where owner_id=$1 and conversation_id=$2 and job_id=$3",
+    query<{ job_id: string; conversation_id: string; status: ChatJobStatus; error: string | null; usage: unknown; provider_metrics: unknown; final_output: string | null; request: unknown; created_at: unknown; updated_at: unknown }>(
+      "select job_id,conversation_id,status,error,usage,provider_metrics,final_output,request,created_at,updated_at from chat_jobs where owner_id=$1 and conversation_id=$2 and job_id=$3",
       [databaseOwner, conversationId, jobId],
     ),
     query<{ event_index: number | string; event: ChatStreamEvent }>(
@@ -169,6 +175,7 @@ export async function getChatJob(ownerId: string, conversationId: string, jobId:
     jobId,
   }));
   const annotationEvent = [...events].reverse().find((event) => event.type === "annotations");
+  const comparison = job.request ? abTestSubmissionForRequest(job.request as ChatRequest) : undefined;
   return {
     jobId,
     conversationId,
@@ -180,6 +187,7 @@ export async function getChatJob(ownerId: string, conversationId: string, jobId:
     usage: job.usage as ChatUsage | null,
     providerMetrics: job.provider_metrics as ChatStreamMetrics | null,
     finalOutput: job.final_output,
+    ...(comparison ? { comparison } : {}),
     ...(annotationEvent?.type === "annotations" ? { annotations: annotationEvent.annotations, sources: annotationEvent.sources } : {}),
     createdAt: isoTimestamp(job.created_at),
     updatedAt: isoTimestamp(job.updated_at),

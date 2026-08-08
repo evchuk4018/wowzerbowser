@@ -15,6 +15,9 @@ import { SkillsSettings } from "./skills-settings";
 import { AutomationsSettings } from "./automations-settings";
 import { ConnectorsSettings } from "./connectors-settings";
 import type { RuntimeConfigValues } from "../../lib/runtime-config-protocol";
+import { DEFAULT_CHAT_MODEL_PREFERENCE } from "../../lib/chat-model-preference";
+import type { ChatModelRef, ChatReasoningEffort } from "../../lib/chat-protocol";
+import { AbTestsSettings } from "./ab-tests-settings";
 
 export type SettingsModalProps = {
   settings: ChatSettings;
@@ -22,6 +25,10 @@ export type SettingsModalProps = {
   onSave: (settings: ChatSettings, runtimeConfig?: Partial<RuntimeConfigValues>) => void;
   loadUsage?: (range: UsageRange) => Promise<UsageReport>;
   hasSession: () => Promise<boolean>;
+  /** Current composer preference; optional until the workspace wires it through. */
+  currentModel?: ChatModelRef;
+  currentThinking?: boolean;
+  currentReasoningEffort?: ChatReasoningEffort;
 };
 
 type SettingsSection =
@@ -35,9 +42,12 @@ type SettingsSection =
   | "safety"
   | "security"
   | "account"
+  | "ab-tests"
   | "skills";
 
 const sections: Array<{ id: SettingsSection; label: string; description: string; icon: string }> = [
+  { id: "ab-tests", label: "A/B testing", description: "Compare blind, randomized model and response settings.", icon: "A/B" },
+  { id: "account", label: "Account", description: "Manage account details and preferences.", icon: "account" },
   { id: "general", label: "General", description: "Conversation context and app preferences.", icon: "settings" },
   { id: "usage", label: "Usage", description: "Review token volume and estimated costs.", icon: "◫" },
   { id: "tools", label: "Tools", description: "Create Python tools and securely connect APIs.", icon: "♢" },
@@ -47,7 +57,6 @@ const sections: Array<{ id: SettingsSection; label: string; description: string;
   { id: "automations", label: "Automations", description: "Schedule reports and conditional live checks.", icon: "▱" },
   { id: "safety", label: "Configurables", description: "Choose runtime models and provider behavior.", icon: "◇" },
   { id: "security", label: "Security and login", description: "Protect your account and active sessions.", icon: "⌾" },
-  { id: "account", label: "Account", description: "Manage your profile and account details.", icon: "◎" },
   { id: "skills", label: "Skills", description: "Create reusable instructions the assistant loads on demand.", icon: "✦" },
 ];
 
@@ -326,7 +335,16 @@ function PlaceholderSettings({ label }: { label: string }) {
   );
 }
 
-export function SettingsModal({ settings, onClose, onSave, loadUsage, hasSession }: SettingsModalProps) {
+export function SettingsModal({
+  settings,
+  onClose,
+  onSave,
+  loadUsage,
+  hasSession,
+  currentModel,
+  currentThinking,
+  currentReasoningEffort,
+}: SettingsModalProps) {
   const [draft, setDraft] = useState(settings);
   const [runtimeConfigDraft, setRuntimeConfigDraft] = useState<Partial<RuntimeConfigValues> | null>(null);
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
@@ -461,6 +479,19 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage, hasSession
                 automationModel={draft.automationModel}
                 onAutomationModelChange={(automationModel) => setDraft((current) => ({ ...current, automationModel }))}
                 onRuntimeConfigChange={handleRuntimeConfigChange}
+              />
+            ) : activeSection === "ab-tests" ? (
+              <AbTestsSettings
+                hasSession={hasSession}
+                defaults={{
+                  model: currentModel ?? DEFAULT_CHAT_MODEL_PREFERENCE.model,
+                  thinking: currentThinking ?? DEFAULT_CHAT_MODEL_PREFERENCE.thinking,
+                  reasoningEffort: currentReasoningEffort ?? DEFAULT_CHAT_MODEL_PREFERENCE.reasoningEffort,
+                  systemPrompt: settings.systemPrompt,
+                  userPresence: draft.userPresence,
+                  contextMode: draft.focusedContextEnabled ? "focused" : "full",
+                  mode: "normal",
+                }}
               />
             ) : (
               <PlaceholderSettings label={activeLabel} />

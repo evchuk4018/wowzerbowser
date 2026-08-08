@@ -3,7 +3,7 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { AssistantActivityTimeline } from "./assistant-activity";
 import { AssistantResponse } from "./assistant-response";
-import type { ConversationTurn as ConversationTurnType, Message } from "./conversation-types";
+import type { ConversationAbTestComparison, ConversationTurn as ConversationTurnType, Message } from "./conversation-types";
 import { MessageActions } from "./message-actions";
 import { ReasoningBlock } from "./reasoning-block";
 import { CallActivityIndicator } from "./call-activity-indicator";
@@ -120,7 +120,78 @@ export type ConversationTurnProps = {
   onEdit: (turn: ConversationTurnType) => void;
   onShare: (message: Message) => void | Promise<void>;
   onOpenArtifact: (artifact: ChatArtifact) => void;
+  onVoteComparison: (comparison: ConversationAbTestComparison, selection: "a" | "b") => void | Promise<void>;
 };
+
+function ComparisonResponseCard({
+  label,
+  message,
+  comparison,
+  hasSession,
+  waiting,
+  thinking,
+  canVote,
+  onOpenArtifact,
+  onVote,
+}: {
+  label: "a" | "b";
+  message: Message;
+  comparison: ConversationAbTestComparison;
+  hasSession: () => Promise<boolean>;
+  waiting: boolean;
+  thinking?: ThinkingTiming;
+  canVote: boolean;
+  onOpenArtifact: (artifact: ChatArtifact) => void;
+  onVote: (comparison: ConversationAbTestComparison, selection: "a" | "b") => void | Promise<void>;
+}) {
+  const optionLabel = `Option ${label.toUpperCase()}`;
+  return (
+    <article className="ab-test-response-card" aria-label={optionLabel}>
+      <div className="ab-test-response-card-heading">
+        <strong>{optionLabel}</strong>
+        {message.status === "complete" && <span>Ready</span>}
+        {message.status === "streaming" && <span>Generating</span>}
+      </div>
+      {(message.activities?.length ?? 0) > 0 || (message.artifacts?.length ?? 0) > 0 ? (
+        <AssistantActivityTimeline
+          activities={message.activities ?? []}
+          content={message.content}
+          artifacts={message.artifacts ?? []}
+          annotations={message.annotations}
+          sources={message.sources}
+          hasSession={hasSession}
+          onOpenArtifact={onOpenArtifact}
+          streaming={message.status === "streaming"}
+        />
+      ) : (
+        <>
+          {Boolean(message.reasoning) && <ReasoningBlock message={message} liveDurationMs={thinking ? Math.max(0, thinking.now - thinking.startedAt) : undefined} />}
+          <div className="message-bubble">
+            {message.content ? (
+              <AssistantResponse
+                content={message.content}
+                annotations={message.annotations}
+                sources={message.sources}
+                artifacts={message.artifacts}
+                onOpenArtifact={onOpenArtifact}
+                streaming={message.status === "streaming"}
+              />
+            ) : waiting ? <CallActivityIndicator /> : null}
+          </div>
+        </>
+      )}
+      {message.error && <div className="message-error">{message.error}</div>}
+      <button
+        type="button"
+        className="ab-test-choice-button"
+        disabled={!canVote}
+        onClick={() => void onVote(comparison, label)}
+      >
+        Choose {optionLabel}
+      </button>
+    </article>
+  );
+}
 
 /** Render one user prompt and its assistant response without owning state. */
 function ConversationTurnInner({
@@ -142,6 +213,7 @@ function ConversationTurnInner({
   onEdit,
   onShare,
   onOpenArtifact,
+  onVoteComparison,
 }: ConversationTurnProps) {
   const version = turn.versions[turn.activeVersion];
   if (!version) return null;
@@ -167,6 +239,33 @@ function ConversationTurnInner({
   const handlePointerDown = (event: ReactPointerEvent<HTMLElement>) => {
     onStartLongPress(turn.id, event.pointerType);
   };
+  const comparison = assistantMessage.abTestComparison;
+  const comparisonMessages = comparison
+    ? new Map(turn.versions.map((version) => [version.assistant.id, version.assistant]))
+    : null;
+  const placeholderMessage = (responseId: string): Message => ({
+    id: responseId,
+    role: "assistant",
+    content: "",
+    reasoning: "",
+    activities: [],
+    artifacts: [],
+    thinkingEnabled: assistantMessage.thinkingEnabled,
+    status: "streaming",
+    lastSequence: assistantMessage.lastSequence,
+    abTestComparison: comparison,
+  });
+  const comparisonOptionMessages = comparison
+    ? (["a", "b"] as const).map((label) => {
+        const responseId = comparison.options[label].responseId;
+        return {
+          label,
+          message: comparisonMessages?.get(responseId) ?? placeholderMessage(responseId),
+        };
+      })
+    : [];
+  const comparisonReady = comparisonOptionMessages.length === 2
+    && comparisonOptionMessages.every(({ message }) => message.status === "complete" && Boolean(message.content.trim()));
 
   return (
     <article className={`message-pair ${actionsOpen ? "message-actions-open" : ""}`}>
@@ -210,6 +309,33 @@ function ConversationTurnInner({
           />
         )}
       </div>
+      {comparison ? (
+        <section className="ab-test-comparison" aria-label="Blind A/B response comparison">
+          <div className="ab-test-comparison-heading">
+            <div>
+              <div className="message-label">Blind comparison</div>
+              <p>Both responses use the same prompt. Choose the one you prefer.</p>
+            </div>
+            {!comparisonReady && <span className="ab-test-comparison-status">Waiting for both responses…</span>}
+          </div>
+          <div className="ab-test-response-grid">
+            {comparisonOptionMessages.map(({ label, message }) => (
+              <ComparisonResponseCard
+                key={label}
+                label={label}
+                message={message}
+                comparison={comparison}
+                hasSession={hasSession}
+                waiting={waitingByMessage[message.id] ?? message.status === "streaming"}
+                thinking={thinkingByMessage[message.id]}
+                canVote={comparisonReady}
+                onOpenArtifact={onOpenArtifact}
+                onVote={onVoteComparison}
+              />
+            ))}
+          </div>
+        </section>
+      ) : (
       <article className="message assistant">
         <div className="message-label">Response</div>
         {(assistantMessage.activities?.length ?? 0) > 0 || (assistantMessage.artifacts?.length ?? 0) > 0 ? (
@@ -331,6 +457,7 @@ function ConversationTurnInner({
           )}
         </div>
       </article>
+      )}
     </article>
   );
 }
