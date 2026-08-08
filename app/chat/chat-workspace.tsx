@@ -13,7 +13,7 @@ import {
 } from "react";
 import { useParams, useRouter } from "next/navigation";
 import type { AuthUser } from "../auth/types";
-import { SettingsModal } from "../settings/settings-modal";
+import { SettingsModal, type SettingsSection } from "../settings/settings-modal";
 import { ChatSearchDialog } from "./chat-search-dialog";
 import { ChatComposer } from "./chat-composer";
 import type { PendingChatImage } from "./chat-image-attachments";
@@ -81,6 +81,17 @@ function createStartupConversationState(requestedConversationId?: string) {
   return { conversations: [conversation], activeId: conversation.id };
 }
 
+type ConnectorReturnState = { section: SettingsSection; status?: "connected" | "error" };
+
+function connectorReturnState(): ConnectorReturnState {
+  if (typeof window === "undefined") return { section: "general" };
+  const params = new URLSearchParams(window.location.search);
+  const section = params.get("settings");
+  if (section !== "tools" && section !== "connectors") return { section: "general" };
+  const status = params.get("connectorStatus");
+  return { section, status: status === "connected" || status === "error" ? status : undefined };
+}
+
 export function ChatWorkspace({
   user,
   hasSession,
@@ -104,6 +115,8 @@ export function ChatWorkspace({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_CHAT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSection>("general");
+  const [connectorStatus, setConnectorStatus] = useState<"connected" | "error" | undefined>();
   const [searchOpen, setSearchOpen] = useState(false);
   const [openMenu, setOpenMenu] = useState<"model" | "thinking" | null>(null);
   const [openConversationActions, setOpenConversationActions] = useState<string | null>(null);
@@ -141,6 +154,22 @@ export function ChatWorkspace({
   const projectAssignmentTimerRef = useRef<number | null>(null);
   const initialConversationIdRef = useRef(requestedConversationId);
   const handledRouteRef = useRef<string | undefined | null>(null);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const returned = connectorReturnState();
+    if (returned.section === "general") return;
+    const frame = window.requestAnimationFrame(() => {
+      setSettingsInitialSection(returned.section);
+      setConnectorStatus(returned.status);
+      setSettingsOpen(true);
+    });
+    url.searchParams.delete("settings");
+    url.searchParams.delete("connectorStatus");
+    url.searchParams.delete("connectorError");
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
   const {
     snapshot,
     snapshotLoaded,
@@ -817,6 +846,8 @@ export function ChatWorkspace({
   };
   const closeSettings = () => {
     setSettingsOpen(false);
+    setSettingsInitialSection("general");
+    setConnectorStatus(undefined);
     requestAnimationFrame(() => {
       const focusTarget = window.matchMedia("(max-width: 760px)").matches
         ? mobileMenuButtonRef.current
@@ -901,6 +932,8 @@ export function ChatWorkspace({
           settings={settings}
           loadUsage={loadUsage}
           hasSession={hasSession}
+          initialSection={settingsInitialSection}
+          connectorStatus={connectorStatus}
           onClose={closeSettings}
           onSave={(next, runtimeConfig) => {
             setSettings(next);

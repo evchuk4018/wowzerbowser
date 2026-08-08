@@ -2,9 +2,16 @@ import { NextResponse } from "next/server";
 import { authorizeOwnerSession } from "../../../auth/owner-auth-service";
 import { completeManagedConnection } from "../../../server/connectors/connector-service";
 import { CONNECTOR_STATE_COOKIE, verifyConnectorOAuthState } from "../../../server/connectors/connector-oauth";
+import { redactConnectorError } from "../../../server/connectors/connector-redaction";
 import { integrationCallbackUrl } from "../../../server/integration-site-url";
 
-function destination(status: "connected" | "error") { const url = new URL(integrationCallbackUrl("/")); url.searchParams.set("connectors", status); url.searchParams.set("settings", "connectors"); return url; }
+function destination(connectorId: string | undefined, status: "connected" | "error", errorCode?: string) {
+  const url = new URL(integrationCallbackUrl("/chat"));
+  url.searchParams.set("connectorStatus", status);
+  url.searchParams.set("settings", connectorId === "gmail" ? "tools" : "connectors");
+  if (errorCode) url.searchParams.set("connectorError", errorCode);
+  return url;
+}
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -16,8 +23,14 @@ export async function GET(request: Request) {
   try {
     const code = url.searchParams.get("code"); if (!verified || !code || url.searchParams.has("error")) throw new Error("Invalid connector authorization response.");
     if (!owner || owner.id !== verified.ownerId) throw new Error("Invalid connector authorization response.");
-    await completeManagedConnection(verified.ownerId, verified.connectorId, code, state); response = NextResponse.redirect(destination("connected"));
-  } catch { response = NextResponse.redirect(destination("error")); }
+    await completeManagedConnection(verified.ownerId, verified.connectorId, code, state); response = NextResponse.redirect(destination(verified.connectorId, "connected"));
+  } catch (error) {
+    console.error("[connector-oauth] connection completion failed", {
+      connectorId: verified?.connectorId ?? null,
+      error: redactConnectorError(error),
+    });
+    response = NextResponse.redirect(destination(verified?.connectorId, "error", "completion_failed"));
+  }
   response.cookies.set(CONNECTOR_STATE_COOKIE, "", { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/api/connectors/callback", maxAge: 0 });
   return response;
 }

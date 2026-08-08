@@ -22,9 +22,11 @@ export type SettingsModalProps = {
   onSave: (settings: ChatSettings, runtimeConfig?: Partial<RuntimeConfigValues>) => void;
   loadUsage?: (range: UsageRange) => Promise<UsageReport>;
   hasSession: () => Promise<boolean>;
+  initialSection?: SettingsSection;
+  connectorStatus?: "connected" | "error";
 };
 
-type SettingsSection =
+export type SettingsSection =
   | "general"
   | "usage"
   | "tools"
@@ -326,11 +328,11 @@ function PlaceholderSettings({ label }: { label: string }) {
   );
 }
 
-export function SettingsModal({ settings, onClose, onSave, loadUsage, hasSession }: SettingsModalProps) {
+export function SettingsModal({ settings, onClose, onSave, loadUsage, hasSession, initialSection = "general", connectorStatus }: SettingsModalProps) {
   const [draft, setDraft] = useState(settings);
   const [runtimeConfigDraft, setRuntimeConfigDraft] = useState<Partial<RuntimeConfigValues> | null>(null);
-  const [activeSection, setActiveSection] = useState<SettingsSection>("general");
-  const [showIndex, setShowIndex] = useState(true);
+  const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection);
+  const [showIndex, setShowIndex] = useState(initialSection === "general");
   const dialogRef = useRef<HTMLElement>(null);
   const titleId = useId();
   const handleRuntimeConfigChange = useCallback((values: Partial<RuntimeConfigValues>) => {
@@ -442,7 +444,7 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage, hasSession
             ) : activeSection === "usage" ? (
               <UsageSettings loadUsage={loadUsage} />
             ) : activeSection === "tools" ? (
-              <ToolsSettings hasSession={hasSession} />
+              <ToolsSettings hasSession={hasSession} connectorStatus={connectorStatus} />
             ) : activeSection === "connectors" ? (
               <ConnectorsSettings hasSession={hasSession} />
             ) : activeSection === "models" ? (

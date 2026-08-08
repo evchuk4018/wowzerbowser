@@ -39,7 +39,7 @@ const draftFor = (tool: CustomToolDefinition): Draft => ({
   secretValues: {}, removeSecrets: [],
 });
 
-export function ToolsSettings({ hasSession }: { hasSession: () => Promise<boolean> }) {
+export function ToolsSettings({ hasSession, connectorStatus }: { hasSession: () => Promise<boolean>; connectorStatus?: "connected" | "error" }) {
   const [tools, setTools] = useState<CustomToolSummary[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [status, setStatus] = useState<"loading" | "idle" | "saving" | "testing">("loading");
@@ -181,6 +181,8 @@ export function ToolsSettings({ hasSession }: { hasSession: () => Promise<boolea
         <div><h3>Tools</h3><p>Create account-wide Python tools the AI can call automatically.</p></div>
         <button type="button" className="settings-save" onClick={() => { setDraft(blankDraft()); setError(""); }}>Create tool</button>
       </div>
+      {connectorStatus === "connected" && <p className="settings-status" role="status">Gmail connected successfully.</p>}
+      {connectorStatus === "error" && <p className="settings-status settings-error" role="alert">Gmail could not be connected. Check the server logs for the OAuth completion error, then try again.</p>}
       {error && <p className="settings-status settings-error" role="alert">{error}</p>}
       {status === "loading" && <p className="settings-status" role="status">Loading tools...</p>}
       {calendar && (
