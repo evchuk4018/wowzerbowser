@@ -9,6 +9,7 @@ import {
 import { BUILTIN_SKILLS } from "../app/server/skills/builtin-skills.ts";
 import { skillCatalogInstructions } from "../app/server/agent/skill-instructions.ts";
 import { executeReadSkillTool } from "../app/server/agent/skill-tool.ts";
+import { SKILL_TOOL_DEFINITIONS, SKILL_TOOL_NAMES } from "../app/server/agent/skill-tool-manifest.ts";
 
 const source = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -40,6 +41,26 @@ test("built-in document skills contain the format workflows removed from the Pyt
   assert.match(docx?.instructions ?? "", /exact DOCX path in the artifacts array/i);
   assert.match(pdf?.instructions ?? "", /reusable Python source/i);
   assert.match(docx?.instructions ?? "", /reusable Python source/i);
+});
+
+test("the built-in skill-management skill guides recurring-pattern detection and mutation", () => {
+  const skill = BUILTIN_SKILLS.find(({ key }) => key === "create-and-edit-skills");
+  assert.ok(skill);
+  assert.match(skill.instructions, /recurring workflow/i);
+  assert.match(skill.instructions, /Chinese conversation/i);
+  assert.match(skill.instructions, /ask only for details that materially affect/i);
+  assert.match(skill.instructions, /create_skill/);
+  assert.match(skill.instructions, /update_skill/);
+  assert.match(skill.instructions, /do not ask for permission to save/i);
+});
+
+test("skill mutation tools expose complete validated create and update payloads", () => {
+  const create = SKILL_TOOL_DEFINITIONS.find(({ function: definition }) => definition.name === SKILL_TOOL_NAMES.create);
+  const update = SKILL_TOOL_DEFINITIONS.find(({ function: definition }) => definition.name === SKILL_TOOL_NAMES.update);
+  assert.deepEqual(create?.function.parameters.required, ["name", "summary", "instructions"]);
+  assert.deepEqual(update?.function.parameters.required, ["skillId", "name", "summary", "instructions"]);
+  assert.equal(create?.function.parameters.additionalProperties, false);
+  assert.equal(update?.function.parameters.additionalProperties, false);
 });
 
 test("the system catalog includes metadata but omits full skill instructions", () => {
@@ -84,12 +105,13 @@ test("read_skill returns only an available requested skill", () => {
 });
 
 test("skill persistence and routes remain owner-scoped and server-only", async () => {
-  const [migration, repository, route, itemRoute, resetRoute] = await Promise.all([
+  const [migration, repository, route, itemRoute, resetRoute, customTools] = await Promise.all([
     source("database/migrations/001_initial_schema.sql"),
     source("app/server/skills/skill-repository.ts"),
     source("app/api/skills/route.ts"),
     source("app/api/skills/[skillId]/route.ts"),
     source("app/api/skills/[skillId]/reset/route.ts"),
+    source("app/server/tools/custom-tool-service.ts"),
   ]);
   assert.match(migration, /create table if not exists public\.user_skills/);
   assert.match(migration, /owner_id uuid not null/);
@@ -105,6 +127,7 @@ test("skill persistence and routes remain owner-scoped and server-only", async (
   assert.match(route, /listOwnerSkills|createOwnerSkill/);
   assert.match(itemRoute, /updateOwnerSkill|deleteOwnerCustomSkill/);
   assert.match(resetRoute, /resetOwnerBuiltinSkill/);
+  assert.match(customTools, /"read_skill", "create_skill", "update_skill"/);
 });
 
 test("Settings replaces Keyboard with an editable Skills accordion", async () => {

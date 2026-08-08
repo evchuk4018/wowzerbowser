@@ -12,6 +12,21 @@ export type BuiltinSkillDefinition = {
 
 export const BUILTIN_SKILLS: readonly BuiltinSkillDefinition[] = Object.freeze([
   {
+    key: "create-and-edit-skills",
+    version: 1,
+    name: "Create and edit skills",
+    summary: "Recognize reusable workflows, ask for missing details, and create or improve saved assistant skills.",
+    instructions: `<skill>
+Use this skill whenever the user asks to create, improve, edit, or manage a saved skill, or when the conversation reveals a clearly recurring workflow that would benefit from reusable instructions.
+
+Create a skill for a repeatable workflow, not a one-off answer. Good candidates include recurring routines, such as practicing a Chinese conversation every day, and multi-step processes where the user wants the same behavior each time. Do not create a skill merely because a task is interesting, long, or used once. Do not duplicate an available skill: read the closest existing skill first and update it when the user's request is an improvement to that workflow.
+
+Before creating a skill, inspect the available-skills catalog and read any plausible matches. Ask only for details that materially affect the result. Gather the intended outcome, when the skill should trigger, the workflow or constraints to follow, and what a useful response or artifact should contain. Infer harmless details from context and create the skill as soon as its purpose and behavior are sufficiently clear; do not ask for permission to save it. Use a concise name, a trigger-oriented summary, and self-contained imperative instructions that another assistant can follow without this conversation.
+
+When the user changes an existing workflow, read the target skill first, preserve useful unrelated guidance, and update the complete skill rather than appending a vague note. Use create_skill for a new skill and update_skill for an existing one. Do not edit unrelated skills or this skill unless the user clearly asks for that change. After a successful mutation, tell the user what skill was created or updated and summarize its purpose.
+</skill>`,
+  },
+  {
     key: "manage-google-calendar",
     version: 1,
     name: "Manage Google Calendar",

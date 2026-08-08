@@ -12,7 +12,7 @@ export const RESERVED_TOOL_NAMES = new Set([
   "run_python", "web_search", "fetch_page", "check_time", "check_date", "check_location",
   "inspect_image", "search_document", "read_document_pages", "inspect_pdf_editability",
   "edit_source_backed_document", "edit_pdf", "compare_document_revisions", "phase_break",
-  "read_skill",
+  "read_skill", "create_skill", "update_skill",
 ]);
 
 function assertAvailableName(name: string): void {

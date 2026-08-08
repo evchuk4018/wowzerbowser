@@ -45,8 +45,8 @@ import { planTodos } from "../server/chat/chat-todo-planner";
 import { runtimeConfigSnapshot } from "../server/config/runtime-config-service";
 import { listOwnerSkills } from "../server/skills/skill-service";
 import { skillCatalogInstructions } from "../server/agent/skill-instructions";
-import { executeReadSkillTool } from "../server/agent/skill-tool";
-import { READ_SKILL_TOOL_NAME, SKILL_TOOL_DEFINITIONS } from "../server/agent/skill-tool-manifest";
+import { executeReadSkillTool, executeSkillMutationTool } from "../server/agent/skill-tool";
+import { READ_SKILL_TOOL_NAME, SKILL_TOOL_DEFINITIONS, SKILL_TOOL_NAMES } from "../server/agent/skill-tool-manifest";
 import { builtinSkillFallbacks } from "../server/skills/builtin-skills";
 import { AUTOMATION_SKILL_KEY, AUTOMATION_TOOL_DEFINITIONS, messageUnlocksAutomationTools } from "../server/agent/automation-tool-manifest";
 import { executeAutomationTool } from "../server/agent/automation-tool";
@@ -745,6 +745,9 @@ export async function generateChatResponse(
                 } catch {}
               }
               return result;
+            }
+            if ((call.name === SKILL_TOOL_NAMES.create || call.name === SKILL_TOOL_NAMES.update) && skillTools.length) {
+              return executeSkillMutationTool(call, ownerId);
             }
             if (automationDefinitions.some((tool) => tool.function.name === call.name)) return executeAutomationTool(call, ownerId);
             if (calendarDefinitions.some((tool) => tool.function.name === call.name)) return executeCalendarTool(call, ownerId);
