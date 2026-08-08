@@ -15,6 +15,10 @@ export type TodoList = {
   updatedAt?: string;
 };
 
+export function hasActiveTodo(list: TodoList): boolean {
+  return list.items.some((item) => item.status !== "completed");
+}
+
 export function normalizeTodoList(value: unknown): TodoList {
   const input = value && typeof value === "object" ? value as Record<string, unknown> : {};
   const raw = Array.isArray(input.items) ? input.items : [];

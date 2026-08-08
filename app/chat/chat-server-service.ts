@@ -42,6 +42,7 @@ import { recordPromptUsage } from "../server/usage/prompt-cost-service";
 import { TODO_TOOL_DEFINITIONS, executeTodoTool } from "../server/agent/todo-tool";
 import { getTodoList } from "../server/chat/chat-todo-store";
 import { planTodos } from "../server/chat/chat-todo-planner";
+import { appendActiveTodoSystemPrompt } from "../server/chat/chat-todo-prompt";
 import { runtimeConfigSnapshot } from "../server/config/runtime-config-service";
 import { listOwnerSkills } from "../server/skills/skill-service";
 import { skillCatalogInstructions } from "../server/agent/skill-instructions";
@@ -260,6 +261,10 @@ export async function generateChatResponse(
     })
     : Promise.resolve(null);
   const [planner, focusedPlan] = await Promise.all([plannerPromise, focusedPlanPromise]);
+  chatRequest = {
+    ...chatRequest,
+    systemPrompt: appendActiveTodoSystemPrompt(chatRequest.systemPrompt, planner.list ?? currentTodos),
+  };
   if (focusedPlan) {
     console.info({
       event: "focused-context-compiled",

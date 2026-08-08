@@ -1,6 +1,6 @@
 import "server-only";
 import { completeOpenRouterQwenText } from "../../providers/openrouter/openrouter-qwen-text-adapter";
-import { normalizeTodoList, type TodoItem, type TodoList } from "../../../lib/todo-protocol";
+import { hasActiveTodo, normalizeTodoList, type TodoItem, type TodoList } from "../../../lib/todo-protocol";
 import { replaceTodoList } from "./chat-todo-store";
 import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 
@@ -28,10 +28,6 @@ const TASK_CONTINUATION_WORDS = /\b(?:continue|proceed|next|update|revise|expand
 
 function countWorkVerbs(message: string): number {
   return new Set((message.match(WORK_VERBS) ?? []).map((verb) => verb.toLowerCase())).size;
-}
-
-function hasActiveTodo(current: TodoList): boolean {
-  return current.items.some((item) => item.status !== "completed");
 }
 
 /**

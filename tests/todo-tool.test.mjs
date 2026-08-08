@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { normalizeTodoList, MAX_TODOS } from "../lib/todo-protocol.ts";
+import { ACTIVE_TODO_SYSTEM_PROMPT, appendActiveTodoSystemPrompt } from "../app/server/chat/chat-todo-prompt.ts";
 import { TODO_TOOL_DEFINITIONS, GET_TODOS_TOOL_NAME, COMPLETE_TODO_TOOL_NAME } from "../app/server/agent/todo-tool.ts";
 import { planTodos, shouldPlanTodos } from "../app/server/chat/chat-todo-planner.ts";
 import { applyChatStreamEvent } from "../lib/chat-history.ts";
@@ -49,4 +50,16 @@ test("an existing todo is not treated as a plan created for the current response
   const current = { revision: 1, items: [{ id: "research", text: "Research", status: "pending", position: 0 }] };
   const outcome = await planTodos({ ownerId: "owner", conversationId: "conversation", userMessage: "Thanks", current });
   assert.deepEqual(outcome, { list: current, plannedThisTurn: false });
+});
+
+test("active todos append a system-prompt reminder", () => {
+  const active = { revision: 1, items: [{ id: "research", text: "Research", status: "pending", position: 0 }] };
+  const completed = { revision: 1, items: [{ id: "research", text: "Research", status: "completed", position: 0 }] };
+
+  assert.equal(
+    appendActiveTodoSystemPrompt("base prompt", active),
+    `base prompt\n\n${ACTIVE_TODO_SYSTEM_PROMPT}`,
+  );
+  assert.equal(appendActiveTodoSystemPrompt("base prompt", completed), "base prompt");
+  assert.equal(appendActiveTodoSystemPrompt(ACTIVE_TODO_SYSTEM_PROMPT, active), ACTIVE_TODO_SYSTEM_PROMPT);
 });
