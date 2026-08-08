@@ -110,6 +110,35 @@ The OAuth request uses offline access and the narrow
 `https://www.googleapis.com/auth/calendar.events` scope. Refresh tokens are
 encrypted at rest and are never sent to the browser or model.
 
+## Outlook email
+
+The read-only Outlook connector uses Microsoft Graph delegated OAuth access to
+search and read messages. It supports both work or school Microsoft accounts and
+personal Microsoft accounts when the app registration uses the `common` tenant.
+
+1. In Microsoft Entra admin center, register a web application and select the
+   account type that supports organizational and personal Microsoft accounts.
+2. Add these authorized redirect URIs:
+   - `http://localhost:3000/api/connectors/callback`
+   - `https://homelab.tail861ffd.ts.net/api/connectors/callback`
+3. Add delegated Microsoft Graph permissions for `Mail.Read` and `User.Read`.
+   The connector also requests `openid profile email offline_access` for account
+   identity and refresh-token access.
+4. Configure the server-only values in `/srv/storage/wowzerbowser/deployment.env`:
+
+   ```dotenv
+   MICROSOFT_OAUTH_CLIENT_ID=your-application-client-id
+   MICROSOFT_OAUTH_CLIENT_SECRET=your-client-secret
+   MICROSOFT_OAUTH_TENANT=common
+   MICROSOFT_OAUTH_STATE_SECRET=at-least-32-random-characters
+   ```
+
+   Keep `CONNECTOR_CREDENTIAL_ENCRYPTION_KEY` configured as shown in
+   `.env.example`. Refresh tokens are encrypted at rest and are never sent to
+   the browser or model.
+5. Apply the local PostgreSQL migrations, restart the app, then open
+   **Settings → Connectors → Outlook** and choose **Connect account**.
+
 ## Discord direct messages
 
 The optional Discord integration turns a private bot DM into the same durable
