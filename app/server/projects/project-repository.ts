@@ -421,7 +421,7 @@ export async function assignProjectChat(input: {
 }): Promise<ChatProjectChat | null> {
   const owner = databaseOwnerId(input.ownerId);
   return withTransaction(async (transaction) => {
-    const [conversation] = await transaction.unsafe<{
+    const conversation = (await transaction.unsafe<{
       conversation_id: string;
       project_id: string | null;
       is_project_library: boolean;
@@ -431,10 +431,10 @@ export async function assignProjectChat(input: {
         where owner_id=$1 and conversation_id=$2
         for update`,
       [owner, input.conversationId],
-    );
-    if (!conversation || conversation.is_project_library) return null;
+    ))[0];
+    if (conversation?.is_project_library) return null;
 
-    const projectIds = [...new Set([conversation.project_id, input.projectId].filter((value): value is string => Boolean(value)))].sort();
+    const projectIds = [...new Set([conversation?.project_id, input.projectId].filter((value): value is string => Boolean(value)))].sort();
     const projects = await transaction.unsafe<{ project_id: string; deleting_at: unknown }>(
       `select project_id,deleting_at
          from chat_projects
@@ -445,7 +445,25 @@ export async function assignProjectChat(input: {
     );
     const targetProject = projects.find((project) => project.project_id === input.projectId);
     if (!targetProject || targetProject.deleting_at !== null) return null;
-    if (conversation.project_id && !projects.some((project) => project.project_id === conversation.project_id)) return null;
+    if (conversation?.project_id && !projects.some((project) => project.project_id === conversation?.project_id)) return null;
+
+    if (!conversation) {
+      const [created] = await transaction.unsafe<ProjectChatRow>(
+        `insert into chat_conversations(owner_id,conversation_id,project_id,title)
+         values($1,$2,$3,coalesce($4,'New conversation'))
+         returning conversation_id,project_id,title,created_at,updated_at,
+           false as has_messages,
+           false as is_streaming`,
+        [owner, input.conversationId, input.projectId, input.title ?? null],
+      );
+      if (!created) return null;
+
+      await transaction.unsafe(
+        "update chat_projects set updated_at=now() where owner_id=$1 and project_id=any($2::text[])",
+        [owner, projectIds],
+      );
+      return projectChatFromRow(created);
+    }
 
     if (conversation.project_id !== input.projectId) {
       await moveProjectChatResources({
