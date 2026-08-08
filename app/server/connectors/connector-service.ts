@@ -15,14 +15,17 @@ import {
 import type { ConnectorProvider, ConnectorProviderContext } from "./connector-types";
 import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 import { GoogleGmailProvider } from "./providers/google-gmail-provider";
+import { MicrosoftOutlookProvider } from "./providers/microsoft-outlook-provider";
 
 const managed = new ManagedConnectorProvider((id) => connectorManifest(id));
 const googleGmail = new GoogleGmailProvider();
+const microsoftOutlook = new MicrosoftOutlookProvider();
 const remoteMcp = new RemoteMcpProvider();
 
 function provider(manifest: ConnectorManifest): ConnectorProvider {
   if (manifest.provider === "managed") return managed;
   if (manifest.provider === "google_gmail") return googleGmail;
+  if (manifest.provider === "microsoft_outlook") return microsoftOutlook;
   return remoteMcp;
 }
 
@@ -61,13 +64,13 @@ export async function getConnectorManifestForOwner(ownerId: string, connectorId:
 
 export async function createManagedConnectionSession(ownerId: string, connectorId: string, state: string) {
   const manifest = await getConnectorManifestForOwner(ownerId, connectorId);
-  if (!manifest || (manifest.provider !== "managed" && manifest.provider !== "google_gmail")) throw new Error("Managed connector not found.");
+  if (!manifest || !["managed", "google_gmail", "microsoft_outlook"].includes(manifest.provider)) throw new Error("Managed connector not found.");
   return provider(manifest).createConnectionSession({ ownerId, connectorId, metadata: { state } });
 }
 
 export async function completeManagedConnection(ownerId: string, connectorId: string, code: string, state: string): Promise<string> {
   const manifest = await getConnectorManifestForOwner(ownerId, connectorId);
-  if (!manifest || (manifest.provider !== "managed" && manifest.provider !== "google_gmail")) throw new Error("Managed connector not found.");
+  if (!manifest || !["managed", "google_gmail", "microsoft_outlook"].includes(manifest.provider)) throw new Error("Managed connector not found.");
   const result = await provider(manifest).completeConnection({ ownerId, connectorId, code, state });
   const connectionId = await createConnection(ownerId, manifest, result.credentials, result.accountLabel, result.accountEmail, result.metadata);
   await discoverConnectorTools(ownerId, connectorId, connectionId);
@@ -78,7 +81,7 @@ export async function createConnection(ownerId: string, manifest: ConnectorManif
   const encrypted = encryptConnectorCredentials(credentials);
   const encryptedMetadata = encryptConnectorMetadata(metadata ?? {});
   const { insertConnection } = await import("./connector-repository");
-  if (manifest.provider === "managed" || manifest.provider === "google_gmail") await ensureManagedDefinition(manifest);
+  if (["managed", "google_gmail", "microsoft_outlook"].includes(manifest.provider)) await ensureManagedDefinition(manifest);
   await ensureInstallation(ownerId, manifest.id);
   return insertConnection(ownerId, { connectorId: manifest.id, accountLabel, accountEmail, credentials: encrypted, encryptedMetadata });
 }

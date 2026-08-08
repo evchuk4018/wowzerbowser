@@ -8,6 +8,10 @@ export const MANAGED_CONNECTOR_MANIFESTS: ConnectorManifest[] = [
     capabilities: ["search", "read"], defaultApproval: { read: "never", write: "always", destructive: "always" },
   },
   {
+    id: "outlook", name: "Outlook", description: "Search and read messages from a connected Outlook account.", version: "1.0.0", provider: "microsoft_outlook", auth: { type: "oauth2" },
+    capabilities: ["search", "read"], defaultApproval: { read: "never", write: "always", destructive: "always" },
+  },
+  {
     id: "google_drive", name: "Google Drive", description: "Find and read files from a connected Google Drive account.", version: "1.0.0", provider: "managed", auth: { type: "oauth2" },
     capabilities: ["search", "read", "write"], defaultApproval: { read: "never", write: "always", destructive: "always" },
   },

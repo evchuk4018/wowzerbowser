@@ -13,6 +13,7 @@ import { requiresConnectorApproval } from "./connector-policy";
 import { ManagedConnectorProvider } from "./providers/managed-provider";
 import { RemoteMcpProvider } from "./providers/remote-mcp-provider";
 import { GoogleGmailProvider } from "./providers/google-gmail-provider";
+import { MicrosoftOutlookProvider } from "./providers/microsoft-outlook-provider";
 
 export const SEARCH_CONNECTOR_TOOLS_NAME = "search_connector_tools";
 export const SEARCH_CONNECTOR_TOOLS_DEFINITION = {
@@ -43,9 +44,10 @@ export async function executeSearchConnectorTools(call: ChatToolCall, ownerId: s
   } catch (error) { return { result: failed(call, redactConnectorError(error)), tools: [] as ConnectorTool[] }; }
 }
 
-function providerFor(id: string, provider: "managed" | "google_gmail" | "remote_mcp") {
+function providerFor(id: string, provider: "managed" | "google_gmail" | "microsoft_outlook" | "remote_mcp") {
   if (provider === "managed") return new ManagedConnectorProvider((connectorId) => connectorManifest(connectorId));
   if (provider === "google_gmail") return new GoogleGmailProvider();
+  if (provider === "microsoft_outlook") return new MicrosoftOutlookProvider();
   return new RemoteMcpProvider();
 }
 

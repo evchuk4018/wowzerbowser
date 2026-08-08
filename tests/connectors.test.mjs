@@ -6,11 +6,16 @@ import { discoveredMcpTools } from "../app/server/connectors/mcp/mcp-tool-discov
 import { normalizeMcpResult } from "../app/server/connectors/mcp/mcp-result-normalizer.ts";
 import { redactConnectorError, redactConnectorValue } from "../app/server/connectors/connector-redaction.ts";
 import { GoogleGmailProvider } from "../app/server/connectors/providers/google-gmail-provider.ts";
+import { MicrosoftOutlookProvider } from "../app/server/connectors/providers/microsoft-outlook-provider.ts";
+import { exchangeMicrosoftOutlookCode, microsoftOutlookAuthorizationUrl, refreshMicrosoftOutlookAccessToken } from "../app/server/connectors/providers/microsoft-outlook-oauth.ts";
+import { outlookGetMessage, outlookSearch, MicrosoftOutlookAuthorizationError } from "../app/server/connectors/providers/microsoft-outlook-adapter.ts";
 
 test("managed connector registry exposes the initial catalog", () => {
-  assert.deepEqual(MANAGED_CONNECTOR_MANIFESTS.map(({ id }) => id), ["gmail", "google_drive", "notion", "slack"]);
+  assert.deepEqual(MANAGED_CONNECTOR_MANIFESTS.map(({ id }) => id), ["gmail", "outlook", "google_drive", "notion", "slack"]);
   assert.equal(MANAGED_CONNECTOR_MANIFESTS.find(({ id }) => id === "gmail").provider, "google_gmail");
   assert.deepEqual(MANAGED_CONNECTOR_MANIFESTS.find(({ id }) => id === "gmail").capabilities, ["search", "read"]);
+  assert.equal(MANAGED_CONNECTOR_MANIFESTS.find(({ id }) => id === "outlook").provider, "microsoft_outlook");
+  assert.deepEqual(MANAGED_CONNECTOR_MANIFESTS.find(({ id }) => id === "outlook").capabilities, ["search", "read"]);
 });
 
 test("connector tool namespacing prevents collisions", () => {
@@ -23,6 +28,119 @@ test("Gmail exposes only read-only tools", async () => {
   assert.deepEqual(tools.map(({ name }) => name), ["search_emails", "search_email_ids", "read_email_thread", "batch_read_email"]);
   assert.equal(tools.every(({ access }) => access === "read"), true);
   assert.equal(tools.some(({ name }) => /send|draft|label|archive|delete|trash/i.test(name)), false);
+});
+
+test("Outlook exposes only read-only email tools", async () => {
+  const tools = await new MicrosoftOutlookProvider().listTools();
+  assert.deepEqual(tools.map(({ name }) => name), ["search_emails", "search_email_ids", "read_email", "batch_read_email"]);
+  assert.equal(tools.every(({ access }) => access === "read"), true);
+  assert.equal(tools.some(({ name }) => /send|draft|label|archive|delete|trash/i.test(name)), false);
+});
+
+test("Microsoft Outlook OAuth uses the common tenant and read-only mail scopes", () => {
+  const previous = {
+    clientId: process.env.MICROSOFT_OAUTH_CLIENT_ID,
+    tenant: process.env.MICROSOFT_OAUTH_TENANT,
+    siteUrl: process.env.NEXT_PUBLIC_SITE_URL,
+  };
+  process.env.MICROSOFT_OAUTH_CLIENT_ID = "client-id";
+  delete process.env.MICROSOFT_OAUTH_TENANT;
+  process.env.NEXT_PUBLIC_SITE_URL = "https://example.test";
+  try {
+    const url = new URL(microsoftOutlookAuthorizationUrl("state-value"));
+    assert.equal(url.hostname, "login.microsoftonline.com");
+    assert.equal(url.pathname, "/common/oauth2/v2.0/authorize");
+    assert.equal(url.searchParams.get("redirect_uri"), "https://example.test/api/connectors/callback");
+    assert.equal(url.searchParams.get("state"), "state-value");
+    assert.match(url.searchParams.get("scope"), /Mail\.Read/);
+    assert.match(url.searchParams.get("scope"), /offline_access/);
+  } finally {
+    if (previous.clientId === undefined) delete process.env.MICROSOFT_OAUTH_CLIENT_ID;
+    else process.env.MICROSOFT_OAUTH_CLIENT_ID = previous.clientId;
+    if (previous.tenant === undefined) delete process.env.MICROSOFT_OAUTH_TENANT;
+    else process.env.MICROSOFT_OAUTH_TENANT = previous.tenant;
+    if (previous.siteUrl === undefined) delete process.env.NEXT_PUBLIC_SITE_URL;
+    else process.env.NEXT_PUBLIC_SITE_URL = previous.siteUrl;
+  }
+});
+
+test("Microsoft Outlook OAuth exchanges authorization and refresh tokens", async () => {
+  const originalFetch = globalThis.fetch;
+  const previous = {
+    clientId: process.env.MICROSOFT_OAUTH_CLIENT_ID,
+    clientSecret: process.env.MICROSOFT_OAUTH_CLIENT_SECRET,
+    tenant: process.env.MICROSOFT_OAUTH_TENANT,
+    siteUrl: process.env.NEXT_PUBLIC_SITE_URL,
+  };
+  const requests = [];
+  process.env.MICROSOFT_OAUTH_CLIENT_ID = "client-id";
+  process.env.MICROSOFT_OAUTH_CLIENT_SECRET = "client-secret";
+  delete process.env.MICROSOFT_OAUTH_TENANT;
+  process.env.NEXT_PUBLIC_SITE_URL = "https://example.test";
+  globalThis.fetch = async (input, init) => {
+    requests.push({ input: String(input), body: String(init.body) });
+    return new Response(JSON.stringify(requests.length === 1
+      ? { access_token: "access-token", refresh_token: "refresh-token", scope: "Mail.Read User.Read" }
+      : { access_token: "refreshed-access-token" }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    assert.deepEqual(await exchangeMicrosoftOutlookCode("authorization-code"), { accessToken: "access-token", refreshToken: "refresh-token", scope: "Mail.Read User.Read" });
+    assert.equal(await refreshMicrosoftOutlookAccessToken("refresh-token"), "refreshed-access-token");
+    assert.equal(requests[0].input, "https://login.microsoftonline.com/common/oauth2/v2.0/token");
+    assert.match(requests[0].body, /grant_type=authorization_code/);
+    assert.match(requests[1].body, /grant_type=refresh_token/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previous.clientId === undefined) delete process.env.MICROSOFT_OAUTH_CLIENT_ID;
+    else process.env.MICROSOFT_OAUTH_CLIENT_ID = previous.clientId;
+    if (previous.clientSecret === undefined) delete process.env.MICROSOFT_OAUTH_CLIENT_SECRET;
+    else process.env.MICROSOFT_OAUTH_CLIENT_SECRET = previous.clientSecret;
+    if (previous.tenant === undefined) delete process.env.MICROSOFT_OAUTH_TENANT;
+    else process.env.MICROSOFT_OAUTH_TENANT = previous.tenant;
+    if (previous.siteUrl === undefined) delete process.env.NEXT_PUBLIC_SITE_URL;
+    else process.env.NEXT_PUBLIC_SITE_URL = previous.siteUrl;
+  }
+});
+
+test("Outlook Graph adapter searches, follows opaque next links, and reads messages", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    requests.push({ url, init });
+    if (url.pathname.endsWith("/messages")) {
+      return new Response(JSON.stringify({
+        value: [{ id: "message-1", conversationId: "conversation-1", subject: "Invoice", from: { emailAddress: { name: "Sender", address: "sender@example.test" } }, toRecipients: [{ emailAddress: { address: "owner@example.test" } }], receivedDateTime: "2026-08-08T12:00:00Z", bodyPreview: "Please review", hasAttachments: true, isRead: false }],
+        "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/messages?$skiptoken=opaque-token",
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return new Response(JSON.stringify({
+      id: "message-1", conversationId: "conversation-1", subject: "Invoice", from: { emailAddress: { name: "Sender", address: "sender@example.test" } }, bodyPreview: "Please review", body: { contentType: "text", content: "Full message" }, hasAttachments: true, attachments: [{ id: "attachment-1", name: "invoice.pdf", contentType: "application/pdf", size: 1234, isInline: false }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const search = await outlookSearch("access-token", { query: "invoice", maxResults: 10 });
+    assert.equal(search.messages[0].from, "Sender <sender@example.test>");
+    assert.deepEqual(search.messages[0].to, ["owner@example.test"]);
+    assert.equal(search.nextPageToken, "https://graph.microsoft.com/v1.0/me/messages?$skiptoken=opaque-token");
+    assert.equal(new URL(requests[0].url).searchParams.get("$search"), '"invoice"');
+    const read = await outlookGetMessage("access-token", "message-1");
+    assert.equal(read.body, "Full message");
+    assert.deepEqual(read.attachments, [{ id: "attachment-1", filename: "invoice.pdf", mimeType: "application/pdf", size: 1234, isInline: false }]);
+    assert.match(requests[1].init.headers.prefer, /body-content-type/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Outlook Graph adapter classifies authorization failures as reconnects", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ error: { message: "expired" } }), { status: 401 });
+  try {
+    await assert.rejects(() => outlookSearch("access-token", { query: "invoice" }), MicrosoftOutlookAuthorizationError);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("MCP discovery classifies read, write, and destructive actions", () => {

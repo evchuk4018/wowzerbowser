@@ -6,7 +6,9 @@ export const CONNECTOR_STATE_COOKIE = "wowzerbowser_connector_oauth";
 const TTL = 10 * 60_000;
 
 function secret(connectorId?: string): string {
-  const name = connectorId === "gmail" ? "GOOGLE_OAUTH_STATE_SECRET" : "PIPEDREAM_CONNECT_STATE_SECRET";
+  const name = connectorId === "gmail"
+    ? "GOOGLE_OAUTH_STATE_SECRET"
+    : connectorId === "outlook" ? "MICROSOFT_OAUTH_STATE_SECRET" : "PIPEDREAM_CONNECT_STATE_SECRET";
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is not configured.`);
   return value;
