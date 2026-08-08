@@ -182,17 +182,19 @@ test("malformed persisted attachment rows are ignored without exposing unsafe me
 });
 
 test("message-version persistence stores attachment metadata on the owning version", async () => {
-  const [store, migration] = await Promise.all([
+  const [store, mapper, migration] = await Promise.all([
     readFile(new URL("../app/server/chat/chat-history-store.ts", import.meta.url), "utf8"),
-    readFile(new URL("../supabase/migrations/20260725010000_chat_image_attachments.sql", import.meta.url), "utf8"),
+    readFile(new URL("../app/server/chat/chat-history-mappers.ts", import.meta.url), "utf8"),
+    readFile(new URL("../database/migrations/001_initial_schema.sql", import.meta.url), "utf8"),
   ]);
-  assert.match(store, /attachments: unknown/);
-  assert.match(store, /attachments: message\.attachments \?\? \[\]/);
-  assert.match(store, /requestImageIds\(request\)/);
-  assert.match(store, /authoritativeAttachmentsForSubmission/);
-  assert.match(store, /previous\.userMessageId/);
-  assert.match(store, /version_id: versionId/);
-  assert.match(migration, /add column if not exists attachments jsonb/i);
+  const persistence = `${store}\n${mapper}`;
+  assert.match(persistence, /attachments: unknown/);
+  assert.match(persistence, /attachments: message\.attachments \?\? \[\]/);
+  assert.match(persistence, /requestImageIds\(request\)/);
+  assert.match(persistence, /authoritativeAttachmentsForSubmission/);
+  assert.match(persistence, /previous\.userMessageId/);
+  assert.match(persistence, /version_id: versionId/);
+  assert.match(migration, /attachments jsonb not null/i);
   assert.match(migration, /jsonb_typeof\(attachments\) = 'array'/i);
 });
 
@@ -268,7 +270,7 @@ test("server image authorization uses upload rows and claim-token retries", asyn
 test("combined image analysis usage remains compatible with legacy usage records", async () => {
   const [protocol, migration] = await Promise.all([
     readFile(new URL("../lib/usage-protocol.ts", import.meta.url), "utf8"),
-    readFile(new URL("../supabase/migrations/20260729210000_combined_image_analysis_usage.sql", import.meta.url), "utf8"),
+    readFile(new URL("../database/migrations/015_subagent_usage.sql", import.meta.url), "utf8"),
   ]);
   assert.match(protocol, /"image_analysis"/);
   assert.match(migration, /'image_analysis'/);

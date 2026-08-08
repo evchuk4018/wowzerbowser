@@ -1,15 +1,15 @@
 import "server-only";
 import type { Automation, AutomationMutation } from "../../../lib/automation-protocol";
-import { asIsoTimestamp, databaseOwnerId, jsonb, query, withTransaction } from "../database/database";
+import { databaseOwnerId, isoTimestamp, jsonb, query, withTransaction } from "../database/database";
 const columns = "id,name,kind,instructions,schedule,time_zone,status,next_run_at,last_run_at,last_outcome,last_error,consecutive_failures,created_at,updated_at";
 
 function value(row: Record<string, unknown>): Automation {
   return {
     id: String(row.id), name: String(row.name), kind: row.kind as Automation["kind"], instructions: String(row.instructions),
     schedule: row.schedule as Automation["schedule"], timeZone: String(row.time_zone), status: row.status as Automation["status"],
-    nextRunAt: row.next_run_at == null ? null : asIsoTimestamp(row.next_run_at), lastRunAt: row.last_run_at == null ? null : asIsoTimestamp(row.last_run_at), lastOutcome: row.last_outcome as Automation["lastOutcome"],
+    nextRunAt: row.next_run_at == null ? null : isoTimestamp(row.next_run_at), lastRunAt: row.last_run_at == null ? null : isoTimestamp(row.last_run_at), lastOutcome: row.last_outcome as Automation["lastOutcome"],
     lastError: row.last_error as string | null, consecutiveFailures: Number(row.consecutive_failures),
-    createdAt: asIsoTimestamp(row.created_at), updatedAt: asIsoTimestamp(row.updated_at),
+    createdAt: isoTimestamp(row.created_at), updatedAt: isoTimestamp(row.updated_at),
   };
 }
 
@@ -107,7 +107,7 @@ export async function finishAutomationRun(
     if (!automation) throw new Error("Automation not found.");
     const failures = input.outcome === "failed" ? Number(automation.consecutive_failures) + 1 : 0;
     const shouldPause = automation.status !== "active" || automation.deleted_at !== null || input.pause || failures >= 3;
-    const persistedNextRunAt = automation.next_run_at == null ? null : asIsoTimestamp(automation.next_run_at);
+    const persistedNextRunAt = automation.next_run_at == null ? null : isoTimestamp(automation.next_run_at);
     const nextRunAt = shouldPause ? null : (persistedNextRunAt ?? input.nextRunAt);
     await tx.unsafe(
       "update automations set status=$1,next_run_at=$2,last_outcome=$3,last_error=$4,consecutive_failures=$5,updated_at=$6 where id=$7 and owner_id=$8",

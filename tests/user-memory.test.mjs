@@ -127,29 +127,30 @@ test("Qwen dreaming adapter enables thinking and parses validated JSON actions",
 });
 
 test("persistence schema provides auditable provenance and exclusive three-job batches", async () => {
-  const migration = await source("supabase/migrations/20260728200000_user_memory_dreaming.sql");
+  const migration = `${await source("database/migrations/001_initial_schema.sql")}\n${await source("database/migrations/003_atomic_functions.sql")}`;
   assert.match(migration, /user_memory_folders/);
   assert.match(migration, /user_memories/);
   assert.match(migration, /user_memory_revisions/);
-  assert.match(migration, /writer in \('dreaming', 'agent'\)/);
+  assert.match(migration, /writer in \('dreaming','agent'\)/);
   assert.match(migration, /source_chat_id text not null/);
   assert.match(migration, /source_job_id text not null/);
   assert.match(migration, /limit 3/);
-  assert.match(migration, /v_job_count < 3/);
+  assert.match(migration, /v_job_count\s*<\s*3/);
   assert.match(migration, /unique \(owner_id, job_id\)/);
-  assert.match(migration, /chat_recall', 'dreaming'/);
+  assert.match(migration, /chat_recall'\s*,\s*'dreaming'/);
   assert.match(migration, /owner_id uuid primary key/);
-  assert.match(migration, /user_memories\|folder_id uuid/);
+  assert.match(migration, /user_memories/);
+  assert.match(migration, /folder_id uuid/);
   assert.doesNotMatch(migration, /\buser_id\b/);
 });
 
 test("consolidation persistence uses five-run cycles and an owner-scoped prompt cap", async () => {
-  const migration = await source("supabase/migrations/20260730150000_dreaming_consolidation.sql");
+  const migration = `${await source("database/migrations/001_initial_schema.sql")}\n${await source("database/migrations/003_atomic_functions.sql")}`;
   assert.match(migration, /dreaming_cycle_count/);
   assert.match(migration, /consolidated_prompt/);
   assert.match(migration, /dreaming_consolidations/);
   assert.match(migration, /primary key \(owner_id, cycle_number\)/);
-  assert.match(migration, /mod\(v_count, 5\)/);
+  assert.match(migration, /mod\(v_count,5\)/);
   assert.match(migration, /record_dreaming_cycle/);
   const service = await source("app/server/memory/dreaming-service.ts");
   assert.match(service, /recordDreamingCycle\(ownerId, runId\)/);
@@ -167,22 +168,23 @@ test("dreaming repository deduplicates three source jobs by conversation using t
 });
 
 test("dreaming stores an action plan before applying it and reuses it on retry", async () => {
-  const [service, migration] = await Promise.all([
+  const [service, schema, functions] = await Promise.all([
     source("app/server/memory/dreaming-service.ts"),
-    source("supabase/migrations/20260729010000_user_memory_dreaming_reliability.sql"),
+    source("database/migrations/001_initial_schema.sql"),
+    source("database/migrations/003_atomic_functions.sql"),
   ]);
+  const migration = `${schema}\n${functions}`;
   assert.match(service, /const persistedActions = run\.actionPlan\?\.actions \?\? null/);
   assert.match(service, /if \(!persistedActions\) await saveDreamingActionPlan/);
   assert.match(service, /for \(const \[index, action\] of actions\.entries\(\)\) await applyAction/);
-  assert.match(migration, /add column if not exists result_summary/);
-  assert.match(migration, /add column if not exists action_plan/);
+  assert.match(migration, /result_summary text/);
+  assert.match(migration, /action_plan jsonb/);
 });
 
 test("legacy user memory columns cannot block durable profile writes", async () => {
-  const migration = await source("supabase/migrations/20260729020000_user_memory_legacy_table_compatibility.sql");
-  for (const column of ["user_id", "memory_type", "dedup_key_hash", "origin"]) {
-    assert.match(migration, new RegExp(`alter column ${column} drop not null`));
-  }
+  const migration = await source("database/migrations/001_initial_schema.sql");
+  assert.match(migration, /user_memory_profiles/);
+  assert.doesNotMatch(migration, /\buser_id\b/);
 });
 
 test("agent memory tools keep server-owned provenance and expose all requested operations", async () => {

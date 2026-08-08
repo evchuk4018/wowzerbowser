@@ -48,10 +48,10 @@ test("automation calendar instructions expose calendar tools without exposing th
 });
 
 test("calendar credentials remain owner-scoped and server-only", () => {
-  const migration = source("supabase/migrations/20260730140000_google_calendar_credentials.sql");
+  const migration = source("database/migrations/001_initial_schema.sql");
   const repository = source("app/server/calendar/google-calendar-repository.ts");
-  assert.match(migration, /owner_id uuid primary key references auth\.users/);
-  assert.match(migration, /enable row level security/);
+  assert.match(migration, /create table if not exists public\.google_calendar_credentials/);
+  assert.match(migration, /owner_id uuid primary key/);
   assert.match(repository, /where owner_id=\$1/);
   assert.match(repository, /databaseOwnerId\(ownerId\)/);
   assert.doesNotMatch(repository, /NEXT_PUBLIC.*SECRET|console\.(?:log|info)/);

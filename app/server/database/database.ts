@@ -99,8 +99,6 @@ export function isoTimestamp(value: unknown): string {
   return String(value);
 }
 
-export const asIsoTimestamp = isoTimestamp;
-
 export function nullableIsoTimestamp(value: unknown): string | null {
   return value === null || value === undefined ? null : isoTimestamp(value);
 }

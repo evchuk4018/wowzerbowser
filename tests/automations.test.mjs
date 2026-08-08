@@ -21,7 +21,7 @@ test("interval and timezone schedules calculate future UTC occurrences", () => {
 });
 
 test("persistence and dispatcher are owner scoped and leased", async () => {
-  const [migration, repository, route] = await Promise.all([source("supabase/migrations/20260730100000_recurring_automations.sql"), source("app/server/automations/automation-repository.ts"), source("app/api/internal/automations/dispatch/route.ts")]);
+  const [migration, repository, route] = await Promise.all([source("database/migrations/003_atomic_functions.sql"), source("app/server/automations/automation-repository.ts"), source("app/api/internal/automations/dispatch/route.ts")]);
   assert.match(migration, /for update skip locked/);
   assert.match(migration, /lease_expires_at/);
   assert.match(repository, /where owner_id=\$1/);
@@ -121,13 +121,13 @@ test("ordinary automation prose becomes a safe non-matching fallback", () => {
 
 test("Discord automation delivery is durable, leased, and idempotent per run", async () => {
   const [migration, repository] = await Promise.all([
-    source("supabase/migrations/20260730160000_discord_automation_notifications.sql"),
+    source("database/migrations/003_atomic_functions.sql"),
     source("app/server/discord/discord-automation-repository.ts"),
   ]);
-  assert.match(migration, /unique \(owner_id, automation_run_id\)/);
   assert.match(migration, /for update skip locked/);
   assert.match(migration, /lease_expires_at/);
-  assert.match(migration, /enable row level security/);
-  assert.doesNotMatch(migration, /create policy/i);
+  const schema = await source("database/migrations/001_initial_schema.sql");
+  assert.match(schema, /unique \(owner_id, automation_run_id\)/);
+  assert.match(schema, /discord_automation_notifications/);
   assert.match(repository, /on conflict\(owner_id,automation_run_id\) do nothing/);
 });

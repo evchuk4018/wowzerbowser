@@ -62,17 +62,18 @@ test("calculates a balanced preview and preserves both desktop columns", () => {
 });
 
 test("wires the PDF preview through the workspace and responsive shell", async () => {
-  const [workspace, panel, response, activity, styles] = await Promise.all([
+  const [workspace, previews, panel, response, activity, styles] = await Promise.all([
     readFile(new URL("../app/chat/chat-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/use-chat-previews.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/pdf-preview-panel.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/assistant-response.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/assistant-activity.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/styles/pdf-preview.css", import.meta.url), "utf8"),
   ]);
 
-  assert.match(workspace, /fetchChatArtifact\(artifact\)/);
-  assert.match(workspace, /URL\.createObjectURL\(blob\)/);
-  assert.match(workspace, /URL\.revokeObjectURL/);
+  assert.match(previews, /fetchChatArtifact\(artifact\)/);
+  assert.match(previews, /URL\.createObjectURL\(blob\)/);
+  assert.match(previews, /URL\.revokeObjectURL/);
   assert.match(workspace, /onOpenArtifact=\{openArtifactPreview\}/);
   assert.match(panel, /role="separator"/);
   assert.match(panel, /ArrowLeft/);

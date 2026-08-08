@@ -9,7 +9,7 @@ import {
   type RuntimeConfigResponse,
   type RuntimeConfigValues,
 } from "../../lib/runtime-config-protocol";
-import { chatModelIdentity, type ChatModelInfo, type ChatModelRef } from "../../lib/chat-protocol";
+import { chatModelIdentity, type ChatModelInfo, type ChatModelRef } from "../../lib/chat-model-protocol";
 
 const CATEGORY_LABELS: Record<RuntimeConfigDescriptor["category"], string> = {
   search: "Search",

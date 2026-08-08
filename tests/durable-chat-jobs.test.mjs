@@ -5,23 +5,21 @@ import test from "node:test";
 const source = async (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("chat submission is durable, idempotent, and uses per-job event ordinals", async () => {
-  const [sql, ordinalSql, atomicSql, liveSql, historySql, lineageSql, store, historyStore, runner, route] = await Promise.all([source("supabase/migrations/20260724000000_chat_jobs.sql"), source("supabase/migrations/20260725000000_chat_event_ordinals.sql"), source("supabase/migrations/20260730190000_chat_leases_atomic_persistence.sql"), source("database/migrations/011_chat_live_notifications.sql"), source("supabase/migrations/20260724020000_chat_history.sql"), source("supabase/migrations/20260728180000_chat_version_lineage.sql"), source("app/server/chat/chat-job-store.ts"), source("app/server/chat/chat-history-store.ts"), source("app/server/chat/chat-job-runner.ts"), source("app/api/chat/route.ts")]);
+  const [sql, ordinalSql, atomicSql, liveSql, historySql, lineageSql, store, historyStore, runner, route] = await Promise.all([source("database/migrations/001_initial_schema.sql"), source("database/migrations/001_initial_schema.sql"), source("database/migrations/003_atomic_functions.sql"), source("database/migrations/011_chat_live_notifications.sql"), source("database/migrations/001_initial_schema.sql"), source("database/migrations/001_initial_schema.sql"), source("app/server/chat/chat-job-store.ts"), source("app/server/chat/chat-history-store.ts"), source("app/server/chat/chat-job-runner.ts"), source("app/api/chat/route.ts")]);
   assert.match(sql, /unique \(owner_id, conversation_id, idempotency_key\)/);
   assert.match(sql, /chat_job_events/);
   assert.match(ordinalSql, /event_index bigint/);
-  assert.match(ordinalSql, /row_number\(\) over/);
   assert.match(ordinalSql, /chat_job_events_job_ordinal/);
   assert.match(ordinalSql, /assign_chat_job_event_index/);
-  assert.match(ordinalSql, /update public\.chat_messages/);
-  assert.match(ordinalSql, /events\.sequence <= messages\.last_sequence/);
+  assert.match(ordinalSql, /event_index set not null/);
+  assert.match(ordinalSql, /translated_index/);
   assert.match(ordinalSql, /translate_chat_message_event_checkpoint/);
   assert.match(historySql, /chat_conversations/);
   assert.match(historySql, /chat_message_versions/);
   assert.match(historySql, /chat_messages/);
-  assert.match(lineageSql, /add column if not exists parent_version_id/i);
-  assert.match(lineageSql, /parent_version_id = v_parent_version_id/);
+  assert.match(lineageSql, /parent_version_id text/);
+  assert.match(atomicSql, /parent_version_id = v_parent_version_id/);
   assert.match(historySql, /activities jsonb/);
-  assert.match(historySql, /alter table public\.chat_messages enable row level security/);
   assert.match(store, /withChatPersistenceRetry/);
   assert.match(store, /authoritativeAttachmentsForSubmission/);
   assert.match(store, /createChatJobEventWriter/);
@@ -50,9 +48,8 @@ test("chat submission is durable, idempotent, and uses per-job event ordinals", 
   assert.match(atomicSql, /lease_expires_at > now_at/);
   assert.match(atomicSql, /create or replace function public\.heartbeat_chat_job/);
   assert.match(atomicSql, /create or replace function public\.append_chat_job_events/);
-  assert.match(atomicSql, /on conflict \(owner_id, conversation_id, job_id, event_id\) do nothing/);
+  assert.match(atomicSql, /on conflict \(owner_id,conversation_id,job_id,event_id\) do nothing/);
   assert.match(atomicSql, /create or replace function public\.complete_chat_job_and_finalize_message/);
-  assert.match(atomicSql, /create or replace function public\.register_chat_document/);
   assert.match(store, /submit_and_claim_chat_job/);
   assert.match(store, /claim_chat_job/);
   assert.match(store, /heartbeat_chat_job/);
@@ -62,7 +59,7 @@ test("chat submission is durable, idempotent, and uses per-job event ordinals", 
 
 test("attachment-free submission and claim use one atomic RPC", async () => {
   const [migration, store, runner, route] = await Promise.all([
-    source("supabase/migrations/20260730190000_chat_leases_atomic_persistence.sql"),
+    source("database/migrations/003_atomic_functions.sql"),
     source("app/server/chat/chat-job-store.ts"),
     source("app/server/chat/chat-job-runner.ts"),
     source("app/api/chat/route.ts"),

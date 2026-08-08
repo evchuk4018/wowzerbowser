@@ -9,17 +9,7 @@ import { downloadAuthorizedDocumentBytes } from "../chat/chat-document-store";
 
 const MAX_STORAGE_OBJECT_BYTES = DOCUMENT_PROJECT_LIMITS.maxFileBytes;
 
-/**
- * The revision source path is now represented by a UUID-keyed storage object.
- * Keep this helper as a compatibility boundary for callers that need a
- * logical label, but never use the returned value as a filesystem path.
- */
-export function revisionSourceStoragePath(input: { relativePath: string }): string {
-  return `revision-source:${input.relativePath}`;
-}
-
-export function createDocumentProjectStore(_unusedDependency?: unknown) {
-  void _unusedDependency;
+export function createDocumentProjectStore() {
   return {
     async createProject(input: { ownerId: string; conversationId: string; projectId: string; title: string; origin?: "generated" | "uploaded" }) {
       await query("insert into chat_document_projects(owner_id,conversation_id,project_id,title,origin) values($1,$2,$3,$4,$5)", [databaseOwnerId(input.ownerId), input.conversationId, input.projectId, input.title, input.origin ?? "generated"]);

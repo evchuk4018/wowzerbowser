@@ -313,10 +313,11 @@ test("collapses authenticated chat startup into one bootstrap request", async ()
 });
 
 test("keeps DeepSeek access server-side and uses the V4 thinking contract", async () => {
-  const [page, client, protocol, adapter, adapterConfig, messages, route, modelsRoute, envExample] = await Promise.all([
+  const [page, client, protocol, modelProtocol, adapter, adapterConfig, messages, route, modelsRoute, envExample] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/chat-service.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/chat-protocol.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/chat-model-protocol.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/providers/deepseek/deepseek-adapter.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/providers/deepseek/deepseek-client-config.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/providers/deepseek/deepseek-messages.ts", import.meta.url), "utf8"),
@@ -328,8 +329,8 @@ test("keeps DeepSeek access server-side and uses the V4 thinking contract", asyn
   assert.match(envExample, /^DEEPSEEK_API_KEY=$/m);
   assert.doesNotMatch(page, /api\.deepseek\.com|DEEPSEEK_API_KEY|@supabase\/supabase-js/);
   assert.doesNotMatch(client, /api\.deepseek\.com|DEEPSEEK_API_KEY|@supabase\/supabase-js/);
-  assert.match(protocol, /deepseek-v4-flash/);
-  assert.match(protocol, /deepseek-v4-pro/);
+  assert.match(modelProtocol, /deepseek-v4-flash/);
+  assert.match(modelProtocol, /deepseek-v4-pro/);
   assert.match(protocol, /reasoningEffort/);
   assert.match(protocol, /systemPrompt/);
   assert.match(protocol, /userPresence/);
@@ -637,7 +638,7 @@ test("validates and preserves ordered assistant tool rounds", () => {
 });
 
 test("keeps Python execution isolated, persistent, bounded, and server-only", async () => {
-  const [executor, tool, manifest, streamService, artifactStore, artifactRoute, client, activity, envExample, packageJson, workerDockerfile, workerSource, compose] =
+  const [executor, tool, manifest, streamService, artifactStore, artifactRoute, client, activity, pythonCode, envExample, packageJson, workerDockerfile, workerSource, compose] =
     await Promise.all([
       readFile(new URL("../app/server/python/local-python-executor.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/server/agent/python-tool.ts", import.meta.url), "utf8"),
@@ -647,6 +648,7 @@ test("keeps Python execution isolated, persistent, bounded, and server-only", as
       readFile(new URL("../app/api/chat/artifacts/[artifactId]/route.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/chat/chat-service.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/chat/assistant-activity.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../app/chat/assistant-python-code.tsx", import.meta.url), "utf8"),
       readFile(new URL("../.env.example", import.meta.url), "utf8"),
       readFile(new URL("../package.json", import.meta.url), "utf8"),
       readFile(new URL("../docker/python-worker/Dockerfile", import.meta.url), "utf8"),
@@ -692,8 +694,8 @@ test("keeps Python execution isolated, persistent, bounded, and server-only", as
   assert.match(activity, /aria-expanded=\{open\}/);
   assert.match(activity, /Created \{artifact\.name\}/);
   assert.match(activity, /pythonSourceFor/);
-  assert.match(activity, /filename: "script\.py"/);
-  assert.match(activity, /className="python-source"/);
+  assert.match(pythonCode, /filename: "script\.py"/);
+  assert.match(pythonCode, /className="python-source"/);
   assert.match(activity, /className="python-output"/);
   assert.match(activity, /phases = activities\.reduce/);
   assert.doesNotMatch(activity, /JSON\.stringify\(activity\.call, null, 2\)/);

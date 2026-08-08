@@ -34,7 +34,7 @@ test("recall adapter uses Qwen Flash without reasoning and treats conversation d
 test("chat orchestration registers recall usage and both tool definitions", async () => {
   const service = await source("app/chat/chat-server-service.ts");
   const usage = await source("lib/usage-protocol.ts");
-  const migration = await source("supabase/migrations/20260728100000_chat_recall_usage.sql");
+  const migration = await source("database/migrations/001_initial_schema.sql");
   assert.match(service, /chatMemoryToolDefinitions/);
   assert.match(service, /executeChatMemoryTool/);
   assert.match(service, /requestKind: "chat_recall"/);

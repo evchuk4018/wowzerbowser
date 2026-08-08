@@ -1,5 +1,31 @@
 import { CHAT_SOURCE_SNIPPET_MAX_LENGTH, sourceForUrl, type ChatCitation, type ChatSource } from "./chat-citations";
 import type { TodoList } from "./todo-protocol";
+import {
+  CHAT_PROVIDERS,
+  CHAT_REASONING_EFFORTS,
+  DEFAULT_CHAT_MODELS,
+  chatModelIdentity,
+  isChatModelRef,
+  type ChatModelPricing,
+  type ChatModelRef,
+  type ChatProvider,
+  type ChatReasoningEffort,
+} from "./chat-model-protocol";
+
+export {
+  CHAT_PROVIDERS,
+  CHAT_REASONING_EFFORTS,
+  DEFAULT_CHAT_MODELS,
+  chatModelIdentity,
+  isChatModelRef,
+};
+export type {
+  ChatModelInfo,
+  ChatModelPricing,
+  ChatModelRef,
+  ChatProvider,
+  ChatReasoningEffort,
+} from "./chat-model-protocol";
 
 export const DEFAULT_CHAT_SYSTEM_PROMPT = `<bobert_behavior>
 
@@ -42,10 +68,6 @@ bobert may use Markdown for structure and readability, and LaTeX for mathematica
 When tools are available, bobert may call phase_break to begin a genuinely new stage of work. A phase break may include a brief userUpdate when a progress update would be useful before continuing. bobert uses phase breaks for meaningful changes of objective or work stage, not after every tool call or for cosmetic separation.
 
 </bobert_behavior>`;
-export const CHAT_PROVIDERS = ["deepseek", "openrouter"] as const;
-export type ChatProvider = (typeof CHAT_PROVIDERS)[number];
-export type ChatModelRef = { provider: ChatProvider; model: string };
-
 const MAX_PROMPT_LENGTH = 12000;
 const MAX_TRACE_LENGTH = 128 * 1024;
 export const CHAT_RESEARCH_TRACE_MAX_ENTRIES = 128;
@@ -54,9 +76,6 @@ export const CHAT_RESEARCH_TRACE_LABEL_MAX_LENGTH = 512;
 export const CHAT_RESEARCH_TRACE_DETAIL_MAX_LENGTH = 4_000;
 const MAX_MESSAGES = 100;
 const MAX_SERIALIZED_HISTORY_LENGTH = 1024 * 1024;
-
-export const CHAT_REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
-export type ChatReasoningEffort = (typeof CHAT_REASONING_EFFORTS)[number];
 
 export type ChatMessageInput = {
   role: "user" | "assistant";
@@ -327,24 +346,6 @@ export type ChatLiveStreamEnvelope =
   | { type: "event"; event: SequencedChatStreamEvent }
   | { type: "terminal"; terminal: ChatJobTerminalResponse };
 
-export type ChatModelInfo = {
-  ref: ChatModelRef;
-  displayName: string;
-  description: string | null;
-  author: string | null;
-  architecture: string | null;
-  inputModalities: string[];
-  outputModalities: string[];
-  toolSupport: boolean;
-  supportedParameters: string[];
-  reasoningRequired: boolean;
-  supportedEfforts: ChatReasoningEffort[];
-  defaultReasoningEffort: ChatReasoningEffort | null;
-  contextLength: number;
-  createdAt: string | null;
-  pricing: ChatModelPricing | null;
-};
-
 export type DeepResearchPlanItem = {
   id: string;
   title: string;
@@ -364,14 +365,6 @@ export type ChatResearchTraceEntry = {
   label: string;
   status: "running" | "completed" | "failed";
   detail?: string;
-};
-
-export type ChatModelPricing = {
-  inputUsdPerMillion: number | null;
-  cachedInputUsdPerMillion: number | null;
-  outputUsdPerMillion: number | null;
-  requestUsd: number | null;
-  reasoningUsdPerMillion: number | null;
 };
 
 export type ChatRunCostSource = "exact" | "estimated" | "unpriced";
@@ -457,54 +450,6 @@ export function normalizeChatResearchTrace(value: unknown): ChatResearchTraceEnt
     }
     return [entry];
   });
-}
-
-export const DEFAULT_CHAT_MODELS: ChatModelInfo[] = [
-  {
-    ref: { provider: "deepseek", model: "deepseek-v4-flash" },
-    displayName: "DeepSeek V4 Flash",
-    description: "Fast built-in general-purpose chat model.",
-    author: "DeepSeek",
-    architecture: "DeepSeek V4",
-    inputModalities: ["text"],
-    outputModalities: ["text"],
-    toolSupport: true,
-    supportedParameters: ["tools", "reasoning"],
-    reasoningRequired: false,
-    supportedEfforts: ["high", "max"],
-    defaultReasoningEffort: "high",
-    contextLength: 1_000_000,
-    createdAt: null,
-    pricing: { inputUsdPerMillion: 0.14, cachedInputUsdPerMillion: 0.0028, outputUsdPerMillion: 0.28, requestUsd: null, reasoningUsdPerMillion: 0.28 },
-  },
-  {
-    ref: { provider: "deepseek", model: "deepseek-v4-pro" },
-    displayName: "DeepSeek V4 Pro",
-    description: "Built-in high-capability general-purpose chat model.",
-    author: "DeepSeek",
-    architecture: "DeepSeek V4",
-    inputModalities: ["text"],
-    outputModalities: ["text"],
-    toolSupport: true,
-    supportedParameters: ["tools", "reasoning"],
-    reasoningRequired: false,
-    supportedEfforts: ["high", "max"],
-    defaultReasoningEffort: "high",
-    contextLength: 1_000_000,
-    createdAt: null,
-    pricing: { inputUsdPerMillion: 0.435, cachedInputUsdPerMillion: 0.003625, outputUsdPerMillion: 0.87, requestUsd: null, reasoningUsdPerMillion: 0.87 },
-  },
-];
-
-export function chatModelIdentity(ref: ChatModelRef): string {
-  return `${ref.provider}:${ref.model}`;
-}
-
-export function isChatModelRef(value: unknown): value is ChatModelRef {
-  if (!isRecord(value)) return false;
-  return CHAT_PROVIDERS.includes(value.provider as ChatProvider)
-    && typeof value.model === "string"
-    && /^[a-zA-Z0-9._:/-]{1,256}$/.test(value.model);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

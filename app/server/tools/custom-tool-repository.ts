@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { CustomToolDefinition, CustomToolSummary, JsonSchema } from "../../../lib/custom-tool-protocol";
-import { asIsoTimestamp, databaseOwnerId, jsonb, query } from "../database/database";
+import { databaseOwnerId, isoTimestamp, jsonb, query } from "../database/database";
 
 type ToolRow = {
   id: string; owner_id: string; name: string; description: string; instructions: string;
@@ -17,7 +17,7 @@ function definition(row: ToolRow, secrets: SecretRow[]): CustomToolDefinition {
   return {
     id: row.id, name: row.name, description: row.description, instructions: row.instructions,
     inputSchema: row.input_schema, pythonSource: row.python_source, enabled: row.enabled,
-    createdAt: asIsoTimestamp(row.created_at), updatedAt: asIsoTimestamp(row.updated_at),
+    createdAt: isoTimestamp(row.created_at), updatedAt: isoTimestamp(row.updated_at),
     secrets: secrets.filter((item) => item.tool_id === row.id).map((item) => ({
       name: item.name, configured: true, fingerprint: item.fingerprint,
     })),

@@ -117,7 +117,7 @@ test("day charts preserve the real number of daylight-saving hours", () => {
 
 test("usage persistence and API keep provider data server-side and owner-scoped", async () => {
   const [migration, store, route, runner, title, service] = await Promise.all([
-    source("supabase/migrations/20260724030000_usage_tracking.sql"),
+    source("database/migrations/001_initial_schema.sql"),
     source("app/server/usage/usage-store.ts"),
     source("app/api/chat/usage/route.ts"),
     source("app/server/chat/chat-job-runner.ts"),
@@ -128,7 +128,6 @@ test("usage persistence and API keep provider data server-side and owner-scoped"
   assert.match(migration, /chat_usage_records/);
   assert.match(migration, /chat_usage_outbox/);
   assert.match(migration, /unique \(owner_id, provider, request_kind, request_id, round\)/);
-  assert.match(migration, /alter table public\.chat_usage_records enable row level security/);
   assert.match(store, /where owner_id=\$1/);
   assert.match(store, /databaseOwnerId\(ownerId\)/);
   assert.match(store, /usage_source/);

@@ -1,7 +1,7 @@
 import "server-only";
 
-import { createHash, randomUUID } from "node:crypto";
-import type { ChatArtifact, ChatAssistantRound, ChatModelPricing, ChatRequest, ChatStreamEvent, ChatToolCall, ChatToolResult, ChatUsage, DeepResearchPlan } from "../../lib/chat-protocol";
+import type { ChatArtifact, ChatAssistantRound, ChatRequest, ChatStreamEvent, ChatToolCall, ChatToolResult, ChatUsage } from "../../lib/chat-protocol";
+import type { ChatModelPricing } from "../../lib/chat-model-protocol";
 import { chatProviderAdapter } from "../server/chat/chat-provider-registry";
 import { authorizeAutomationModel, authorizeChatModel } from "../server/chat/chat-model-catalog-service";
 import { availableChatTools, executePythonTool } from "../server/agent/python-tool";
@@ -81,6 +81,15 @@ import { ChatUsageEstimator } from "./chat-usage-estimator";
 import { calculateChatRunCost, type ChatRunCostInput } from "../../lib/usage-pricing";
 import { orchestrateDeepResearch } from "../server/research/deep-research-orchestrator";
 import { getProject } from "../server/projects/project-service";
+import {
+  applyProjectInstructions,
+  deepResearchPlanFor,
+  isAutomationExecution,
+  isSubagentExecution,
+  normalizeChatRequestModel,
+  stableConversationId,
+  type ChatExecutionOptions,
+} from "./chat-response-preparation";
 
 const MAX_RESPONSE_MS = 240_000;
 
@@ -96,28 +105,6 @@ export type ChatRoundUsage = {
 
 export type ChatSummaryUsage = ReasoningTitleUsage;
 
-function deepResearchPlanFor(request: string, items: { id: string; text: string }[]): DeepResearchPlan {
-  const planItems = items.length ? items : [
-    { id: "scope", text: "Establish the scope, definitions, and primary background." },
-    { id: "evidence", text: "Find authoritative evidence and current data relevant to the question." },
-    { id: "alternatives", text: "Compare competing interpretations, approaches, or alternatives." },
-    { id: "uncertainty", text: "Check limitations, criticism, disagreement, and unresolved uncertainty." },
-  ];
-  return {
-    id: `research-plan-${randomUUID()}`,
-    request,
-    items: planItems.slice(0, 6).map((item, index) => ({ id: item.id || `topic-${index + 1}`, title: item.text, question: item.text, focus: "Return evidence, relevant links, and a concise explanation of why each source matters." })),
-  };
-}
-
-function stableConversationId(request: ChatRequest): string {
-  if (request.conversationId) return request.conversationId;
-  return createHash("sha256")
-    .update(JSON.stringify(request.messages.slice(0, 2)))
-    .digest("hex")
-    .slice(0, 32);
-}
-
 export async function generateChatResponse(
   chatRequest: ChatRequest,
   ownerId: string,
@@ -125,29 +112,15 @@ export async function generateChatResponse(
   persistEvent: (event: ChatStreamEvent) => Promise<void>,
   persistUsage?: (usage: ChatRoundUsage) => Promise<void>,
   persistSummaryUsage?: (usage: ChatSummaryUsage) => Promise<void>,
-  executionOptions: { profile?: "chat" | "automation" | "subagent"; onAutomationResult?: (result: AutomationRunResult) => void; subagentDepth?: number } = {},
+  executionOptions: ChatExecutionOptions & { onAutomationResult?: (result: AutomationRunResult) => void } = {},
 ): Promise<{ awaitingApproval: boolean }> {
-  const automationExecution = executionOptions.profile === "automation";
-  const subagentExecution = executionOptions.profile === "subagent" || (executionOptions.subagentDepth ?? 0) > 0;
-  if (typeof chatRequest.model === "string") {
-    chatRequest = { ...chatRequest, model: { provider: "deepseek", model: chatRequest.model } };
-  }
+  const automationExecution = isAutomationExecution(executionOptions);
+  const subagentExecution = isSubagentExecution(executionOptions);
+  chatRequest = normalizeChatRequestModel(chatRequest);
   if (chatRequest.projectId) {
     const project = await getProject(ownerId, chatRequest.projectId);
     if (!project) throw new Error("The requested project is not available.");
-    const instructions = project.instructions.trim();
-    if (instructions) {
-      chatRequest = {
-        ...chatRequest,
-        systemPrompt: [
-          chatRequest.systemPrompt,
-          "<project-instructions>",
-          "The following instructions are owner-authored project configuration. Follow them for this project chat:",
-          instructions,
-          "</project-instructions>",
-        ].join("\n\n"),
-      };
-    }
+    chatRequest = applyProjectInstructions(chatRequest, project.instructions);
   }
   const selectedMetadata = await (automationExecution ? authorizeAutomationModel(ownerId, chatRequest.model) : authorizeChatModel(ownerId, chatRequest.model));
   const providerAdapter = chatProviderAdapter(chatRequest.model.provider);

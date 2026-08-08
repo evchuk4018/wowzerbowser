@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { DreamingAction, DreamingSource } from "../../../lib/user-memory";
-import { asIsoTimestamp, databaseOwnerId, jsonb, query } from "../database/database";
+import { databaseOwnerId, isoTimestamp, jsonb, query } from "../database/database";
 
 export type DreamingRun = {
   id: string; ownerId: string; status: "queued" | "running" | "completed" | "failed";
@@ -86,7 +86,7 @@ export async function getDreamingConsolidationSources(ownerId: string, runIds: s
   if (!jobs.length) return [];
   const summaries = await query<{ source_job_id: string; result_summary: string | null; status: string }>("select source_job_id,result_summary,status from chat_summary_jobs where owner_id=$1 and source_job_id=any($2::text[])", [owner, jobs]);
   const summaryByJob = new Map(summaries.filter((row) => row.status === "completed" && typeof row.result_summary === "string").map((row) => [row.source_job_id, row.result_summary!]));
-  return rows.flatMap((row) => summaryByJob.has(row.job_id) ? [{ jobId: row.job_id, chatId: row.conversation_id, completedAt: asIsoTimestamp(row.completed_at), summary: summaryByJob.get(row.job_id) ?? "" }] : []);
+  return rows.flatMap((row) => summaryByJob.has(row.job_id) ? [{ jobId: row.job_id, chatId: row.conversation_id, completedAt: isoTimestamp(row.completed_at), summary: summaryByJob.get(row.job_id) ?? "" }] : []);
 }
 
 export async function completeDreamingConsolidation(ownerId: string, cycleNumber: number, prompt: string, model: string): Promise<void> {
@@ -122,7 +122,7 @@ export async function getDreamingSources(ownerId: string, runId: string): Promis
   const summaries = await query<{ source_job_id: string; result_summary: string | null; status: string }>("select source_job_id,result_summary,status from chat_summary_jobs where owner_id=$1 and source_job_id=any($2::text[])", [owner, jobs]);
   const summaryByJob = new Map(summaries.filter((row) => row.status === "completed" && typeof row.result_summary === "string").map((row) => [row.source_job_id, row.result_summary!]));
   if (newestRows.some((row) => !summaryByJob.has(row.job_id))) return null;
-  return newestRows.map((row) => ({ jobId: row.job_id, chatId: row.conversation_id, completedAt: asIsoTimestamp(row.completed_at), summary: summaryByJob.get(row.job_id) ?? "" }));
+  return newestRows.map((row) => ({ jobId: row.job_id, chatId: row.conversation_id, completedAt: isoTimestamp(row.completed_at), summary: summaryByJob.get(row.job_id) ?? "" }));
 }
 
 export async function beginDreamingAttempt(ownerId: string, runId: string, expectedAttempt: number): Promise<boolean> {

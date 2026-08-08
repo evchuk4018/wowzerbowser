@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { SkillDefinition, SkillMutation } from "../../../lib/skill-protocol";
-import { asIsoTimestamp, databaseOwnerId, query } from "../database/database";
+import { databaseOwnerId, isoTimestamp, query } from "../database/database";
 
 export type SkillRow = {
   id: string;
@@ -29,8 +29,8 @@ export function skillValue(row: SkillRow): SkillDefinition {
     instructions: row.instructions,
     source: row.builtin_key ? "builtin" : "custom",
     customized: row.customized,
-    createdAt: asIsoTimestamp(row.created_at),
-    updatedAt: asIsoTimestamp(row.updated_at),
+    createdAt: isoTimestamp(row.created_at),
+    updatedAt: isoTimestamp(row.updated_at),
   };
 }
 

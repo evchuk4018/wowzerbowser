@@ -85,14 +85,14 @@ test("read_skill returns only an available requested skill", () => {
 
 test("skill persistence and routes remain owner-scoped and server-only", async () => {
   const [migration, repository, route, itemRoute, resetRoute] = await Promise.all([
-    source("supabase/migrations/20260730000000_user_skills.sql"),
+    source("database/migrations/001_initial_schema.sql"),
     source("app/server/skills/skill-repository.ts"),
     source("app/api/skills/route.ts"),
     source("app/api/skills/[skillId]/route.ts"),
     source("app/api/skills/[skillId]/reset/route.ts"),
   ]);
-  assert.match(migration, /owner_id uuid not null references auth\.users\(id\) on delete cascade/);
-  assert.match(migration, /enable row level security/);
+  assert.match(migration, /create table if not exists public\.user_skills/);
+  assert.match(migration, /owner_id uuid not null/);
   assert.match(migration, /where deleted_at is null/);
   assert.match(repository, /where owner_id=\$1/);
   assert.match(repository, /databaseOwnerId\(ownerId\)/);

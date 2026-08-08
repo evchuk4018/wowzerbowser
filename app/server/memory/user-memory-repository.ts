@@ -9,7 +9,7 @@ import {
   type UserMemoryTree,
   type UserMemoryWriter,
 } from "../../../lib/user-memory";
-import { asIsoTimestamp, databaseOwnerId, jsonb, query } from "../database/database";
+import { databaseOwnerId, isoTimestamp, jsonb, query } from "../database/database";
 
 export type MemoryWriteContext = {
   ownerId: string;
@@ -67,11 +67,11 @@ function pathsFor(rows: FolderRow[]): Map<string, string[]> {
 }
 
 function folderValue(row: FolderRow, paths: Map<string, string[]>): UserMemoryFolder {
-  return { id: row.id, parentId: row.parent_id, name: row.name, path: paths.get(row.id)!, createdAt: asIsoTimestamp(row.created_at) };
+  return { id: row.id, parentId: row.parent_id, name: row.name, path: paths.get(row.id)!, createdAt: isoTimestamp(row.created_at) };
 }
 
 function memoryValue(row: MemoryRow): UserMemory {
-  return { id: row.id, folderId: row.folder_id, content: row.content, sourceChatId: row.source_chat_id, sourceJobId: row.source_job_id, writer: row.writer, createdAt: asIsoTimestamp(row.created_at), updatedAt: asIsoTimestamp(row.updated_at) };
+  return { id: row.id, folderId: row.folder_id, content: row.content, sourceChatId: row.source_chat_id, sourceJobId: row.source_job_id, writer: row.writer, createdAt: isoTimestamp(row.created_at), updatedAt: isoTimestamp(row.updated_at) };
 }
 
 export async function getUserMemoryTree(ownerId: string): Promise<UserMemoryTree> {
@@ -112,7 +112,7 @@ export async function ensureMemoryFolderPath(context: MemoryWriteContext, rawPat
       }
     }
     parentId = row.id;
-    result = { id: row.id, parentId: row.parent_id, name: row.name, path: [], createdAt: asIsoTimestamp(row.created_at) };
+    result = { id: row.id, parentId: row.parent_id, name: row.name, path: [], createdAt: isoTimestamp(row.created_at) };
   }
   return result;
 }

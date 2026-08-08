@@ -8,15 +8,14 @@ async function source(path) {
 }
 
 test("chat search contract is owner-scoped across title, summary, and raw messages", async () => {
-  const migration = await source("supabase/migrations/20260728010000_chat_search.sql");
+  const migration = await source("database/migrations/003_atomic_functions.sql");
   assert.match(migration, /p_owner_id uuid/);
-  assert.match(migration, /conversations\.owner_id = p_owner_id/);
+  assert.match(migration, /c\.owner_id=p_owner_id/);
   assert.match(migration, /chat_conversation_summaries/);
   assert.match(migration, /chat_messages/);
-  assert.match(migration, /conversations\.title/);
+  assert.match(migration, /c\.title/);
   assert.match(migration, /searchable_text not like/);
-  assert.match(migration, /order by conversation_text\.updated_at desc/);
-  assert.match(migration, /grant execute .* service_role/);
+  assert.match(migration, /order by updated_at desc/);
 });
 
 test("search route validates the bounded query and keeps authorization at the route boundary", async () => {

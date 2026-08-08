@@ -94,7 +94,7 @@ test("Qwen summary adapter preserves retryable upstream status", async () => {
 
 test("summary integration remains server-only and is owned by the worker", async () => {
   const [migration, service, route, worker, protocol, history] = await Promise.all([
-    source("supabase/migrations/20260728000000_chat_summaries.sql"),
+    source("database/migrations/001_initial_schema.sql"),
     source("app/server/chat/chat-summary-service.ts"),
     source("app/api/chat/route.ts"),
     source("scripts/background-worker.ts"),

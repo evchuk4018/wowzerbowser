@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { authFetch } from "../auth/auth-fetch";
-import { DEFAULT_CHAT_MODELS, chatModelIdentity, type ChatModelInfo } from "../../lib/chat-protocol";
+import { DEFAULT_CHAT_MODELS, chatModelIdentity, type ChatModelInfo } from "../../lib/chat-model-protocol";
 
 type CatalogModel = ChatModelInfo & { enabled: boolean };
 type CatalogResponse = {
