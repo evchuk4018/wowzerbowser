@@ -22,6 +22,7 @@ export const USAGE_REQUEST_KINDS = [
   "subagent",
   "automation",
   "context_router",
+  "voice_transcription",
 ] as const;
 export type UsageRequestKind = (typeof USAGE_REQUEST_KINDS)[number];
 

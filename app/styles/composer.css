@@ -440,6 +440,45 @@
   font-weight: 300;
 }
 
+.voice-button {
+  display: grid;
+  width: 31px;
+  height: 31px;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.voice-button:hover:not(:disabled),
+.voice-button--recording {
+  background: rgba(207, 73, 96, .16);
+  color: #ff9da9;
+}
+
+.voice-button:disabled {
+  cursor: default;
+  opacity: .45;
+}
+
+.voice-icon,
+.voice-stop-icon {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.voice-stop-icon {
+  fill: currentColor;
+  stroke: none;
+}
+
 .send-button {
   width: 34px;
   height: 34px;

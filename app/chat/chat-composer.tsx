@@ -26,9 +26,17 @@ import type { TodoList } from "../../lib/todo-protocol";
 import { CHAT_MODE_COMMANDS, chatModeCommandAtCaret, clearChatModeCommand, type ChatMode } from "../../lib/chat-modes";
 import { filterChatComposerCommands, moveChatCommandIndex, removeChatCommandToken, CHAT_PROJECT_COMMAND as PROJECT_COMMAND } from "../../lib/chat-command-picker";
 import type { ChatProject } from "../../lib/chat-project-protocol";
+import { appendChatVoiceTranscript, MAX_CHAT_VOICE_DURATION_MS } from "../../lib/chat-voice";
+import { transcribeChatVoice } from "./chat-service";
+import {
+  convertRecordedAudioToWav,
+  startVoiceRecording as beginVoiceRecording,
+  type VoiceRecordingSession,
+} from "./chat-voice-recorder";
 import { DocumentIcon, FolderIcon, REASONING_LABELS, documentType, formatDocumentSize } from "./chat-composer-parts";
 
 type CommandView = "commands" | "projects";
+type VoiceState = "idle" | "recording" | "transcribing";
 
 export type ChatComposerProps = {
   draft: string;
@@ -152,17 +160,23 @@ export function ChatComposer({
   const [attachments, setAttachments] = useState<PendingChatImage[]>([]);
   const [documents, setDocuments] = useState<PendingChatDocument[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [expanded, setExpanded] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentsRef = useRef(attachments);
   const documentsRef = useRef(documents);
+  const voiceSessionRef = useRef<VoiceRecordingSession | null>(null);
+  const voiceTimerRef = useRef<number | null>(null);
+  const voiceRequestControllerRef = useRef<AbortController | null>(null);
   const disabled = isStreaming || isSubmittingAttachments || startupPending;
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [commandToken, setCommandToken] = useState<{ start: number; end: number; query: string } | null>(null);
   const [commandView, setCommandView] = useState<CommandView>("commands");
   const [commandIndex, setCommandIndex] = useState(0);
   const [projectIndex, setProjectIndex] = useState(0);
-  const projectPickerDisabled = disabled || isPreparingAttachments || Boolean(assigningProjectId);
+  const composerDisabled = disabled || voiceState !== "idle";
+  const projectPickerDisabled = composerDisabled || isPreparingAttachments || Boolean(assigningProjectId);
   const matchingCommands = filterChatComposerCommands(commandToken?.query ?? "");
   const activeCommandIndex = Math.min(commandIndex, Math.max(0, matchingCommands.length - 1));
   const activeProjectIndex = Math.min(projectIndex, Math.max(0, projects.length - 1));
@@ -198,6 +212,59 @@ export function ChatComposer({
       if (!document.consumed) void onCancelDocumentPreparation(document);
     });
   }, [onCancelDocumentPreparation]);
+
+  useEffect(() => () => {
+    if (voiceTimerRef.current !== null) window.clearTimeout(voiceTimerRef.current);
+    voiceRequestControllerRef.current?.abort();
+    voiceSessionRef.current?.cancel();
+  }, []);
+
+  const stopVoiceInput = async () => {
+    const session = voiceSessionRef.current;
+    if (!session) return;
+    voiceSessionRef.current = null;
+    if (voiceTimerRef.current !== null) {
+      window.clearTimeout(voiceTimerRef.current);
+      voiceTimerRef.current = null;
+    }
+    setVoiceState("transcribing");
+    try {
+      const recording = await session.stop();
+      const wav = await convertRecordedAudioToWav(recording);
+      const controller = new AbortController();
+      voiceRequestControllerRef.current = controller;
+      const answer = await transcribeChatVoice(wav, controller.signal);
+      setDraft((current) => appendChatVoiceTranscript(current, answer.transcript));
+      setVoiceError(null);
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        setVoiceError(error instanceof Error ? error.message : "The voice recording could not be transcribed.");
+      }
+    } finally {
+      voiceRequestControllerRef.current = null;
+      setVoiceState("idle");
+    }
+  };
+
+  const startVoiceInput = async () => {
+    if (composerDisabled) return;
+    setVoiceError(null);
+    try {
+      const session = await beginVoiceRecording();
+      if (disabled) {
+        session.cancel();
+        return;
+      }
+      voiceSessionRef.current = session;
+      setVoiceState("recording");
+      voiceTimerRef.current = window.setTimeout(() => {
+        void stopVoiceInput();
+      }, MAX_CHAT_VOICE_DURATION_MS);
+    } catch (error) {
+      setVoiceState("idle");
+      setVoiceError(error instanceof Error ? error.message : "Microphone access was unavailable.");
+    }
+  };
 
   const addFiles = (files: readonly File[]) => {
     if (startupPending) return;
@@ -423,7 +490,7 @@ export function ChatComposer({
                 <button
                   type="button"
                   aria-label={`Remove ${attachment.file.name || "pasted image"}`}
-                  disabled={disabled}
+                  disabled={composerDisabled}
                   onClick={() => removeAttachment(attachment.id)}
                 >
                   ×
@@ -463,7 +530,7 @@ export function ChatComposer({
                     className="composer-document-remove"
                     type="button"
                     aria-label={`Remove ${document.file.name}`}
-                    disabled={disabled}
+                    disabled={composerDisabled}
                     onClick={() => removeDocument(document.id)}
                   >
                     ×
@@ -481,7 +548,7 @@ export function ChatComposer({
                 <button
                   type="button"
                   aria-label={`Remove ${image.name || "attached image"}`}
-                  disabled={disabled}
+                  disabled={composerDisabled}
                   onClick={() => onRemovePreservedAttachment?.(image.id)}
                 >
                   ×
@@ -513,7 +580,7 @@ export function ChatComposer({
                     className="composer-document-remove"
                     type="button"
                     aria-label={`Remove ${document.name}`}
-                    disabled={disabled}
+                    disabled={composerDisabled}
                     onClick={() => onRemovePreservedDocument?.(document.id)}
                   >
                     ×
@@ -574,7 +641,7 @@ export function ChatComposer({
             type="button"
             className="attach-button"
             aria-label="Attach images, PDF, or DOCX"
-            disabled={disabled}
+            disabled={composerDisabled}
             onClick={() => fileInputRef.current?.click()}
           >
             +
@@ -652,7 +719,7 @@ export function ChatComposer({
                         aria-selected={selected}
                         className={`composer-command-option composer-project-option ${selected ? "selected" : ""}`}
                         key={project.id}
-                        disabled={Boolean(assigningProjectId)}
+                        disabled={composerDisabled || Boolean(assigningProjectId)}
                         onMouseEnter={() => setProjectIndex(index)}
                         onClick={() => void selectProject(project)}
                       >
@@ -672,7 +739,7 @@ export function ChatComposer({
               className="composer-mode-chip"
               aria-label="Disable deep research"
               aria-pressed={true}
-              disabled={disabled}
+              disabled={composerDisabled}
               onClick={() => {
                 setMode("normal");
                 setDraft((current) => clearChatModeCommand(current));
@@ -689,7 +756,7 @@ export function ChatComposer({
               aria-label="Choose model"
               aria-controls="model-options"
               aria-expanded={openMenu === "model"}
-              disabled={disabled || !models.length}
+              disabled={composerDisabled || !models.length}
               onClick={() => setOpenMenu((current) => (current === "model" ? null : "model"))}
             >
               <span className="menu-trigger-label">{selectedModel?.displayName ?? "Model"}</span>
@@ -708,7 +775,7 @@ export function ChatComposer({
                     type="button"
                     aria-pressed={chatModelIdentity(availableModel.ref) === chatModelIdentity(model)}
                     className={`composer-menu-option ${chatModelIdentity(availableModel.ref) === chatModelIdentity(model) ? "selected" : ""}`}
-                    disabled={disabled}
+                    disabled={composerDisabled}
                     onClick={() => {
                       setModel(availableModel.ref);
                       const nextThinking = availableModel.reasoningRequired || (thinking && Boolean(availableModel.supportedEfforts.length));
@@ -735,7 +802,7 @@ export function ChatComposer({
               aria-label="Choose thinking mode"
               aria-controls="thinking-options"
               aria-expanded={openMenu === "thinking"}
-              disabled={disabled || !canThink}
+              disabled={composerDisabled || !canThink}
               onClick={() => setOpenMenu((current) => (current === "thinking" ? null : "thinking"))}
             >
               <span className="menu-trigger-label">Thinking: {effectiveThinking ? effectiveEffort : "Off"}</span>
@@ -752,7 +819,7 @@ export function ChatComposer({
                   type="button"
                   aria-pressed={!thinking}
                   className={`composer-menu-option ${!thinking ? "selected" : ""}`}
-                  disabled={disabled}
+                  disabled={composerDisabled}
                   onClick={() => {
                     setThinking(false);
                     onPreferenceChange({ model, thinking: false, reasoningEffort: effort });
@@ -768,7 +835,7 @@ export function ChatComposer({
                     type="button"
                     aria-pressed={thinking && effort === supportedEffort}
                     className={`composer-menu-option ${thinking && effort === supportedEffort ? "selected" : ""}`}
-                    disabled={isStreaming}
+                    disabled={composerDisabled}
                     onClick={() => {
                       setThinking(true);
                       setEffort(supportedEffort);
@@ -783,6 +850,28 @@ export function ChatComposer({
               </div>
             )}
           </div>
+          <button
+            type="button"
+            className={`voice-button ${voiceState === "recording" ? "voice-button--recording" : ""}`}
+            aria-label={voiceState === "recording" ? "Stop recording" : voiceState === "transcribing" ? "Transcribing voice" : "Record voice message"}
+            aria-pressed={voiceState === "recording"}
+            disabled={disabled || voiceState === "transcribing"}
+            onClick={() => {
+              if (voiceState === "recording") void stopVoiceInput();
+              else void startVoiceInput();
+            }}
+          >
+            {voiceState === "recording" ? (
+              <svg className="voice-stop-icon" viewBox="0 0 16 16" aria-hidden="true">
+                <rect x="4" y="4" width="8" height="8" rx="1" />
+              </svg>
+            ) : (
+              <svg className="voice-icon" viewBox="0 0 16 16" aria-hidden="true">
+                <rect x="5" y="2" width="6" height="8" rx="3" />
+                <path d="M3 8a5 5 0 0 0 10 0M8 13v2M5.5 15h5" />
+              </svg>
+            )}
+          </button>
           {isStreaming ? (
             <button
               type="button"
@@ -799,7 +888,7 @@ export function ChatComposer({
               type="submit"
               className="send-button"
               aria-label="Send message"
-              disabled={disabled || (!draft.trim() && attachments.length === 0 && documents.length === 0 && preservedAttachments.length === 0 && preservedDocuments.length === 0)}
+              disabled={composerDisabled || (!draft.trim() && attachments.length === 0 && documents.length === 0 && preservedAttachments.length === 0 && preservedDocuments.length === 0)}
             >
               <svg className="send-icon" viewBox="0 0 16 16" aria-hidden="true">
                 <path d="M8 13V3" />
@@ -809,15 +898,17 @@ export function ChatComposer({
           )}
         </div>
       </div>
-      {(attachmentError || submissionError) && (
-        <p className="composer-error" role="alert">{attachmentError || submissionError}</p>
+      {(attachmentError || voiceError || submissionError) && (
+        <p className="composer-error" role="alert">{attachmentError || voiceError || submissionError}</p>
       )}
       {projectAssignmentError && <p className="composer-error" role="alert">{projectAssignmentError}</p>}
       {projectAssignmentStatus && <p className="helper-text composer-project-status" role="status" aria-live="polite">{projectAssignmentStatus}</p>}
-      {startupPending && !attachmentError && !submissionError && (
+      {startupPending && !attachmentError && !voiceError && !submissionError && (
         <p className="helper-text composer-startup-status" role="status">Restoring chat…</p>
       )}
-      {isPreparingAttachments && documents.length === 0 && !attachmentError && !submissionError && (
+      {voiceState === "recording" && <p className="helper-text" role="status">Recording voice...</p>}
+      {voiceState === "transcribing" && <p className="helper-text" role="status">Transcribing voice...</p>}
+      {isPreparingAttachments && documents.length === 0 && !attachmentError && !voiceError && !submissionError && (
         <p className="helper-text" role="status">Preparing image details…</p>
       )}
       <p className="helper-text">Press Enter to send · Shift + Enter for a new line</p>

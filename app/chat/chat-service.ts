@@ -16,6 +16,7 @@ import { chatTerminalEvents } from "./chat-terminal-events";
 import { waitForChatRetry } from "./chat-retry-backoff";
 import { authFetch } from "../auth/auth-fetch";
 import type { WorkspaceFile, WorkspaceSearchMatch } from "../../lib/workspace-protocol";
+import type { ChatVoiceAnswer } from "../../lib/chat-voice";
 
 async function readError(response: Response): Promise<string> {
   const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
@@ -80,6 +81,23 @@ export async function fetchChatModels(): Promise<ChatModelInfo[]> {
 
   const body = (await response.json()) as { models?: ChatModelInfo[] };
   return body.models ?? [];
+}
+
+export async function transcribeChatVoice(audio: Blob, signal?: AbortSignal): Promise<ChatVoiceAnswer> {
+  const response = await authFetch("/api/chat/transcribe", {
+    method: "POST",
+    headers: { "content-type": audio.type || "audio/wav" },
+    body: audio,
+    signal,
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  const body = await response.json() as { transcript?: unknown; model?: unknown };
+  if (typeof body.transcript !== "string" || !body.transcript.trim()) throw new Error("Voice transcription returned no text.");
+  return {
+    transcript: body.transcript,
+    model: typeof body.model === "string" && body.model ? body.model : null,
+    usage: null,
+  };
 }
 
 async function openChatStream(request: ChatRequest, signal?: AbortSignal): Promise<Response> {

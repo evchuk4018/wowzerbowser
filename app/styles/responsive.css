@@ -281,6 +281,7 @@
   }
 
   .attach-button,
+  .voice-button,
   .send-button {
     width: 32px;
     height: 30px;

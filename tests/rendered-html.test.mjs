@@ -368,6 +368,9 @@ test("keeps composer model and thinking controls accessible and responsive", asy
   assert.match(composer, /aria-label="Choose model"/);
   assert.match(composer, /aria-label="Choose thinking mode"/);
   assert.match(composer, /aria-label="Stop generating"/);
+  assert.match(composer, /aria-label=\{voiceState === "recording" \? "Stop recording"/);
+  assert.match(composer, /className=\{`voice-button/);
+  assert.match(composer, /startVoiceRecording/);
   assert.match(composer, /aria-label=\{expanded \? "Close expanded editor" : "Expand message editor"\}/);
   assert.match(composer, /className="composer-expand-icon"/);
   assert.doesNotMatch(composer, /expanded \? "↙" : "↗"/);
