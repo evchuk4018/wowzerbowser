@@ -20,6 +20,22 @@ export type RunChatJobOptions = {
   shutdownSignal?: AbortSignal;
 };
 
+export type ChatHeartbeatState = {
+  active: boolean;
+  status?: string;
+  cancelled?: boolean;
+};
+
+/**
+ * Only an authoritative lease response may stop a running chat. A failed
+ * heartbeat is transient until the database tells us otherwise.
+ */
+export function chatHeartbeatAction(state: ChatHeartbeatState): "continue" | "cancel" | "lease_lost" {
+  if (state.cancelled) return "cancel";
+  if (!state.active) return "lease_lost";
+  return "continue";
+}
+
 /**
  * The web process uses this as a small compatibility entrypoint for tests and
  * maintenance tools. Production execution passes an already-claimed job from
@@ -65,15 +81,32 @@ export async function runClaimedChatJob(
     if (heartbeatInFlight || controller.signal.aborted) return;
     heartbeatInFlight = renewChatJob(ownerId, claim.conversationId, claim.jobId, leaseToken)
       .then((state) => {
-        if (state.cancelled) {
+        const action = chatHeartbeatAction(state);
+        if (action === "cancel") {
           cancellationObserved = true;
           controller.abort();
-        } else if (!state.active) {
+        } else if (action === "lease_lost") {
+          console.warn(JSON.stringify({
+            event: "background-worker-chat-lease-lost",
+            ownerId,
+            conversationId: claim.conversationId,
+            jobId: claim.jobId,
+            status: state.status ?? "missing",
+          }));
           controller.abort();
         }
       })
-      .catch(() => {
-        controller.abort();
+      .catch((error) => {
+        // A transient PostgreSQL or pool error must not silently terminate a
+        // chat. The next heartbeat will retry, while the lease remains the
+        // authoritative safeguard if the worker cannot renew it.
+        console.warn(JSON.stringify({
+          event: "background-worker-chat-heartbeat-failed",
+          ownerId,
+          conversationId: claim.conversationId,
+          jobId: claim.jobId,
+          error: error instanceof Error ? error.message : "Unknown heartbeat error",
+        }));
       })
       .finally(() => {
         heartbeatInFlight = null;

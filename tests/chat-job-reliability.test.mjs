@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { chatRetryDelayMs } from "../app/chat/chat-retry-backoff.ts";
 import { isTransientChatPersistenceError, withChatPersistenceRetry } from "../app/server/chat/chat-persistence-retry.ts";
+import { chatHeartbeatAction } from "../app/server/chat/chat-job-runner.ts";
+
+test("chat heartbeat only stops execution for authoritative cancellation or lease loss", () => {
+  assert.equal(chatHeartbeatAction({ active: true }), "continue");
+  assert.equal(chatHeartbeatAction({ active: true, cancelled: true }), "cancel");
+  assert.equal(chatHeartbeatAction({ active: false, status: "missing" }), "lease_lost");
+});
 
 test("chat recovery backoff is bounded and jittered", () => {
   assert.equal(chatRetryDelayMs(0, { initialMs: 300, maxMs: 1500, random: () => 0 }), 240);
