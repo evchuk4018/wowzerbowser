@@ -9,11 +9,24 @@ test("the Python worker exposes bounded, session-scoped workspace operations", (
   assert.match(workerSource, /\/v1\/workspace\/read/);
   assert.match(workerSource, /\/v1\/workspace\/search/);
   assert.match(workerSource, /\/v1\/workspace\/write/);
+  assert.match(workerSource, /\/v1\/workspace\/write-stream/);
   assert.match(workerSource, /\/v1\/workspace\/delete/);
   assert.match(workerSource, /\/v1\/command/);
   assert.match(workerSource, /shell=False/);
   assert.match(workerSource, /O_NOFOLLOW/);
   assert.match(workerSource, /MAX_SEARCH_RESULTS/);
+  assert.match(workerSource, /MAX_STREAMING_WRITE_BYTES = 1 \* 1024 \* 1024 \* 1024/);
+  assert.match(workerSource, /MAX_WORKSPACE_FILE_SIZE = MAX_STREAMING_WRITE_BYTES/);
+  assert.match(workerSource, /MAX_WRITE_BYTES = MAX_ARTIFACT_BYTES/);
+  assert.match(workerSource, /x-python-session/);
+  assert.match(workerSource, /x-workspace-path/);
+  assert.match(workerSource, /x-workspace-size/);
+  assert.match(workerSource, /x-workspace-replace/);
+  assert.match(workerSource, /x-workspace-expected-sha256/);
+  assert.match(workerSource, /Content-Length must match x-workspace-size/);
+  assert.match(workerSource, /Workspace stream body was incomplete/);
+  assert.match(workerSource, /\.workspace-stream-/);
+  assert.match(workerSource, /os\.replace\(temporary_name, parts\[-1\]/);
   assert.match(workerSource, /expected_sha256/);
   assert.doesNotMatch(workerSource, /shell=True/);
 });
@@ -82,6 +95,58 @@ test("LocalPythonExecutor keeps root-directory and file-path contracts distinct"
     assert.equal(writeRequest.body.replace, true);
     assert.equal(writeRequest.body.expectedSha256, "a".repeat(64));
     assert.equal(requests.find((request) => request.path === "/v1/command").body.cwd, "");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("LocalPythonExecutor streams bounded workspace writes with authenticated metadata", async () => {
+  const { LocalPythonExecutor, PYTHON_TOOL_LIMITS } = await import("../app/server/python/local-python-executor.ts");
+  const previousFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(input.toString());
+    if (url.pathname === "/v1/sessions/open") return Response.json({ session: "stream-session" });
+    if (url.pathname === "/v1/workspace/write-stream") {
+      const bytes = new Uint8Array(await new Response(init.body).arrayBuffer());
+      requests.push({ url, method: init.method, headers: new Headers(init.headers), bytes });
+      return Response.json({ written: true, replaced: true, sha256: "c".repeat(64) });
+    }
+    throw new Error(`Unexpected request: ${url.pathname}`);
+  };
+
+  try {
+    const executor = new LocalPythonExecutor("owner", "conversation");
+    async function* source() {
+      yield new Uint8Array([1, 2]);
+      yield new Uint8Array([3, 4, 5]);
+    }
+    assert.deepEqual(
+      await executor.writeWorkspaceStream("documents/data.bin", source(), 5, { overwrite: true, expectedSha256: "a".repeat(64) }),
+      { size: 5, sha256: "c".repeat(64) },
+    );
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].method, "POST");
+    assert.deepEqual(requests[0].bytes, new Uint8Array([1, 2, 3, 4, 5]));
+    assert.equal(requests[0].headers.get("x-python-worker-secret"), process.env.PYTHON_WORKER_SECRET);
+    assert.equal(requests[0].headers.get("x-python-session"), "stream-session");
+    assert.equal(requests[0].headers.get("x-workspace-path"), "documents/data.bin");
+    assert.equal(requests[0].headers.get("x-workspace-size"), "5");
+    assert.equal(requests[0].headers.get("content-length"), "5");
+    assert.equal(requests[0].headers.get("x-workspace-replace"), "true");
+    assert.equal(requests[0].headers.get("x-workspace-expected-sha256"), "a".repeat(64));
+    await assert.rejects(
+      () => executor.writeWorkspaceStream("too-large.bin", source(), PYTHON_TOOL_LIMITS.maxStreamingWorkspaceBytes + 1),
+      /between 0 and 1073741824 bytes/,
+    );
+    async function* incompleteSource() {
+      yield new Uint8Array([1]);
+    }
+    await assert.rejects(
+      () => executor.writeWorkspaceStream("incomplete.bin", incompleteSource(), 2),
+      /declared size/,
+    );
+    assert.equal(requests.length, 1);
   } finally {
     globalThis.fetch = previousFetch;
   }

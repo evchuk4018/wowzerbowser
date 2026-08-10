@@ -65,9 +65,10 @@ MAX_ARTIFACT_BYTES = 25 * 1024 * 1024
 MAX_ARTIFACT_TOTAL_BYTES = 50 * 1024 * 1024
 MAX_REQUEST_BYTES = 2 * 1024 * 1024
 MAX_WRITE_BYTES = MAX_ARTIFACT_BYTES
+MAX_STREAMING_WRITE_BYTES = 1 * 1024 * 1024 * 1024
 MAX_ISOLATED_SOURCE_BYTES = 256 * 1024
 MAX_LIST_ENTRIES = 100
-MAX_WORKSPACE_FILE_SIZE = 100 * 1024 * 1024
+MAX_WORKSPACE_FILE_SIZE = MAX_STREAMING_WRITE_BYTES
 MAX_SEARCH_QUERY_LENGTH = 1_024
 MAX_SEARCH_RESULTS = 100
 MAX_SEARCH_FILE_BYTES = 4 * 1024 * 1024
@@ -416,7 +417,7 @@ def _sha256_fd(fd: int) -> str:
         digest.update(chunk)
 
 
-def existing_file_sha256(parent_fd: int, name: str) -> str | None:
+def existing_file_sha256(parent_fd: int, name: str, limit: int = MAX_WRITE_BYTES) -> str | None:
     try:
         fd = os.open(name, os.O_RDONLY | O_NOFOLLOW | O_CLOEXEC, dir_fd=parent_fd)
     except FileNotFoundError:
@@ -427,7 +428,9 @@ def existing_file_sha256(parent_fd: int, name: str) -> str | None:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise WorkerError(400, "Workspace entry must be a regular file.")
         details = os.fstat(fd)
-        if details.st_size > MAX_WRITE_BYTES:
+        if details.st_size > limit:
+            if limit == MAX_STREAMING_WRITE_BYTES:
+                raise WorkerError(413, "Workspace file exceeds the 1 GiB streaming write limit.")
             raise WorkerError(413, "Workspace file exceeds the 25 MiB limit.")
         return _sha256_fd(fd)
     finally:
@@ -489,6 +492,77 @@ def write_workspace_file(
 
 def write_new_file(root: Path, relative: str, data: bytes) -> None:
     write_workspace_file(root, relative, data)
+
+
+def write_workspace_stream(
+    root: Path,
+    relative: str,
+    body: BinaryIO,
+    size: int,
+    replace: bool = False,
+    expected_sha256: str | None = None,
+) -> tuple[bool, str]:
+    if not isinstance(size, int) or isinstance(size, bool) or size < 0 or size > MAX_STREAMING_WRITE_BYTES:
+        raise WorkerError(413 if isinstance(size, int) and size > MAX_STREAMING_WRITE_BYTES else 400, "Streaming workspace size must be an integer between 0 and 1 GiB.")
+    if not isinstance(replace, bool):
+        raise WorkerError(400, "replace must be a boolean.")
+    if expected_sha256 is not None and re.fullmatch(r"[0-9a-fA-F]{64}", expected_sha256) is None:
+        raise WorkerError(400, "expectedSha256 must be a SHA-256 hex digest.")
+    if expected_sha256 is not None:
+        expected_sha256 = expected_sha256.lower()
+    parts = relative.split("/")
+    try:
+        parent_fd = open_directory_chain(root, parts[:-1], create=True)
+    except OSError as error:
+        raise WorkerError(400, "Workspace parent is not a safe directory.") from error
+    fd = -1
+    temporary_name: str | None = None
+    replaced = False
+    digest = hashlib.sha256()
+    total = 0
+    try:
+        current_sha256 = existing_file_sha256(parent_fd, parts[-1], MAX_STREAMING_WRITE_BYTES)
+        if expected_sha256 is not None and current_sha256 != expected_sha256:
+            raise WorkerError(409, "Workspace file changed before it could be replaced.")
+        if current_sha256 is not None and not replace:
+            raise WorkerError(409, "Workspace file already exists.")
+        if current_sha256 is None and expected_sha256 is not None:
+            raise WorkerError(409, "Workspace file changed before it could be replaced.")
+
+        temporary_name = f".workspace-stream-{secrets.token_hex(12)}"
+        fd = os.open(temporary_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600, dir_fd=parent_fd)
+        while total < size:
+            try:
+                chunk = body.read(min(64 * 1024, size - total))
+            except (OSError, ValueError) as error:
+                raise WorkerError(400, "Workspace stream body could not be read.") from error
+            if not chunk:
+                raise WorkerError(400, "Workspace stream body was incomplete.")
+            if total + len(chunk) > size:
+                raise WorkerError(400, "Workspace stream body exceeded Content-Length.")
+            view = memoryview(chunk)
+            while view:
+                written = os.write(fd, view)
+                view = view[written:]
+            digest.update(chunk)
+            total += len(chunk)
+        if total != size:
+            raise WorkerError(400, "Workspace stream body length did not match Content-Length.")
+        os.fsync(fd)
+        os.close(fd)
+        fd = -1
+        os.replace(temporary_name, parts[-1], src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        replaced = current_sha256 is not None
+        return replaced, digest.hexdigest()
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        if temporary_name is not None:
+            try:
+                os.unlink(temporary_name, dir_fd=parent_fd)
+            except FileNotFoundError:
+                pass
+        os.close(parent_fd)
 
 
 def create_directory(root: Path, relative: str) -> None:
@@ -996,12 +1070,22 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             raise WorkerError(400, "Request body must be a JSON object.")
         return value
 
+    def stream_size_header(self, name: str) -> int:
+        value = self.headers.get(name)
+        if value is None or re.fullmatch(r"(?:0|[1-9][0-9]*)", value.strip()) is None:
+            raise WorkerError(400, f"{name} must be a non-negative decimal byte count.")
+        size = int(value)
+        if size > MAX_STREAMING_WRITE_BYTES:
+            raise WorkerError(413, "Streaming workspace size exceeds the 1 GiB limit.")
+        return size
+
     def dispatch(self, method: str, path: str) -> tuple[int, Any, str]:
         if path == "/health" and method == "GET":
             return 200, {"status": "ok", "activeSessions": len(SESSIONS_BY_TOKEN)}, "json"
         if not self.authenticated():
             raise WorkerError(401, "Python worker authentication failed.")
-        body = self.read_json(MAX_WRITE_BYTES * 2) if method == "PUT" else (self.read_json(MAX_REQUEST_BYTES) if method == "POST" else {})
+        stream_write = path == "/v1/workspace/write-stream" and method == "POST"
+        body = {} if stream_write else (self.read_json(MAX_WRITE_BYTES * 2) if method == "PUT" else (self.read_json(MAX_REQUEST_BYTES) if method == "POST" else {}))
         if path == "/v1/sessions/open" and method == "POST":
             owner_id = body.get("ownerId")
             conversation_id = body.get("conversationId")
@@ -1076,6 +1160,26 @@ class WorkerHandler(http.server.BaseHTTPRequestHandler):
             with execution_slot(time.time() + 30):
                 replaced = write_workspace_file(session.workspace, relative, data, replace=replace, expected_sha256=expected_sha256)
             return 200, {"written": True, "replaced": replaced, "sha256": hashlib.sha256(data).hexdigest()}, "json"
+        if stream_write:
+            session = session_for(self.headers.get("x-python-session"))
+            relative = safe_relative(self.headers.get("x-workspace-path"))
+            size = self.stream_size_header("x-workspace-size")
+            content_length = self.stream_size_header("Content-Length")
+            if content_length != size:
+                raise WorkerError(400, "Content-Length must match x-workspace-size.")
+            replace_header = self.headers.get("x-workspace-replace")
+            if replace_header == "true":
+                replace = True
+            elif replace_header == "false":
+                replace = False
+            else:
+                raise WorkerError(400, "x-workspace-replace must be true or false.")
+            expected_sha256 = self.headers.get("x-workspace-expected-sha256")
+            if expected_sha256 is not None and re.fullmatch(r"[0-9a-fA-F]{64}", expected_sha256) is None:
+                raise WorkerError(400, "expectedSha256 must be a SHA-256 hex digest.")
+            with execution_slot(time.time() + MAX_RESPONSE_SECONDS):
+                replaced, sha256 = write_workspace_stream(session.workspace, relative, self.rfile, size, replace=replace, expected_sha256=expected_sha256)
+            return 200, {"written": True, "replaced": replaced, "size": size, "sha256": sha256}, "json"
         if path == "/v1/workspace/mkdir" and method == "POST":
             session = session_for(body.get("session"))
             relative = safe_relative(body.get("path"))

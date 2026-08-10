@@ -15,6 +15,7 @@ export const PYTHON_TOOL_LIMITS = {
   maxArtifacts: PYTHON_TOOL_INPUT_LIMITS.maxArtifacts,
   maxArtifactBytes: 25 * 1024 * 1024,
   maxArtifactTotalBytes: 50 * 1024 * 1024,
+  maxStreamingWorkspaceBytes: 1 * 1024 * 1024 * 1024,
 } as const;
 
 export const PYTHON_WORKER_URL = "http://python-worker:5003";
@@ -56,6 +57,8 @@ export type WorkspaceWriteOptions = {
   replace?: boolean;
   expectedSha256?: string;
 };
+
+export type WorkspaceByteSource = ReadableStream<Uint8Array> | AsyncIterable<Uint8Array>;
 
 export type LocalCommandInput = {
   command: string;
@@ -121,7 +124,7 @@ async function responseError(response: Response): Promise<Error> {
 
 async function fetchWithDeadline(
   path: string,
-  init: RequestInit,
+  init: RequestInit & { duplex?: "half" },
   deadlineAt: number,
 ): Promise<Response> {
   assertConfigured();
@@ -144,6 +147,58 @@ async function fetchWithDeadline(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function boundedWorkspaceByteStream(source: WorkspaceByteSource, size: number): ReadableStream<Uint8Array> {
+  const candidate = source as ReadableStream<Uint8Array> & AsyncIterable<Uint8Array>;
+  const reader = typeof candidate?.getReader === "function" ? candidate.getReader() : null;
+  const iterator = reader === null && typeof candidate?.[Symbol.asyncIterator] === "function"
+    ? candidate[Symbol.asyncIterator]()
+    : null;
+  if (reader === null && iterator === null) throw new Error("Workspace stream source must be a ReadableStream or async byte source.");
+
+  let total = 0;
+  let released = false;
+  const releaseReader = () => {
+    if (!released && reader !== null) {
+      released = true;
+      reader.releaseLock();
+    }
+  };
+  const nextChunk = async (): Promise<IteratorResult<Uint8Array>> => reader !== null ? reader.read() : await iterator!.next();
+  const cancelSource = async (reason: unknown) => {
+    if (reader !== null) {
+      await reader.cancel(reason).catch(() => undefined);
+      releaseReader();
+    } else if (iterator?.return) {
+      await iterator.return(reason).catch(() => undefined);
+    }
+  };
+
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const result = await nextChunk();
+        if (result.done) {
+          releaseReader();
+          if (total !== size) throw new Error("Workspace stream source ended before the declared size.");
+          controller.close();
+          return;
+        }
+        if (!(result.value instanceof Uint8Array)) throw new Error("Workspace stream source must yield Uint8Array chunks.");
+        if (result.value.byteLength > size - total) throw new Error("Workspace stream source exceeded the declared size.");
+        total += result.value.byteLength;
+        controller.enqueue(result.value);
+        if (total === size) controller.close();
+      } catch (error) {
+        releaseReader();
+        controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      await cancelSource(reason);
+    },
+  });
 }
 
 async function requestJson<T>(path: string, value: unknown, deadlineAt: number, method = "POST"): Promise<T> {
@@ -270,6 +325,40 @@ export class LocalPythonExecutor {
       ...(options.overwrite ? { replace: true } : {}),
       ...(options.expectedSha256 ? { expectedSha256: options.expectedSha256 } : {}),
     }, this.responseDeadlineAt, "PUT");
+  }
+
+  async writeWorkspaceStream(
+    pathValue: string,
+    source: WorkspaceByteSource,
+    size: number,
+    overwriteOrOptions: boolean | WorkspaceWriteOptions = false,
+  ): Promise<{ size: number; sha256: string }> {
+    const path = relativeWorkspacePath(pathValue);
+    if (typeof size !== "number" || !Number.isSafeInteger(size) || size < 0 || size > PYTHON_TOOL_LIMITS.maxStreamingWorkspaceBytes) {
+      throw new Error("Streaming workspace write size must be an integer between 0 and 1073741824 bytes.");
+    }
+    const options = writeOptions(overwriteOrOptions);
+    const session = await this.ensureSession(this.responseDeadlineAt);
+    const body = boundedWorkspaceByteStream(source, size);
+    const response = await fetchWithDeadline("/v1/workspace/write-stream", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/octet-stream",
+        "content-length": String(size),
+        "x-python-session": session,
+        "x-workspace-path": path,
+        "x-workspace-size": String(size),
+        "x-workspace-replace": String(options.overwrite),
+        ...(options.expectedSha256 ? { "x-workspace-expected-sha256": options.expectedSha256 } : {}),
+      },
+      body,
+      duplex: "half",
+    }, this.responseDeadlineAt);
+    if (!response.ok) throw await responseError(response);
+    const result = await response.json() as { sha256?: unknown };
+    if (typeof result.sha256 !== "string" || !/^[0-9a-f]{64}$/iu.test(result.sha256)) throw new Error("The local Python worker returned an invalid workspace stream digest.");
+    return { size, sha256: result.sha256 };
   }
 
   async replaceWorkspaceFile(pathValue: string, bytes: Uint8Array): Promise<void>;
