@@ -55,6 +55,16 @@ test("deployment surfaces do not retain the removed Redlib provider", async () =
   assert.match(updateScript, /up -d --remove-orphans searxng miniflux-postgres miniflux/);
 });
 
+test("Local Drive credentials are deployment-only", async () => {
+  const envExample = await read(".env.example");
+  const audit = await read("scripts/audit-local-runtime.mjs");
+  const compose = await read("compose.yaml");
+  assert.match(envExample, /^LOCAL_DRIVE_API_TOKEN=$/m);
+  assert.match(audit, /LOCAL_DRIVE_API_TOKEN/u);
+  assert.match(compose, /env_file:\n\s+- path: \$\{DEPLOYMENT_ENV_FILE:-\.env\}/u);
+  assert.doesNotMatch(envExample, /NEXT_PUBLIC_LOCAL_DRIVE_API_TOKEN/u);
+});
+
 test("only the application storage directory is bind-mounted", async () => {
   const compose = await read("compose.yaml");
   assert.equal((compose.match(/source: \/srv\/storage\/wowzerbowser/g) ?? []).length, 2);

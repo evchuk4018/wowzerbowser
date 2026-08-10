@@ -23,6 +23,10 @@ export const MANAGED_CONNECTOR_MANIFESTS: ConnectorManifest[] = [
     id: "slack", name: "Slack", description: "Search conversations and interact with a connected Slack workspace.", version: "1.0.0", provider: "managed", auth: { type: "oauth2" },
     capabilities: ["search", "read", "write", "destructive"], defaultApproval: { read: "never", write: "always", destructive: "always" },
   },
+  {
+    id: "local_drive", name: "Local Drive", description: "Search, read, and manage files in the private Local Drive service.", version: "1.0.0", provider: "local_drive", auth: { type: "none" },
+    capabilities: ["search", "read", "write", "destructive"], defaultApproval: { read: "never", write: "always", destructive: "always" },
+  },
 ];
 
 export function normalizeConnectorId(value: string): string {

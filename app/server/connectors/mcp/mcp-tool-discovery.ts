@@ -5,7 +5,7 @@ import { namespaceConnectorTool } from "../connector-registry";
 
 export function classifyConnectorToolAccess(name: string, description: string): ConnectorAccess {
   const text = `${name} ${description}`.toLocaleLowerCase();
-  if (/delete|remove|cancel|publish|pay|destroy|revoke|archive/.test(text)) return "destructive";
+  if (/delete|remove|cancel|publish|pay|destroy|revoke|archive|trash|restore/.test(text)) return "destructive";
   if (/create|write|update|edit|send|post|move|rename|upload|insert|add/.test(text)) return "write";
   return "read";
 }

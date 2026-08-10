@@ -16,16 +16,20 @@ import type { ConnectorProvider, ConnectorProviderContext } from "./connector-ty
 import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 import { GoogleGmailProvider } from "./providers/google-gmail-provider";
 import { MicrosoftOutlookProvider } from "./providers/microsoft-outlook-provider";
+import { LOCAL_DRIVE_CONNECTOR_ID, LOCAL_DRIVE_MCP_ENDPOINT, LOCAL_DRIVE_VERSION, LocalDriveProvider } from "./providers/local-drive-provider";
 
 const managed = new ManagedConnectorProvider((id) => connectorManifest(id));
 const googleGmail = new GoogleGmailProvider();
 const microsoftOutlook = new MicrosoftOutlookProvider();
 const remoteMcp = new RemoteMcpProvider();
+const localDrive = new LocalDriveProvider();
+const localDriveProvisioning = new Map<string, Promise<string>>();
 
 function provider(manifest: ConnectorManifest): ConnectorProvider {
   if (manifest.provider === "managed") return managed;
   if (manifest.provider === "google_gmail") return googleGmail;
   if (manifest.provider === "microsoft_outlook") return microsoftOutlook;
+  if (manifest.provider === "local_drive") return localDrive;
   return remoteMcp;
 }
 
@@ -50,6 +54,7 @@ export async function listConnectorCatalog(ownerId: string): Promise<ConnectorCa
   const manifests = await manifestsFor(ownerId);
   return Promise.all(manifests.map(async (manifest) => {
     try {
+      if (manifest.provider === "local_drive") await ensureLocalDriveConnection(ownerId);
       const [installation, connections, tools] = await Promise.all([getInstallation(ownerId, manifest.id), listConnections(ownerId, manifest.id), listTools(ownerId, manifest.id)]);
       return { ...manifest, installed: Boolean(installation?.enabled), providerAvailable: true, connections: connections.map(publicConnection), enabledToolCount: tools.filter((tool) => tool.enabled).length };
     } catch (error) {
@@ -81,7 +86,7 @@ export async function createConnection(ownerId: string, manifest: ConnectorManif
   const encrypted = encryptConnectorCredentials(credentials);
   const encryptedMetadata = encryptConnectorMetadata(metadata ?? {});
   const { insertConnection } = await import("./connector-repository");
-  if (["managed", "google_gmail", "microsoft_outlook"].includes(manifest.provider)) await ensureManagedDefinition(manifest);
+  if (["managed", "google_gmail", "microsoft_outlook", "local_drive"].includes(manifest.provider)) await ensureManagedDefinition(manifest);
   await ensureInstallation(ownerId, manifest.id);
   return insertConnection(ownerId, { connectorId: manifest.id, accountLabel, accountEmail, credentials: encrypted, encryptedMetadata });
 }
@@ -108,7 +113,7 @@ export async function discoverConnectorTools(ownerId: string, connectorId: strin
   const manifest = await getConnectorManifestForOwner(ownerId, connectorId);
   if (!manifest) throw new Error("Connector not found.");
   const connection = connectionId ? await getConnection(ownerId, connectionId) : await getDefaultConnection(ownerId, connectorId);
-  if (!connection || connection.connector_id !== connectorId || connection.status !== "connected") throw new Error("Connect an account before discovering connector tools.");
+  if (!connection || connection.connector_id !== connectorId || !["connected", "unavailable"].includes(connection.status)) throw new Error("Connect an account before discovering connector tools.");
   try {
     const metadata = decryptConnectorMetadata(connection);
     const context: ConnectorProviderContext = { ownerId, connectorId, connectionId: connection.id, credentials: decryptConnectorCredentials(connection), metadata: { ...metadata, endpointUrl: metadata.endpointUrl, version: manifest.version } };
@@ -123,9 +128,39 @@ export async function discoverConnectorTools(ownerId: string, connectorId: strin
   }
 }
 
+/** Provision the deployment-authenticated Local Drive connection without persisting its token. */
+export function ensureLocalDriveConnection(ownerId: string): Promise<string> {
+  const pending = localDriveProvisioning.get(ownerId);
+  if (pending) return pending;
+  const task = provisionLocalDriveConnection(ownerId).finally(() => localDriveProvisioning.delete(ownerId));
+  localDriveProvisioning.set(ownerId, task);
+  return task;
+}
+
+async function provisionLocalDriveConnection(ownerId: string): Promise<string> {
+  const manifest = connectorManifest(LOCAL_DRIVE_CONNECTOR_ID);
+  if (!manifest) throw new Error("Local Drive connector is not registered.");
+  if (!process.env.LOCAL_DRIVE_API_TOKEN?.trim()) throw new Error("Local Drive is not configured.");
+  await ensureManagedDefinition(manifest);
+  await ensureInstallation(ownerId, manifest.id);
+
+  const existing = (await listConnections(ownerId, manifest.id)).find((connection) => ["connected", "unavailable"].includes(connection.status));
+  let connectionId = existing?.id;
+  if (!connectionId) {
+    connectionId = await createConnection(ownerId, manifest, {}, "Private Local Drive", undefined, { endpointUrl: LOCAL_DRIVE_MCP_ENDPOINT, version: LOCAL_DRIVE_VERSION });
+  }
+
+  const connection = await getConnection(ownerId, connectionId);
+  if (!connection) throw new Error("Local Drive connection could not be loaded.");
+  const cachedTools = await listTools(ownerId, manifest.id);
+  if (connection.status !== "connected" || !cachedTools.some((tool) => tool.connection_id === connectionId)) await discoverConnectorTools(ownerId, manifest.id, connectionId);
+  return connectionId;
+}
+
 export async function listConnectorTools(ownerId: string, connectorId: string): Promise<ConnectorTool[]> {
   const manifest = await getConnectorManifestForOwner(ownerId, connectorId);
   if (!manifest) throw new Error("Connector not found.");
+  if (manifest.provider === "local_drive") await ensureLocalDriveConnection(ownerId);
   const cached = await listTools(ownerId, connectorId);
   const allowed = manifest.id === "gmail" ? cached.filter((tool) => tool.access === "read") : cached;
   return Promise.all(allowed.map(async (tool) => ({ ...publicTool(tool, manifest), approvalMode: (await getPermission(ownerId, connectorId, tool.name))?.approval_mode ?? manifest.defaultApproval[tool.access] })));

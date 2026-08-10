@@ -143,6 +143,16 @@ personal Microsoft accounts when the app registration uses the `common` tenant.
 5. Apply the local PostgreSQL migrations, restart the app, then open
    **Settings → Connectors → Outlook** and choose **Connect account**.
 
+## Private Local Drive
+
+Local Drive is a deployment-managed MCP connector. It is automatically enabled
+for the configured application owner when `LOCAL_DRIVE_API_TOKEN` is present in
+`/srv/storage/wowzerbowser/deployment.env`. The token is read only by the web
+and background-worker services, is never stored in connector credentials, and
+is never exposed to the browser or model. The connector discovers its
+Streamable HTTP tools from the private Local Drive service and applies read,
+write, and destructive approval controls automatically.
+
 ## Discord direct messages
 
 The optional Discord integration turns a private bot DM into the same durable

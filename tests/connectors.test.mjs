@@ -7,16 +7,36 @@ import { normalizeMcpResult } from "../app/server/connectors/mcp/mcp-result-norm
 import { redactConnectorError, redactConnectorValue } from "../app/server/connectors/connector-redaction.ts";
 import { GoogleGmailProvider } from "../app/server/connectors/providers/google-gmail-provider.ts";
 import { MicrosoftOutlookProvider } from "../app/server/connectors/providers/microsoft-outlook-provider.ts";
+import { classifyLocalDriveToolAccess, LocalDriveProvider } from "../app/server/connectors/providers/local-drive-provider.ts";
+import { requiresConnectorApproval } from "../app/server/connectors/connector-policy.ts";
 import { exchangeMicrosoftOutlookCode, microsoftOutlookAuthorizationUrl, refreshMicrosoftOutlookAccessToken } from "../app/server/connectors/providers/microsoft-outlook-oauth.ts";
 import { outlookGetMessage, outlookSearch, MicrosoftOutlookAuthorizationError } from "../app/server/connectors/providers/microsoft-outlook-adapter.ts";
 import { isToolsConnector } from "../app/settings/connector-placement.ts";
 
 test("managed connector registry exposes the initial catalog", () => {
-  assert.deepEqual(MANAGED_CONNECTOR_MANIFESTS.map(({ id }) => id), ["gmail", "outlook", "google_drive", "notion", "slack"]);
+  assert.deepEqual(MANAGED_CONNECTOR_MANIFESTS.map(({ id }) => id), ["gmail", "outlook", "google_drive", "notion", "slack", "local_drive"]);
   assert.equal(MANAGED_CONNECTOR_MANIFESTS.find(({ id }) => id === "gmail").provider, "google_gmail");
   assert.deepEqual(MANAGED_CONNECTOR_MANIFESTS.find(({ id }) => id === "gmail").capabilities, ["search", "read"]);
   assert.equal(MANAGED_CONNECTOR_MANIFESTS.find(({ id }) => id === "outlook").provider, "microsoft_outlook");
   assert.deepEqual(MANAGED_CONNECTOR_MANIFESTS.find(({ id }) => id === "outlook").capabilities, ["search", "read"]);
+  assert.equal(MANAGED_CONNECTOR_MANIFESTS.find(({ id }) => id === "local_drive").provider, "local_drive");
+});
+
+test("Local Drive classifies every expected operation with the normal approval tier", async () => {
+  assert.deepEqual([
+    classifyLocalDriveToolAccess("drive_list", ""),
+    classifyLocalDriveToolAccess("drive_search", ""),
+    classifyLocalDriveToolAccess("drive_get_metadata", ""),
+    classifyLocalDriveToolAccess("drive_read_text", ""),
+    classifyLocalDriveToolAccess("drive_write_file", ""),
+    classifyLocalDriveToolAccess("drive_create_folder", ""),
+    classifyLocalDriveToolAccess("drive_rename_item", ""),
+    classifyLocalDriveToolAccess("drive_move_item", ""),
+    classifyLocalDriveToolAccess("drive_trash_item", ""),
+    classifyLocalDriveToolAccess("drive_restore_item", ""),
+    classifyLocalDriveToolAccess("drive_delete_permanently", ""),
+  ], ["read", "read", "read", "read", "write", "write", "write", "write", "destructive", "destructive", "destructive"]);
+  assert.equal(await requiresConnectorApproval("owner", MANAGED_CONNECTOR_MANIFESTS.find(({ id }) => id === "local_drive"), "drive_delete_permanently", "destructive"), true);
 });
 
 test("email connectors are placed in Tools", () => {
@@ -187,6 +207,76 @@ test("MCP client initializes, caches session, lists, and calls tools", async () 
   assert.deepEqual(await client.callTool("search", { query: "hello" }), { structuredContent: { answer: "ok" } });
   assert.equal(calls[1].headers["mcp-session-id"], "session-1");
   assert.equal(calls[1].headers.authorization, "Bearer secret-token");
+  assert.equal(calls[1].body.id, undefined);
+  assert.equal(calls[1].body.method, "notifications/initialized");
+});
+
+test("Local Drive MCP provider discovers and executes drive_list with auth on every request", async () => {
+  const previous = process.env.LOCAL_DRIVE_API_TOKEN;
+  process.env.LOCAL_DRIVE_API_TOKEN = "local-drive-test-token";
+  const requests = [];
+  const fetchImpl = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    requests.push({ body, headers: new Headers(init.headers) });
+    const headers = new Headers({ "content-type": "application/json" });
+    if (body.method === "initialize") {
+      headers.set("mcp-session-id", "local-drive-session");
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: {} }), { status: 200, headers });
+    }
+    if (body.method === "tools/list") return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: {
+      tools: [
+        { name: "drive_list", description: "List", inputSchema: { type: "object", properties: { folderId: { type: "string" } } } },
+        { name: "drive_search", description: "Search", inputSchema: { type: "object" } },
+        { name: "drive_get_metadata", description: "Metadata", inputSchema: { type: "object" } },
+        { name: "drive_read_text", description: "Read", inputSchema: { type: "object" } },
+        { name: "drive_write_file", description: "Write", inputSchema: { type: "object" } },
+        { name: "drive_create_folder", description: "Create", inputSchema: { type: "object" } },
+        { name: "drive_rename_item", description: "Rename", inputSchema: { type: "object" } },
+        { name: "drive_move_item", description: "Move", inputSchema: { type: "object" } },
+        { name: "drive_trash_item", description: "Trash", inputSchema: { type: "object" } },
+        { name: "drive_restore_item", description: "Restore", inputSchema: { type: "object" } },
+        { name: "drive_delete_permanently", description: "Delete", inputSchema: { type: "object" } },
+      ],
+    } }), { status: 200, headers });
+    if (body.method === "tools/call") return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { structuredContent: { items: [], folderId: body.params.arguments.folderId, echoed: "Bearer local-drive-test-token" } } }), { status: 200, headers });
+    return new Response("", { status: 202, headers });
+  };
+  try {
+    const provider = new LocalDriveProvider(fetchImpl);
+    const tools = await provider.listTools({ ownerId: "owner", connectorId: "local_drive" });
+    assert.deepEqual(tools.map(({ name }) => name), ["drive_list", "drive_search", "drive_get_metadata", "drive_read_text", "drive_write_file", "drive_create_folder", "drive_rename_item", "drive_move_item", "drive_trash_item", "drive_restore_item", "drive_delete_permanently"]);
+    assert.equal(tools.find(({ name }) => name === "drive_list").description, "List files and folders in a Local Drive folder.");
+    assert.equal(tools.find(({ name }) => name === "drive_delete_permanently").access, "destructive");
+    const result = await provider.callTool({ ownerId: "owner", connectorId: "local_drive", tool: tools[0], arguments: { folderId: "root" } });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.output, { items: [], folderId: "root", echoed: "Bearer [redacted]" });
+    assert.equal(requests.filter(({ body }) => body.method === "initialize").length, 2);
+    assert.equal(requests.filter(({ body }) => body.method === "notifications/initialized").length, 2);
+    assert.equal(requests.filter(({ body }) => body.method === "tools/list").length, 1);
+    assert.equal(requests.filter(({ body }) => body.method === "tools/call").length, 1);
+    assert.equal(requests.every(({ headers }) => headers.get("authorization") === "Bearer local-drive-test-token"), true);
+    assert.equal(requests.filter(({ body }) => body.method === "notifications/initialized")[0].body?.id, undefined);
+    assert.doesNotMatch(JSON.stringify(result), /local-drive-test-token/);
+  } finally {
+    if (previous === undefined) delete process.env.LOCAL_DRIVE_API_TOKEN;
+    else process.env.LOCAL_DRIVE_API_TOKEN = previous;
+  }
+});
+
+test("MCP client maps timeout, authentication, authorization, server, and connectivity failures", async () => {
+  const cases = [
+    [401, /authentication failed/],
+    [403, /authorization was denied/],
+    [500, /server error/],
+  ];
+  for (const [status, message] of cases) {
+    const client = new McpClient("https://example.com/mcp", {}, async () => new Response("", { status }));
+    await assert.rejects(() => client.listTools(), message);
+  }
+  const timeoutClient = new McpClient("https://example.com/mcp", {}, async (_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true })), { timeoutMs: 10 });
+  await assert.rejects(() => timeoutClient.listTools(), /timed out/);
+  const connectivityClient = new McpClient("https://example.com/mcp", {}, async () => { throw new Error("offline"); });
+  await assert.rejects(() => connectivityClient.listTools(), /Could not connect/);
 });
 
 test("MCP results and errors redact secrets", () => {
