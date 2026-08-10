@@ -189,7 +189,10 @@ function boundedWorkspaceByteStream(source: WorkspaceByteSource, size: number): 
         if (result.value.byteLength > size - total) throw new Error("Workspace stream source exceeded the declared size.");
         total += result.value.byteLength;
         controller.enqueue(result.value);
-        if (total === size) controller.close();
+        if (total === size) {
+          releaseReader();
+          controller.close();
+        }
       } catch (error) {
         releaseReader();
         controller.error(error);
@@ -356,9 +359,9 @@ export class LocalPythonExecutor {
       duplex: "half",
     }, this.responseDeadlineAt);
     if (!response.ok) throw await responseError(response);
-    const result = await response.json() as { sha256?: unknown };
-    if (typeof result.sha256 !== "string" || !/^[0-9a-f]{64}$/iu.test(result.sha256)) throw new Error("The local Python worker returned an invalid workspace stream digest.");
-    return { size, sha256: result.sha256 };
+    const result = await response.json() as { size?: unknown; sha256?: unknown };
+    if (result.size !== size || typeof result.sha256 !== "string" || !/^[0-9a-f]{64}$/iu.test(result.sha256)) throw new Error("The local Python worker returned invalid workspace stream metadata.");
+    return { size, sha256: result.sha256.toLowerCase() };
   }
 
   async replaceWorkspaceFile(pathValue: string, bytes: Uint8Array): Promise<void>;

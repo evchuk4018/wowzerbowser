@@ -2,6 +2,7 @@ import "server-only";
 
 import type { ChatToolCall, ChatToolResult } from "../../../lib/chat-protocol";
 import type { ConnectorTool } from "../../../lib/connector-protocol";
+import type { ConnectorWorkspaceSink } from "./connector-types";
 import { connectorManifest, namespaceConnectorTool } from "./connector-registry";
 import { connectorModelTool, discoverConnectorTools, getConnectorManifestForOwner } from "./connector-service";
 import { requestConnectorApproval, waitForConnectorApproval } from "./connector-approval-service";
@@ -53,7 +54,7 @@ function providerFor(id: string, provider: "managed" | "google_gmail" | "microso
   return new RemoteMcpProvider();
 }
 
-export async function executeConnectorTool(call: ChatToolCall, context: { ownerId: string; conversationId?: string; jobId?: string; signal?: AbortSignal; onApproval?: (summary: import("../../../lib/connector-protocol").ConnectorApprovalSummary) => Promise<void> }): Promise<ChatToolResult> {
+export async function executeConnectorTool(call: ChatToolCall, context: { ownerId: string; conversationId?: string; jobId?: string; signal?: AbortSignal; onApproval?: (summary: import("../../../lib/connector-protocol").ConnectorApprovalSummary) => Promise<void>; workspace?: ConnectorWorkspaceSink }): Promise<ChatToolResult> {
   const startedAt = Date.now();
   try {
     const separator = call.name.indexOf("__", "connector__".length);
@@ -79,7 +80,7 @@ export async function executeConnectorTool(call: ChatToolCall, context: { ownerI
       if (decision === "deny") return failed(call, "The user denied this connector action.");
     }
     const provider = providerFor(connectorId, manifest.provider);
-    const result = await provider.callTool({ ownerId: context.ownerId, connectorId, connectionId: connection.id, credentials: decryptConnectorCredentials(connection), metadata: { ...connection.metadata, endpointUrl: connection.metadata.endpointUrl, version: manifest.version }, tool, arguments: argumentsValue, signal: context.signal });
+    const result = await provider.callTool({ ownerId: context.ownerId, connectorId, connectionId: connection.id, credentials: decryptConnectorCredentials(connection), metadata: { ...connection.metadata, endpointUrl: connection.metadata.endpointUrl, version: manifest.version }, tool, arguments: argumentsValue, signal: context.signal, workspace: context.workspace });
     const chatResult: ChatToolResult = { id: call.id, name: call.name, ok: result.ok, stdout: result.output === undefined ? "" : JSON.stringify(redactConnectorValue(result.output)), stderr: result.error ? redactConnectorError(result.error) : "", ...(result.isError ? { exitCode: 1 } : {}) };
     await auditConnectorCall({ ownerId: context.ownerId, connectorId, connectionId: connection.id, toolName: row.name, access: row.access, arguments: argumentsValue, ok: result.ok, error: result.error, durationMs: Date.now() - startedAt });
     return chatResult;

@@ -16,7 +16,7 @@ import type { ConnectorProvider, ConnectorProviderContext } from "./connector-ty
 import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 import { GoogleGmailProvider } from "./providers/google-gmail-provider";
 import { MicrosoftOutlookProvider } from "./providers/microsoft-outlook-provider";
-import { LOCAL_DRIVE_CONNECTOR_ID, LOCAL_DRIVE_MCP_ENDPOINT, LOCAL_DRIVE_VERSION, LocalDriveProvider } from "./providers/local-drive-provider";
+import { LOCAL_DRIVE_CONNECTOR_ID, LOCAL_DRIVE_MCP_ENDPOINT, LOCAL_DRIVE_VERSION, LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME, LocalDriveProvider } from "./providers/local-drive-provider";
 
 const managed = new ManagedConnectorProvider((id) => connectorManifest(id));
 const googleGmail = new GoogleGmailProvider();
@@ -153,7 +153,7 @@ async function provisionLocalDriveConnection(ownerId: string): Promise<string> {
   const connection = await getConnection(ownerId, connectionId);
   if (!connection) throw new Error("Local Drive connection could not be loaded.");
   const cachedTools = await listTools(ownerId, manifest.id);
-  if (connection.status !== "connected" || !cachedTools.some((tool) => tool.connection_id === connectionId)) await discoverConnectorTools(ownerId, manifest.id, connectionId);
+  if (connection.status !== "connected" || !cachedTools.some((tool) => tool.connection_id === connectionId) || !cachedTools.some((tool) => tool.connection_id === connectionId && tool.name === LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME)) await discoverConnectorTools(ownerId, manifest.id, connectionId);
   return connectionId;
 }
 

@@ -7,6 +7,7 @@ import {
   WEB_SEARCH_TOOL_NAME,
 } from "./web-tools";
 import { INSPECT_IMAGE_TOOL_NAME } from "./image-tool-manifest";
+import { INSPECT_WORKSPACE_IMAGE_TOOL_NAME } from "./workspace-image-tool-manifest";
 import { INSPECT_DOCUMENT_PAGE_TOOL_NAME, READ_PDF_PAGES_TOOL_NAME, SEARCH_PDF_TOOL_NAME } from "./pdf-tool-manifest";
 import {
   COMPARE_DOCUMENT_REVISIONS_TOOL_NAME,
@@ -61,6 +62,7 @@ export const TOOL_EXECUTION_METADATA: Readonly<Record<string, ToolExecutionMetad
   [CHECK_DATE_TOOL_NAME]: { executionPolicy: "parallel-safe" },
   [CHECK_LOCATION_TOOL_NAME]: { executionPolicy: "parallel-safe" },
   [INSPECT_IMAGE_TOOL_NAME]: { executionPolicy: "parallel-safe" },
+  [INSPECT_WORKSPACE_IMAGE_TOOL_NAME]: { executionPolicy: "parallel-safe" },
   [SEARCH_PDF_TOOL_NAME]: { executionPolicy: "parallel-safe" },
   [READ_PDF_PAGES_TOOL_NAME]: { executionPolicy: "parallel-safe" },
   [INSPECT_DOCUMENT_PAGE_TOOL_NAME]: { executionPolicy: "parallel-safe" },

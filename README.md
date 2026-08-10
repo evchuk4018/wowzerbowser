@@ -153,6 +153,12 @@ is never exposed to the browser or model. The connector discovers its
 Streamable HTTP tools from the private Local Drive service and applies read,
 write, and destructive approval controls automatically.
 
+Wowzer also exposes `drive_download_to_workspace` to import a Local Drive file
+into the persistent conversation workspace. Downloads stream directly into
+the private workspace, are capped at 1 GiB, and reject MP4 files. Supported
+PNG, JPEG, WebP, and GIF imports can then be analyzed with
+`inspect_workspace_image`.
+
 ## Discord direct messages
 
 The optional Discord integration turns a private bot DM into the same durable

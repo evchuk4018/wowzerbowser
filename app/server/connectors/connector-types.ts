@@ -30,6 +30,15 @@ export type ConnectionSession = {
   state: string;
 };
 
+export type ConnectorWorkspaceSink = {
+  writeStream: (
+    path: string,
+    source: ReadableStream<Uint8Array>,
+    size: number,
+    options?: { overwrite?: boolean; expectedSha256?: string },
+  ) => Promise<{ size: number; sha256: string }>;
+};
+
 export type ConnectorProviderContext = {
   ownerId: string;
   connectorId: string;
@@ -37,6 +46,8 @@ export type ConnectorProviderContext = {
   credentials?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   signal?: AbortSignal;
+  /** Optional conversation workspace sink for provider-specific binary imports. */
+  workspace?: ConnectorWorkspaceSink;
 };
 
 export interface ConnectorProvider {

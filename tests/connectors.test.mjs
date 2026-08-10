@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { namespaceConnectorTool, MANAGED_CONNECTOR_MANIFESTS } from "../app/server/connectors/connector-registry.ts";
 import { assertSafeMcpUrl, McpClient } from "../app/server/connectors/mcp/mcp-client.ts";
 import { discoveredMcpTools } from "../app/server/connectors/mcp/mcp-tool-discovery.ts";
@@ -7,7 +8,7 @@ import { normalizeMcpResult } from "../app/server/connectors/mcp/mcp-result-norm
 import { redactConnectorError, redactConnectorValue } from "../app/server/connectors/connector-redaction.ts";
 import { GoogleGmailProvider } from "../app/server/connectors/providers/google-gmail-provider.ts";
 import { MicrosoftOutlookProvider } from "../app/server/connectors/providers/microsoft-outlook-provider.ts";
-import { classifyLocalDriveToolAccess, LocalDriveProvider } from "../app/server/connectors/providers/local-drive-provider.ts";
+import { classifyLocalDriveToolAccess, LOCAL_DRIVE_WORKSPACE_DOWNLOAD_MAX_BYTES, LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME, LocalDriveProvider } from "../app/server/connectors/providers/local-drive-provider.ts";
 import { requiresConnectorApproval } from "../app/server/connectors/connector-policy.ts";
 import { exchangeMicrosoftOutlookCode, microsoftOutlookAuthorizationUrl, refreshMicrosoftOutlookAccessToken } from "../app/server/connectors/providers/microsoft-outlook-oauth.ts";
 import { outlookGetMessage, outlookSearch, MicrosoftOutlookAuthorizationError } from "../app/server/connectors/providers/microsoft-outlook-adapter.ts";
@@ -28,6 +29,7 @@ test("Local Drive classifies every expected operation with the normal approval t
     classifyLocalDriveToolAccess("drive_search", ""),
     classifyLocalDriveToolAccess("drive_get_metadata", ""),
     classifyLocalDriveToolAccess("drive_read_text", ""),
+    classifyLocalDriveToolAccess(LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME, ""),
     classifyLocalDriveToolAccess("drive_write_file", ""),
     classifyLocalDriveToolAccess("drive_create_folder", ""),
     classifyLocalDriveToolAccess("drive_rename_item", ""),
@@ -35,7 +37,7 @@ test("Local Drive classifies every expected operation with the normal approval t
     classifyLocalDriveToolAccess("drive_trash_item", ""),
     classifyLocalDriveToolAccess("drive_restore_item", ""),
     classifyLocalDriveToolAccess("drive_delete_permanently", ""),
-  ], ["read", "read", "read", "read", "write", "write", "write", "write", "destructive", "destructive", "destructive"]);
+  ], ["read", "read", "read", "read", "write", "write", "write", "write", "write", "destructive", "destructive", "destructive"]);
   assert.equal(await requiresConnectorApproval("owner", MANAGED_CONNECTOR_MANIFESTS.find(({ id }) => id === "local_drive"), "drive_delete_permanently", "destructive"), true);
 });
 
@@ -244,8 +246,10 @@ test("Local Drive MCP provider discovers and executes drive_list with auth on ev
   try {
     const provider = new LocalDriveProvider(fetchImpl);
     const tools = await provider.listTools({ ownerId: "owner", connectorId: "local_drive" });
-    assert.deepEqual(tools.map(({ name }) => name), ["drive_list", "drive_search", "drive_get_metadata", "drive_read_text", "drive_write_file", "drive_create_folder", "drive_rename_item", "drive_move_item", "drive_trash_item", "drive_restore_item", "drive_delete_permanently"]);
+    assert.deepEqual(tools.map(({ name }) => name), ["drive_list", "drive_search", "drive_get_metadata", "drive_read_text", "drive_write_file", "drive_create_folder", "drive_rename_item", "drive_move_item", "drive_trash_item", "drive_restore_item", "drive_delete_permanently", LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME]);
     assert.equal(tools.find(({ name }) => name === "drive_list").description, "List files and folders in a Local Drive folder.");
+    assert.equal(tools.find(({ name }) => name === LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME).access, "write");
+    assert.match(tools.find(({ name }) => name === LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME).description, /1 GiB/);
     assert.equal(tools.find(({ name }) => name === "drive_delete_permanently").access, "destructive");
     const result = await provider.callTool({ ownerId: "owner", connectorId: "local_drive", tool: tools[0], arguments: { folderId: "root" } });
     assert.equal(result.ok, true);
@@ -257,6 +261,70 @@ test("Local Drive MCP provider discovers and executes drive_list with auth on ev
     assert.equal(requests.every(({ headers }) => headers.get("authorization") === "Bearer local-drive-test-token"), true);
     assert.equal(requests.filter(({ body }) => body.method === "notifications/initialized")[0].body?.id, undefined);
     assert.doesNotMatch(JSON.stringify(result), /local-drive-test-token/);
+  } finally {
+    if (previous === undefined) delete process.env.LOCAL_DRIVE_API_TOKEN;
+    else process.env.LOCAL_DRIVE_API_TOKEN = previous;
+  }
+});
+
+test("Local Drive downloads a non-MP4 file into the conversation workspace", async () => {
+  const previous = process.env.LOCAL_DRIVE_API_TOKEN;
+  process.env.LOCAL_DRIVE_API_TOKEN = "local-drive-test-token";
+  const requests = [];
+  const bytes = new TextEncoder().encode("image-bytes");
+  const fetchImpl = async (url, init) => {
+    const headers = new Headers(init?.headers);
+    requests.push({ url: String(url), method: init?.method ?? "GET", headers });
+    if (String(url).endsWith("/mcp")) {
+      const body = JSON.parse(init.body);
+      const responseHeaders = new Headers({ "content-type": "application/json" });
+      if (body.method === "initialize") {
+        responseHeaders.set("mcp-session-id", "local-drive-session");
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: {} }), { status: 200, headers: responseHeaders });
+      }
+      if (body.method === "tools/call") return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { structuredContent: { id: "file-1", kind: "file", name: "IMG_1794.jpeg", sizeBytes: bytes.byteLength, contentType: "image/jpeg", sha256: createHash("sha256").update(bytes).digest("hex"), trashedAt: null } } }), { status: 200, headers: responseHeaders });
+      return new Response("", { status: 202, headers: responseHeaders });
+    }
+    return new Response(bytes, { status: 200, headers: { "content-type": "image/jpeg", "content-length": String(bytes.byteLength) } });
+  };
+  try {
+    const provider = new LocalDriveProvider(fetchImpl);
+    const tool = { name: LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME };
+    let written;
+    const result = await provider.callTool({ ownerId: "owner", connectorId: "local_drive", tool, arguments: { id: "file-1", path: "photos/IMG_1794.jpeg" }, workspace: { writeStream: async (path, source, size, options) => { const stored = new Uint8Array(await new Response(source).arrayBuffer()); written = { path, stored, size, options }; return { size: stored.byteLength, sha256: createHash("sha256").update(stored).digest("hex") }; } } });
+    assert.equal(result.ok, true);
+    assert.deepEqual(written, { path: "photos/IMG_1794.jpeg", stored: bytes, size: bytes.byteLength, options: { overwrite: false } });
+    assert.equal(requests.find(({ method }) => method === "GET").headers.get("authorization"), "Bearer local-drive-test-token");
+    assert.match(requests.find(({ method }) => method === "GET").url, /\/drive\/api\/drive\/items\/file-1\/download$/);
+  } finally {
+    if (previous === undefined) delete process.env.LOCAL_DRIVE_API_TOKEN;
+    else process.env.LOCAL_DRIVE_API_TOKEN = previous;
+  }
+});
+
+test("Local Drive workspace downloads reject MP4 files and files above 1 GiB", async () => {
+  const previous = process.env.LOCAL_DRIVE_API_TOKEN;
+  process.env.LOCAL_DRIVE_API_TOKEN = "local-drive-test-token";
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url: String(url), init });
+    const body = JSON.parse(init.body);
+    const headers = new Headers({ "content-type": "application/json" });
+    if (body.method === "initialize") return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: {} }), { status: 200, headers });
+    if (body.method === "tools/call") {
+      const id = body.params.arguments.id;
+      const item = id === "video" ? { id, kind: "file", name: "clip.mp4", sizeBytes: 10, contentType: "video/mp4", trashedAt: null } : { id, kind: "file", name: "huge.jpeg", sizeBytes: LOCAL_DRIVE_WORKSPACE_DOWNLOAD_MAX_BYTES + 1, contentType: "image/jpeg", trashedAt: null };
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { structuredContent: item } }), { status: 200, headers });
+    }
+    return new Response("", { status: 202, headers });
+  };
+  try {
+    const provider = new LocalDriveProvider(fetchImpl);
+    const tool = { name: LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME };
+    const workspace = { writeStream: async () => { throw new Error("workspace write should not run"); } };
+    await assert.rejects(() => provider.callTool({ ownerId: "owner", connectorId: "local_drive", tool, arguments: { id: "video", path: "clip.mp4" }, workspace }), /MP4/);
+    await assert.rejects(() => provider.callTool({ ownerId: "owner", connectorId: "local_drive", tool, arguments: { id: "large", path: "huge.jpeg" }, workspace }), /1 GiB/);
+    assert.equal(calls.some(({ url }) => url.endsWith("/download")), false);
   } finally {
     if (previous === undefined) delete process.env.LOCAL_DRIVE_API_TOKEN;
     else process.env.LOCAL_DRIVE_API_TOKEN = previous;

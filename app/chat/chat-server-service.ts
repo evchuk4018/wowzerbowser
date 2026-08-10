@@ -16,6 +16,8 @@ import {
   executeInspectImageTool,
   INSPECT_IMAGE_TOOL_NAME,
 } from "../server/agent/image-tool";
+import { availableWorkspaceImageTools, INSPECT_WORKSPACE_IMAGE_TOOL_NAME } from "../server/agent/workspace-image-tool-manifest";
+import { executeInspectWorkspaceImageTool } from "../server/agent/workspace-image-tool";
 import { isLocalPythonConfigured, LocalPythonExecutor } from "../server/python/local-python-executor";
 import { getAuthoritativeChatImageIdsForRequest } from "../server/chat/chat-history-store";
 import { listAuthorizedProjectImages } from "../server/chat/chat-image-store";
@@ -182,6 +184,7 @@ export async function generateChatResponse(
   const availableProjectImageIds = projectImages.map((image) => image.id);
   const visibleImageIds = [...new Set([...allowedImageIds, ...availableProjectImageIds])];
   const imageTools = availableImageTools(visibleImageIds.length > 0);
+  const workspaceImageTools = availableWorkspaceImageTools(isLocalPythonConfigured());
   const allPdfEditTools = availablePdfEditTools([...authoritativePdfs.values()].some((document) => document.contentType === "application/pdf"));
   const allPdfReadTools = availablePdfTools(allowedPdfIds.size > 0, [...authoritativePdfs.values()].some((document) => document.contentType === "application/pdf"));
   const phaseTools = chatRequest.thinking && !automationExecution ? [PHASE_BREAK_TOOL_DEFINITION] : [];
@@ -198,6 +201,7 @@ export async function generateChatResponse(
     ...(pythonTools.length ? [{ id: "python", summary: "Run Python for computation, data processing, or generated files.", keywords: ["python", "calculate", "compute", "chart", "spreadsheet", "generate file"], fallback: true }] : []),
     ...(workspaceTools.length ? [{ id: "workspace", summary: "Inspect, create, edit, search, and run checks against persistent conversation files.", keywords: ["file", "files", "code", "html", "javascript", "typescript", "python", "edit", "create", "write", "workspace", "script"], fallback: true }] : []),
     ...(imageTools.length ? [{ id: "image", summary: "Inspect an attached image.", keywords: ["image", "photo", "picture", "screenshot"], required: Boolean(latestMessage?.attachments?.length) }] : []),
+    ...(workspaceImageTools.length ? [{ id: "workspace-image", summary: "Inspect an image file in the persistent workspace, including one imported from Local Drive.", keywords: ["workspace image", "local drive image", "drive photo", "image file", "photo file", "describe image"], fallback: true }] : []),
     ...(webTools.length ? [{ id: "web", summary: "Search the web, fetch pages, and check current time, date, or deployment location.", keywords: ["current", "latest", "today", "web", "search", "url", "time", "date", "location", "news"], fallback: true }] : []),
     ...(potentialDeepResearchTools.length ? [{ id: "research", summary: "Run substantial multi-source research and inspect its evidence.", keywords: ["research", "sources", "investigate", "compare evidence"], fallback: true }] : []),
     ...(allPdfReadTools.length ? [{ id: "documents", summary: "Search and read authorized PDF or DOCX documents.", keywords: ["document", "pdf", "docx", "page", "attached"], required: Boolean(latestMessage?.documents?.length), fallback: true }] : []),
@@ -289,6 +293,7 @@ export async function generateChatResponse(
   const activePythonTools = selected("python") ? pythonTools : [];
   const activeWorkspaceTools = selected("workspace") ? workspaceTools : [];
   const activeImageTools = selected("image") ? imageTools : [];
+  const activeWorkspaceImageTools = selected("workspace-image") ? workspaceImageTools : [];
   const activeWebTools = selected("web") ? webTools : [];
   const activeDeepResearchTools = selected("research") ? deepResearchTools : [];
   const activePdfReadTools = selected("documents") ? allPdfReadTools : [];
@@ -317,7 +322,7 @@ export async function generateChatResponse(
   }));
   chatRequest = { ...chatRequest, messages: contextualMessages };
   const allowedProjectIds = new Set([...authoritativePdfs.values()].map((document) => document.projectId).filter((projectId): projectId is string => Boolean(projectId)));
-  const baseToolDefinitions = [...activePythonTools, ...activeWorkspaceTools, ...activeImageTools, ...activeWebTools, ...activeDeepResearchTools, ...pdfEditTools, ...activePhaseTools, ...customDefinitions, ...activeChatMemoryTools, ...activeUserMemoryTools, ...skillTools, ...todoTools, ...automationResultTools, ...contextTools, ...(connectorDiscoveryAvailable && selected("connectors") ? [SEARCH_CONNECTOR_TOOLS_DEFINITION] : []), ...(subagentExecution ? [] : [subagentToolDefinition()])];
+  const baseToolDefinitions = [...activePythonTools, ...activeWorkspaceTools, ...activeImageTools, ...activeWorkspaceImageTools, ...activeWebTools, ...activeDeepResearchTools, ...pdfEditTools, ...activePhaseTools, ...customDefinitions, ...activeChatMemoryTools, ...activeUserMemoryTools, ...skillTools, ...todoTools, ...automationResultTools, ...contextTools, ...(connectorDiscoveryAvailable && selected("connectors") ? [SEARCH_CONNECTOR_TOOLS_DEFINITION] : []), ...(subagentExecution ? [] : [subagentToolDefinition()])];
   const imageToolAdvertised = activeImageTools.some((tool) => tool.function.name === INSPECT_IMAGE_TOOL_NAME);
 
   const enqueue = async (event: ChatStreamEvent) => {
@@ -543,7 +548,7 @@ export async function generateChatResponse(
           await enqueue({ type: "round", round });
           const systemInstructions = [
             ...runPythonInstructionsFor(Boolean(activePythonTools.length)),
-            ...(activeWorkspaceTools.length ? [WORKSPACE_TOOL_INSTRUCTIONS] : []),
+            ...(activeWorkspaceTools.length || activeWorkspaceImageTools.length ? [WORKSPACE_TOOL_INSTRUCTIONS] : []),
             ...webToolInstructionsFor(Boolean(activeWebTools.length)),
             ...deepResearchInstructionsFor(Boolean(activeDeepResearchTools.length)),
             ...(subagentExecution ? [SUBAGENT_CHILD_INSTRUCTIONS] : [SUBAGENT_TOOL_INSTRUCTIONS]),
@@ -658,12 +663,12 @@ export async function generateChatResponse(
           const executeToolCall = async (call: ChatToolCall, callIndex: number): Promise<ChatToolResult> => {
             if (activeWorkspaceTools.some((tool) => tool.function.name === call.name)) {
               if (!isLocalPythonConfigured()) throw new Error("Workspace tools are not configured.");
-                  if (!executor) executor = new LocalPythonExecutor(ownerId, conversationId, responseDeadlineAt).withWorkspaceId(chatRequest.projectId ?? conversationId);
+              if (!executor) executor = new LocalPythonExecutor(ownerId, conversationId, responseDeadlineAt).withWorkspaceId(chatRequest.projectId ?? conversationId);
               return executeWorkspaceTool(call, { ownerId, conversationId, projectId: chatRequest.projectId, executor });
             }
             if (call.name === "run_python" && activePythonTools.length) {
               if (!isLocalPythonConfigured()) throw new Error("Python execution is not configured.");
-                  if (!executor) executor = new LocalPythonExecutor(ownerId, conversationId, responseDeadlineAt).withWorkspaceId(chatRequest.projectId ?? conversationId);
+              if (!executor) executor = new LocalPythonExecutor(ownerId, conversationId, responseDeadlineAt).withWorkspaceId(chatRequest.projectId ?? conversationId);
               return executePythonTool(call, executor, ownerId, conversationId, async (artifact, bytes, storageObjectId) => {
                 const pdfId = artifact.id;
                 if (artifact.contentType === DOCX_CONTENT_TYPE) await ingestDocx({ ownerId, conversationId, documentId: pdfId, filename: artifact.name, bytes, storageObjectId, alreadyUploaded: true, jobId: responseId, signal: roundSignal, projectId: artifact.projectId, revisionId: artifact.revisionId, parentRevisionId: artifact.parentRevisionId, origin: artifact.origin, editable: artifact.editable, sourceCompleteness: artifact.sourceCompleteness });
@@ -679,6 +684,18 @@ export async function generateChatResponse(
                 jobId: responseId,
                 signal: roundSignal,
                 responseDeadlineAt,
+              });
+            }
+            if (call.name === INSPECT_WORKSPACE_IMAGE_TOOL_NAME && activeWorkspaceImageTools.some((tool) => tool.function.name === call.name)) {
+              if (!isLocalPythonConfigured()) throw new Error("Workspace image inspection is not configured.");
+              if (!executor) executor = new LocalPythonExecutor(ownerId, conversationId, responseDeadlineAt).withWorkspaceId(chatRequest.projectId ?? conversationId);
+              return executeInspectWorkspaceImageTool(call, {
+                ownerId,
+                conversationId,
+                jobId: responseId,
+                signal: roundSignal,
+                responseDeadlineAt,
+                executor,
               });
             }
             if (call.name === RUN_SUBAGENT_TOOL_NAME && !subagentExecution) {
@@ -791,6 +808,14 @@ export async function generateChatResponse(
                 conversationId,
                 jobId: responseId,
                 signal: roundSignal,
+                workspace: isLocalPythonConfigured()
+                  ? {
+                      writeStream: async (path, source, size, options) => {
+                        if (!executor) executor = new LocalPythonExecutor(ownerId, conversationId, responseDeadlineAt).withWorkspaceId(chatRequest.projectId ?? conversationId);
+                        return executor.writeWorkspaceStream(path, source, size, options);
+                      },
+                    }
+                  : undefined,
                 onApproval: async (approval) => enqueue({ type: "connector_approval", approval }),
               });
             }

@@ -110,7 +110,7 @@ test("LocalPythonExecutor streams bounded workspace writes with authenticated me
     if (url.pathname === "/v1/workspace/write-stream") {
       const bytes = new Uint8Array(await new Response(init.body).arrayBuffer());
       requests.push({ url, method: init.method, headers: new Headers(init.headers), bytes });
-      return Response.json({ written: true, replaced: true, sha256: "c".repeat(64) });
+      return Response.json({ written: true, replaced: true, size: bytes.byteLength, sha256: "c".repeat(64) });
     }
     throw new Error(`Unexpected request: ${url.pathname}`);
   };
