@@ -37,7 +37,7 @@ HDD mount is present before any application container is started.
 - Next.js API routes live under `app/api/`
 - Docker Compose runs `web`, private PostgreSQL, `background-worker`, the
   private CPU-only `opendataloader-hybrid` PDF backend, SearXNG and Miniflux
-  search services, the MediaWiki/Wikipedia reference API, and private
+  search services with Wikipedia results routed through SearXNG, and private
   Firecrawl page retrieval
 
 ## Authentication
@@ -224,8 +224,9 @@ random characters in the deployment environment.
 ## Web tools
 
 The web tools use the private search stack configured in `.env.example`. A
-single `web_search` call queries SearXNG twice—the original query and the same
-query with `reddit` appended—plus MediaWiki/Wikipedia and Miniflux. The second
+single `web_search` call queries SearXNG three ways—the original query and the same
+query with `Wikipedia` appended and the same query with `reddit` appended—plus
+Miniflux. The Wikipedia query targets reference pages, while the second
 SearXNG stream keeps Reddit-hosted URLs, and the combined results are then
 deduplicated and ranked. Pass `focus=general`, `news`, `community`, or
 `reference` to change ranking priorities without excluding any provider.
@@ -265,13 +266,13 @@ environment, never in the generated YAML.
 When the background todo planner creates a non-empty plan for the current
 response, the server also advertises `deep_research_search`, `find_in_page`,
 `list_page_links`, and `follow_page_link`. Prior conversation todos do not
-unlock these tools. Every research query uses the same SearXNG/MediaWiki/Miniflux
+unlock these tools. Every research query uses the same SearXNG/Miniflux
 search aggregator, and every selected page is retrieved through Firecrawl.
 
 Deep Research uses the limits shown in `.env.example`, stores public extracted
 pages in the server-only `research_page_cache` table, and records its cheap
 background model calls as `deep_research` usage. Academic, developer, recent,
-official, and community intents change the SearXNG/MediaWiki/Miniflux
+official, and community intents change the SearXNG/Miniflux
 aggregator's ranking focus; the community stream is still the Reddit-suffixed
 SearXNG query rather than a separate provider API.
 

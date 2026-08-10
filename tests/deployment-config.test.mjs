@@ -40,7 +40,7 @@ test("search and retrieval services stay private to the Compose network", async 
     assert.doesNotMatch(block, /^    ports:/m, `${service} must not publish a host port`);
   }
   assert.match(compose, /SEARXNG_URL: \$\{SEARXNG_URL:-http:\/\/searxng:8080\}/);
-  assert.match(compose, /MEDIAWIKI_API_URL: \$\{MEDIAWIKI_API_URL:-https:\/\/en\.wikipedia\.org\/w\/api\.php\}/);
+  assert.doesNotMatch(compose, /MEDIAWIKI_API_URL|mediawiki/i);
   assert.match(compose, /FIRECRAWL_URL: \$\{FIRECRAWL_URL:-http:\/\/firecrawl:3002\}/);
   assert.doesNotMatch(compose, /redlib|REDLIB/i);
   assert.match(compose, /rabbitmq-diagnostics.*\n\s+interval: 10s\n\s+timeout: 20s\n\s+retries: 6\n\s+start_period: 120s/s);

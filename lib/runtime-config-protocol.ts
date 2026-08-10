@@ -14,7 +14,6 @@ export type RuntimeConfigKey =
   | "searxngFormats"
   | "searxngLimiter"
   | "searxngPublicInstance"
-  | "mediawikiApiUrl"
   | "minifluxUrl"
   | "firecrawlUrl"
   | "opendataloaderHybridUrl"
@@ -119,7 +118,7 @@ export type RuntimeConfigValueForKey<Key extends RuntimeConfigKey> =
       ? string[]
       : Key extends "deepResearchMaxEstimatedCostUsd"
         ? number
-        : Key extends "deploymentLocation" | "searxngUrl" | "mediawikiApiUrl" | "minifluxUrl" | "firecrawlUrl" | "opendataloaderHybridUrl" | "pythonWorkerUrl" | "pipedreamConnectBaseUrl"
+        : Key extends "deploymentLocation" | "searxngUrl" | "minifluxUrl" | "firecrawlUrl" | "opendataloaderHybridUrl" | "pythonWorkerUrl" | "pipedreamConnectBaseUrl"
           ? string
           : number;
 
@@ -205,7 +204,6 @@ export const RUNTIME_CONFIG_DESCRIPTORS: RuntimeConfigDescriptor[] = [
   descriptor({ key: "searxngFormats", label: "SearXNG formats", description: "Formats enabled on the SearXNG endpoint.", category: "search", type: "list", defaultValue: ["html", "json"], restartRequired: true }),
   descriptor({ key: "searxngLimiter", label: "SearXNG limiter", description: "Enable SearXNG request limiting.", category: "search", type: "boolean", defaultValue: false, restartRequired: true }),
   descriptor({ key: "searxngPublicInstance", label: "SearXNG public instance", description: "Allow SearXNG to behave as a public instance.", category: "search", type: "boolean", defaultValue: false, restartRequired: true }),
-  descriptor({ key: "mediawikiApiUrl", label: "MediaWiki API URL", description: "Explicit MediaWiki-compatible reference-search endpoint.", category: "providers", type: "url", envName: "MEDIAWIKI_API_URL", defaultValue: "https://en.wikipedia.org/w/api.php", restartRequired: false }),
   descriptor({ key: "minifluxUrl", label: "Miniflux URL", description: "RSS/news provider base URL.", category: "providers", type: "url", envName: "MINIFLUX_URL", defaultValue: "http://miniflux:8080", restartRequired: false }),
   descriptor({ key: "firecrawlUrl", label: "Firecrawl URL", description: "Page extraction provider base URL.", category: "providers", type: "url", envName: "FIRECRAWL_URL", defaultValue: "http://firecrawl:3002", restartRequired: false }),
   descriptor({ key: "opendataloaderHybridUrl", label: "OpenDataLoader URL", description: "Private PDF hybrid extraction service URL.", category: "providers", type: "url", envName: "OPENDATALOADER_HYBRID_URL", defaultValue: "http://opendataloader-hybrid:5002", restartRequired: false }),

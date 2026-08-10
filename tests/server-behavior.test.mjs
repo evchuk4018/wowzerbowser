@@ -205,16 +205,15 @@ test("web search queries every self-hosted provider and caps higher counts", asy
     assert.equal(result.web?.query, "current date");
     assert.equal(requestedUrls.length, 12);
     const searxngRequests = requested.filter(({ url }) => url.includes("searxng"));
-    assert.equal(searxngRequests.length, 6);
+    assert.equal(searxngRequests.length, 9);
     for (const searxngRequest of searxngRequests) {
       assert.equal(searxngRequest.init.method, "POST");
       assert.equal(searxngRequest.init.headers["Content-Type"], "application/x-www-form-urlencoded");
       assert.equal(new URLSearchParams(searxngRequest.init.body).get("categories"), "news");
     }
     assert.deepEqual(searxngRequests.map(({ init }) => new URLSearchParams(init.body).get("q")).sort(), [
-      "current date", "current date reddit", "current date latest updates", "current date latest updates reddit", "current date recent coverage", "current date recent coverage reddit",
+      "current date", "current date Wikipedia", "current date reddit", "current date latest updates", "current date latest updates Wikipedia", "current date latest updates reddit", "current date recent coverage", "current date recent coverage Wikipedia", "current date recent coverage reddit",
     ].sort());
-    assert.ok(requestedUrls.some((url) => url.includes("wikipedia")));
     assert.ok(requestedUrls.some((url) => url.includes("miniflux")));
     assert.equal(result.web?.results[0]?.url, "https://news.example.com/story");
     assert.equal("provider" in (result.web?.results[0] ?? {}), false);

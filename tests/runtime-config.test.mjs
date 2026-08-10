@@ -22,6 +22,7 @@ test("runtime configuration resolves environment defaults and bounded persisted 
   assert.equal(values.deepResearchMaxSearches, 7);
   assert.equal(values.deploymentLocation, "homelab");
   assert.ok(RUNTIME_CONFIG_DESCRIPTORS.some(({ key }) => key === "searxngFormats"));
+  assert.ok(!RUNTIME_CONFIG_DESCRIPTORS.some(({ key }) => key === "mediawikiApiUrl"));
 });
 
 test("assistant output limits are first-class runtime configurables", () => {

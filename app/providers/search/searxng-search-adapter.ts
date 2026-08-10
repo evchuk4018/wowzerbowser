@@ -77,6 +77,11 @@ export async function searchSearXNG(query: SearchProviderQuery, signal?: AbortSi
   return searchSearXNGWithProvider(query, "searxng", signal);
 }
 
+export async function searchSearXNGWikipedia(query: SearchProviderQuery, signal?: AbortSignal): Promise<SearchCandidate[]> {
+  const wikipediaQuery: SearchProviderQuery = { ...query, query: `${query.query.trim()} Wikipedia` };
+  return searchSearXNGWithProvider(wikipediaQuery, "searxng", signal);
+}
+
 export async function searchSearXNGReddit(query: SearchProviderQuery, signal?: AbortSignal): Promise<SearchCandidate[]> {
   const redditQuery: SearchProviderQuery = { ...query, query: `${query.query.trim()} reddit` };
   return searchSearXNGWithProvider(redditQuery, "searxng-reddit", signal, (item) => isRedditUrl(item.url));

@@ -1,9 +1,8 @@
 import "server-only";
 
 import type { SearchFocus } from "../../../lib/search-protocol";
-import { searchMediaWiki } from "../../providers/search/mediawiki-search-adapter";
 import { searchMiniflux } from "../../providers/search/miniflux-search-adapter";
-import { searchSearXNG, searchSearXNGReddit } from "../../providers/search/searxng-search-adapter";
+import { searchSearXNG, searchSearXNGReddit, searchSearXNGWikipedia } from "../../providers/search/searxng-search-adapter";
 import { rankSearchCandidates } from "./search-ranking";
 import { isSearchCandidateRelevant, scoreSearchCandidate } from "./search-relevance";
 import { searchProviderWithReliability } from "./search-provider-reliability";
@@ -109,7 +108,7 @@ export async function searchSelfHosted(input: {
   const providers: Array<[SearchProviderName, SearchProviderQuery, () => Promise<SearchCandidate[]>]> = queries.flatMap((query) => [
     ["searxng", query, () => searchSearXNG(query, input.signal)] as [SearchProviderName, SearchProviderQuery, () => Promise<SearchCandidate[]>],
     ["searxng-reddit", query, () => searchSearXNGReddit(query, input.signal)] as [SearchProviderName, SearchProviderQuery, () => Promise<SearchCandidate[]>],
-    ["mediawiki", query, () => searchMediaWiki(query, input.signal)] as [SearchProviderName, SearchProviderQuery, () => Promise<SearchCandidate[]>],
+    ["searxng", query, () => searchSearXNGWikipedia(query, input.signal)] as [SearchProviderName, SearchProviderQuery, () => Promise<SearchCandidate[]>],
     ["miniflux", query, () => searchMiniflux(query, input.signal)] as [SearchProviderName, SearchProviderQuery, () => Promise<SearchCandidate[]>],
   ]);
   const outcomes: ProviderOutcome[] = await Promise.all(providers.map(async ([name, query, request]): Promise<ProviderOutcome> => {

@@ -11,7 +11,7 @@ const ownerId = process.env.APP_OWNER_ID?.trim();
 if (!connectionString || !ownerId) throw new Error("DATABASE_URL and APP_OWNER_ID are required.");
 
 const exported = new Map([
-  ["SEARXNG_URL", "searxngUrl"], ["MEDIAWIKI_API_URL", "mediawikiApiUrl"], ["MINIFLUX_URL", "minifluxUrl"],
+  ["SEARXNG_URL", "searxngUrl"], ["MINIFLUX_URL", "minifluxUrl"],
   ["FIRECRAWL_URL", "firecrawlUrl"], ["OPENDATALOADER_HYBRID_URL", "opendataloaderHybridUrl"], ["PYTHON_WORKER_URL", "pythonWorkerUrl"],
   ["SEARCH_PROVIDER_CACHE_TTL_MS", "searchProviderCacheTtlMs"], ["SEARCH_PROVIDER_FAILURE_THRESHOLD", "searchProviderFailureThreshold"], ["SEARCH_PROVIDER_CIRCUIT_OPEN_MS", "searchProviderCircuitOpenMs"],
   ["FIRECRAWL_MAX_CONCURRENT_PAGES", "firecrawlMaxConcurrentPages"], ["FIRECRAWL_MAX_CONCURRENT_JOBS", "firecrawlMaxConcurrentJobs"], ["FIRECRAWL_BROWSER_POOL_SIZE", "firecrawlBrowserPoolSize"],

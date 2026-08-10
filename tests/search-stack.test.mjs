@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { extractFirecrawl } from "../app/providers/research/research-page-adapters.ts";
 import { searchMiniflux } from "../app/providers/search/miniflux-search-adapter.ts";
-import { searchSearXNG, searchSearXNGReddit } from "../app/providers/search/searxng-search-adapter.ts";
+import { searchSearXNG, searchSearXNGReddit, searchSearXNGWikipedia } from "../app/providers/search/searxng-search-adapter.ts";
 import { searchRequest } from "../app/providers/search/search-http.ts";
 import { SearchNoResultsError, SearchUnavailableError, searchSelfHosted } from "../app/server/search/search-service.ts";
 import { isSearchCandidateRelevant, scoreSearchCandidate } from "../app/server/search/search-relevance.ts";
@@ -97,7 +97,7 @@ test("a failing provider opens its circuit without taking healthy providers down
   try {
     const input = { query: "circuit breaker", focus: "community", count: 5 };
     for (let attempt = 0; attempt < 4; attempt += 1) assert.ok((await searchSelfHosted(input)).length > 0);
-    assert.equal(failingNormalCalls, 6);
+    assert.equal(failingNormalCalls, 8);
   } finally {
     globalThis.fetch = previousFetch;
     resetSearchProviderReliability();
@@ -117,6 +117,7 @@ test("community search uses an exact SearXNG Reddit query and filters non-Reddit
       const query = new URLSearchParams(init.body).get("q");
       calls.push({ url: value, init, query });
       if (query === "self hosted search") return Response.json({ results: [] });
+      if (query === "self hosted search Wikipedia") return Response.json({ results: [] });
       if (query === "self hosted search reddit") return Response.json({ results: [
         { title: "Unrelated result", url: "https://example.com/not-reddit", content: "Should be filtered" },
         { title: "Self-hosted search", url: "https://www.reddit.com/r/selfhosted/comments/abc123/self_hosted_search/", content: "Community experience" },
@@ -131,8 +132,8 @@ test("community search uses an exact SearXNG Reddit query and filters non-Reddit
   };
   try {
     const results = await searchSelfHosted({ query: "self hosted search", focus: "community", count: 3, queryIndex: 0, intent: "community" });
-    assert.equal(calls.length, 2);
-    assert.deepEqual(calls.map(({ query }) => query).sort(), ["self hosted search", "self hosted search reddit"]);
+    assert.equal(calls.length, 3);
+    assert.deepEqual(calls.map(({ query }) => query).sort(), ["self hosted search", "self hosted search Wikipedia", "self hosted search reddit"]);
     assert.equal(results.length, 3);
     assert.equal(results[0].provider, "searxng-reddit");
     assert.equal(results[0].rank, 2);
@@ -162,6 +163,26 @@ test("SearXNG Reddit-query failures preserve upstream HTTP statuses", async () =
         new RegExp(`status ${status}`),
       );
     }
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousUrl === undefined) delete process.env.SEARXNG_URL; else process.env.SEARXNG_URL = previousUrl;
+  }
+});
+
+test("Wikipedia search appends Wikipedia to the SearXNG query", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousUrl = process.env.SEARXNG_URL;
+  process.env.SEARXNG_URL = "http://searxng:8080";
+  let requestedQuery = "";
+  globalThis.fetch = async (_url, init = {}) => {
+    requestedQuery = new URLSearchParams(init.body).get("q") ?? "";
+    return Response.json({ results: [{ title: "Reference", url: "https://en.wikipedia.org/wiki/Reference", content: "Reference evidence" }] });
+  };
+  try {
+    const results = await searchSearXNGWikipedia({ query: "TypeScript", focus: "reference", count: 5, queryIndex: 0, intent: "reference" });
+    assert.equal(requestedQuery, "TypeScript Wikipedia");
+    assert.equal(results[0].provider, "searxng");
+    assert.equal(results[0].url, "https://en.wikipedia.org/wiki/Reference");
   } finally {
     globalThis.fetch = previousFetch;
     if (previousUrl === undefined) delete process.env.SEARXNG_URL; else process.env.SEARXNG_URL = previousUrl;
@@ -272,15 +293,11 @@ test("SearXNG rejects a successful HTML page instead of parsing the UI", async (
   }
 });
 
-test("general search does not return irrelevant MediaWiki fallback pages", async () => {
+test("general search does not return irrelevant Wikipedia results", async () => {
   const previousFetch = globalThis.fetch;
   globalThis.fetch = async (url) => {
     const value = String(url);
     if (value.includes("searxng")) return Response.json({ results: [] });
-    if (value.includes("wikipedia")) return Response.json({ query: { pages: {
-      "1": { title: "Major League Soccer", fullurl: "https://en.wikipedia.org/wiki/Major_League_Soccer", extract: "The league is a professional soccer competition." },
-      "2": { title: "FC Bayern Munich", fullurl: "https://en.wikipedia.org/wiki/FC_Bayern_Munich", extract: "A football club based in Munich." },
-    } } });
     return Response.json({ entries: [] });
   };
   try {
@@ -299,9 +316,6 @@ test("search returns healthy provider results when another provider is unavailab
   globalThis.fetch = async (url) => {
     const value = String(url);
     if (value.includes("searxng")) return Response.json({ results: [{ title: "Weather Cup guide", url: "https://example.com/weather-cup", content: "Magcargo matchup evidence" }] });
-    if (value.includes("wikipedia")) return Response.json({ query: { pages: {
-      "1": { title: "Major League Soccer", fullurl: "https://en.wikipedia.org/wiki/Major_League_Soccer", extract: "The league is a professional soccer competition." },
-    } } });
     return Response.json({ entries: [] });
   };
   try {
@@ -323,7 +337,7 @@ test("search reports rejected provider names when no provider has usable results
       (error) => error instanceof SearchUnavailableError
         && /searxng/.test(error.message)
         && /searxng-reddit/.test(error.message)
-        && /mediawiki/.test(error.message)
+        && !/mediawiki/i.test(error.message)
         && /miniflux/.test(error.message),
     );
   } finally {

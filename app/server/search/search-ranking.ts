@@ -11,10 +11,10 @@ export type SearchRankingOptions = {
 };
 
 const PROVIDER_WEIGHTS: Record<SearchFocus, Record<SearchProviderName, number>> = {
-  general: { searxng: 1, "searxng-reddit": 0.9, mediawiki: 0.9, miniflux: 0.9 },
-  news: { searxng: 1, "searxng-reddit": 0.65, mediawiki: 0.55, miniflux: 1.55 },
-  community: { searxng: 0.85, "searxng-reddit": 1.55, mediawiki: 0.6, miniflux: 0.65 },
-  reference: { searxng: 0.85, "searxng-reddit": 0.55, mediawiki: 1.6, miniflux: 0.6 },
+  general: { searxng: 1, "searxng-reddit": 0.9, miniflux: 0.9 },
+  news: { searxng: 1, "searxng-reddit": 0.65, miniflux: 1.55 },
+  community: { searxng: 0.85, "searxng-reddit": 1.55, miniflux: 0.65 },
+  reference: { searxng: 0.85, "searxng-reddit": 0.55, miniflux: 0.6 },
 };
 
 const LOW_QUALITY = /(?:pinterest\.|quora\.|answers\.com$|content-farm|clickhole)/i;
@@ -47,7 +47,6 @@ function isPrimary(candidate: SearchCandidate, domain: string): boolean {
 function sourceQuality(candidate: SearchCandidate, domain: string): number {
   if (LOW_QUALITY.test(domain)) return 0;
   if (isPrimary(candidate, domain)) return 1;
-  if (candidate.provider === "mediawiki") return 0.85;
   if (candidate.provider === "miniflux" || NEWS.test(domain)) return 0.75;
   if (candidate.provider === "searxng-reddit" || COMMUNITY.test(domain)) return 0.6;
   return 0.5;
@@ -58,7 +57,7 @@ function intentFit(candidate: SearchCandidate, focus: SearchFocus): number {
   const domain = host(candidate.url);
   const community = COMMUNITY.test(domain) || candidate.provider === "searxng-reddit";
   const news = NEWS.test(domain) || candidate.provider === "miniflux";
-  const reference = isPrimary(candidate, domain) || candidate.provider === "mediawiki";
+  const reference = isPrimary(candidate, domain);
 
   if (focus === "community") return community || intent === "community" ? 1 : 0.35;
   if (focus === "news") return news || intent === "recent" ? 1 : 0.35;
