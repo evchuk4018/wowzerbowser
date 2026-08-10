@@ -23,7 +23,13 @@ const googleGmail = new GoogleGmailProvider();
 const microsoftOutlook = new MicrosoftOutlookProvider();
 const remoteMcp = new RemoteMcpProvider();
 const localDrive = new LocalDriveProvider();
+const localDriveConnectionProvisioning = new Map<string, Promise<string>>();
 const localDriveProvisioning = new Map<string, Promise<string>>();
+
+export type ConnectorCatalogOptions = {
+  /** Refresh Local Drive's remote MCP manifest before returning the catalog. */
+  refreshLocalDriveTools?: boolean;
+};
 
 function provider(manifest: ConnectorManifest): ConnectorProvider {
   if (manifest.provider === "managed") return managed;
@@ -50,11 +56,15 @@ async function manifestsFor(ownerId: string): Promise<ConnectorManifest[]> {
   return [...MANAGED_CONNECTOR_MANIFESTS, ...custom.map(manifestFromRow).filter((item) => !MANAGED_CONNECTOR_MANIFESTS.some((managedItem) => managedItem.id === item.id))];
 }
 
-export async function listConnectorCatalog(ownerId: string): Promise<ConnectorCatalogItem[]> {
+export async function listConnectorCatalog(ownerId: string, options: ConnectorCatalogOptions = {}): Promise<ConnectorCatalogItem[]> {
   const manifests = await manifestsFor(ownerId);
   return Promise.all(manifests.map(async (manifest) => {
     try {
-      if (manifest.provider === "local_drive") await ensureLocalDriveConnection(ownerId);
+      if (manifest.provider === "local_drive") {
+        await (options.refreshLocalDriveTools === false
+          ? ensureLocalDriveConnectionRecord(ownerId)
+          : ensureLocalDriveConnection(ownerId));
+      }
       const [installation, connections, tools] = await Promise.all([getInstallation(ownerId, manifest.id), listConnections(ownerId, manifest.id), listTools(ownerId, manifest.id)]);
       return { ...manifest, installed: Boolean(installation?.enabled), providerAvailable: true, connections: connections.map(publicConnection), enabledToolCount: tools.filter((tool) => tool.enabled).length };
     } catch (error) {
@@ -138,6 +148,24 @@ export function ensureLocalDriveConnection(ownerId: string): Promise<string> {
 }
 
 async function provisionLocalDriveConnection(ownerId: string): Promise<string> {
+  const connectionId = await ensureLocalDriveConnectionRecord(ownerId);
+  const connection = await getConnection(ownerId, connectionId);
+  if (!connection) throw new Error("Local Drive connection could not be loaded.");
+  const cachedTools = await listTools(ownerId, LOCAL_DRIVE_CONNECTOR_ID);
+  if (connection.status !== "connected" || !cachedTools.some((tool) => tool.connection_id === connectionId) || !cachedTools.some((tool) => tool.connection_id === connectionId && tool.name === LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME)) await discoverConnectorTools(ownerId, LOCAL_DRIVE_CONNECTOR_ID, connectionId);
+  return connectionId;
+}
+
+/** Ensure the owner-scoped Local Drive records exist without making a remote call. */
+function ensureLocalDriveConnectionRecord(ownerId: string): Promise<string> {
+  const pending = localDriveConnectionProvisioning.get(ownerId);
+  if (pending) return pending;
+  const task = provisionLocalDriveConnectionRecord(ownerId).finally(() => localDriveConnectionProvisioning.delete(ownerId));
+  localDriveConnectionProvisioning.set(ownerId, task);
+  return task;
+}
+
+async function provisionLocalDriveConnectionRecord(ownerId: string): Promise<string> {
   const manifest = connectorManifest(LOCAL_DRIVE_CONNECTOR_ID);
   if (!manifest) throw new Error("Local Drive connector is not registered.");
   if (!process.env.LOCAL_DRIVE_API_TOKEN?.trim()) throw new Error("Local Drive is not configured.");
@@ -152,8 +180,6 @@ async function provisionLocalDriveConnection(ownerId: string): Promise<string> {
 
   const connection = await getConnection(ownerId, connectionId);
   if (!connection) throw new Error("Local Drive connection could not be loaded.");
-  const cachedTools = await listTools(ownerId, manifest.id);
-  if (connection.status !== "connected" || !cachedTools.some((tool) => tool.connection_id === connectionId) || !cachedTools.some((tool) => tool.connection_id === connectionId && tool.name === LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME)) await discoverConnectorTools(ownerId, manifest.id, connectionId);
   return connectionId;
 }
 

@@ -125,14 +125,15 @@ export async function recoverPersistedJob({
       continue;
     }
     if (signal.aborted) return;
+    const afterBeforeSnapshot = after;
     for (const event of snapshot.events) {
       if (!isSequencedEvent(event) || event.sequence <= after) continue;
       after = event.sequence;
       currentMessage = applyChatStreamEvent(currentMessage, event, event.sequence);
       dispatch({ type: "UPDATE_MESSAGE", conversationId: candidate.conversationId, messageId: candidate.message.id, patch: currentMessage });
     }
+    if (after > afterBeforeSnapshot) retryAttempt = 0;
     if (snapshot.hasMore) {
-      retryAttempt = 0;
       continue;
     }
     const terminal = terminalAction(candidate, snapshot);

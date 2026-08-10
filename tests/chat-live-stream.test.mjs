@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readChatLiveStream } from "../app/chat/read-chat-live-stream.ts";
 import { streamChatResponse } from "../app/chat/chat-service.ts";
+import { encodeChatLiveHeartbeat } from "../app/server/chat/encode-chat-live-envelope.ts";
 import {
   CHAT_JOB_EVENTS_CHANNEL,
   createChatJobEventSubscription,
@@ -104,6 +105,15 @@ test("reads fragmented SSE frames in order", async () => {
 test("ignores malformed SSE frames without dropping later events", async () => {
   const valid = { type: "event", event: { type: "content", delta: "ok", sequence: 1, jobId: "job-1" } };
   const response = new Response(`data: not-json\n\ndata: ${JSON.stringify(valid)}\n\n`);
+  const received = [];
+  for await (const frame of readChatLiveStream(response)) received.push(frame);
+  assert.deepEqual(received, [valid]);
+});
+
+test("ignores SSE transport heartbeats without dropping later events", async () => {
+  assert.equal(new TextDecoder().decode(encodeChatLiveHeartbeat()), ": heartbeat\n\n");
+  const valid = { type: "event", event: { type: "content", delta: "ok", sequence: 1, jobId: "job-1" } };
+  const response = new Response(`: heartbeat\n\ndata: ${JSON.stringify(valid)}\n\n`);
   const received = [];
   for await (const frame of readChatLiveStream(response)) received.push(frame);
   assert.deepEqual(received, [valid]);

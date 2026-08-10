@@ -3,7 +3,7 @@ import "server-only";
 import type { ConnectorApprovalDecision, ConnectorApprovalSummary } from "../../../lib/connector-protocol";
 import { createApproval, getApproval, readApprovalStatus, resolveApproval, setPermission } from "./connector-repository";
 import { redactConnectorValue } from "./connector-redaction";
-import { resumeChatJobAfterApproval, setChatJobAwaitingApproval } from "../chat/chat-job-store";
+import { resumeChatJobAfterApproval } from "../chat/chat-job-store";
 
 const APPROVAL_RETRY_INITIAL_MS = 300;
 const APPROVAL_RETRY_MAX_MS = 1_500;
@@ -32,7 +32,10 @@ export async function requestConnectorApproval(values: {
   connectorName: string; accountLabel: string | null; toolName: string; description: string; access: "read" | "write" | "destructive"; arguments: Record<string, unknown>;
 }): Promise<{ id: string; summary: ConnectorApprovalSummary }> {
   const id = await createApproval({ ownerId: values.ownerId, jobId: values.jobId, conversationId: values.conversationId, connectorId: values.connectorId, connectionId: values.connectionId, toolName: values.toolName, description: values.description, access: values.access, importantArguments: redactConnectorValue(values.arguments) as Record<string, unknown> });
-  if (values.jobId && values.conversationId) await setChatJobAwaitingApproval(values.ownerId, values.conversationId, values.jobId);
+  // Connector execution waits for the decision inside the active worker. Keep
+  // that worker's lease valid so its tool-call and approval events can flush
+  // before the user acts. Clearing the lease here makes the approval invisible
+  // and aborts the exact tool call that is waiting for it.
   return { id, summary: { approvalId: id, ...(values.jobId ? { jobId: values.jobId } : {}), connectorId: values.connectorId, connectorName: values.connectorName, connectionId: values.connectionId, accountLabel: values.accountLabel, toolName: values.toolName, description: values.description, access: values.access, importantArguments: redactConnectorValue(values.arguments) as Record<string, unknown>, createdAt: new Date().toISOString() } };
 }
 

@@ -103,20 +103,24 @@ test("replay is ordered, exclusive, and owner isolated", async () => {
 });
 
 test("live delivery uses SSE while recovery uses bounded exponential backoff", async () => {
-  const [service, recovery, hook, backoff] = await Promise.all([
+  const [service, recovery, hook, backoff, jobStream] = await Promise.all([
     source("app/chat/chat-service.ts"),
     source("app/chat/chat-job-recovery.ts"),
     source("app/chat/use-persisted-job-recovery.ts"),
     source("app/chat/chat-retry-backoff.ts"),
+    source("app/server/chat/chat-job-stream.ts"),
   ]);
   assert.match(service, /readChatLiveStream/);
   assert.match(service, /snapshot\.hasMore/);
   assert.match(service, /waitForChatRetry/);
   assert.match(recovery, /resumeChatJob/);
   assert.match(recovery, /waitForChatRetry/);
+  assert.match(service, /sequence > sequenceBeforeSnapshot\) retryAttempt = 0/);
+  assert.match(recovery, /after > afterBeforeSnapshot\) retryAttempt = 0/);
   assert.match(hook, /visibilitychange/);
   assert.match(backoff, /Math\.min\(maxMs/);
   assert.match(backoff, /0\.8 \+ random\(\) \* 0\.4/);
+  assert.match(jobStream, /encodeChatLiveHeartbeat/);
 });
 
 test("disconnect is delivery-only while explicit stop calls durable cancellation", async () => {
@@ -127,6 +131,23 @@ test("disconnect is delivery-only while explicit stop calls durable cancellation
   assert.match(generation, /controller\.signal\.aborted[\s\S]*pendingEvents\.length = 0/);
   assert.match(runner, /renewChatJob/);
   assert.match(runner, /CHAT_JOB_HEARTBEAT_MS/);
+});
+
+test("connector approvals retain the active worker lease until the decision is delivered", async () => {
+  const approvalService = await source("app/server/connectors/connector-approval-service.ts");
+  assert.doesNotMatch(approvalService, /setChatJobAwaitingApproval/);
+  assert.match(approvalService, /createApproval/);
+  assert.match(approvalService, /waitForConnectorApproval/);
+});
+
+test("chat startup reads cached Local Drive tools without remote manifest refresh", async () => {
+  const [chatService, connectorService] = await Promise.all([
+    source("app/chat/chat-server-service.ts"),
+    source("app/server/connectors/connector-service.ts"),
+  ]);
+  assert.match(chatService, /listConnectorCatalog\(ownerId, \{ refreshLocalDriveTools: false \}\)/);
+  assert.match(connectorService, /ensureLocalDriveConnectionRecord/);
+  assert.match(connectorService, /options\.refreshLocalDriveTools === false/);
 });
 
 test("page reload and visibility restoration retain sequence and final output", async () => {

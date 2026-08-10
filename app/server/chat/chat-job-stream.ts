@@ -1,5 +1,5 @@
 import type { ChatJobResumeResponse, ChatJobSubmissionResponse, ChatJobTerminalResponse } from "../../../lib/chat-protocol";
-import { encodeChatLiveEnvelope } from "./encode-chat-live-envelope";
+import { encodeChatLiveEnvelope, encodeChatLiveHeartbeat } from "./encode-chat-live-envelope";
 import { getChatJob } from "./chat-job-store";
 import { subscribeToChatJobEvents } from "./chat-live-notifier";
 
@@ -47,16 +47,18 @@ export function streamChatJob(
   if (requestSignal.aborted) controller.abort(requestSignal.reason);
   else requestSignal.addEventListener("abort", abortFromRequest, { once: true });
 
-  const send = (streamController: ReadableStreamDefaultController<Uint8Array>, value: Parameters<typeof encodeChatLiveEnvelope>[0]): boolean => {
+  const sendBytes = (streamController: ReadableStreamDefaultController<Uint8Array>, value: Uint8Array): boolean => {
     if (controller.signal.aborted) return false;
     try {
-      streamController.enqueue(encodeChatLiveEnvelope(value));
+      streamController.enqueue(value);
       return true;
     } catch {
       controller.abort();
       return false;
     }
   };
+  const send = (streamController: ReadableStreamDefaultController<Uint8Array>, value: Parameters<typeof encodeChatLiveEnvelope>[0]): boolean =>
+    sendBytes(streamController, encodeChatLiveEnvelope(value));
 
   return new ReadableStream<Uint8Array>({
     start(streamController) {
@@ -87,10 +89,11 @@ export function streamChatJob(
               const abortTimeout = () => timeoutController.abort(controller.signal.reason);
               controller.signal.addEventListener("abort", abortTimeout, { once: true });
               try {
-                await Promise.race([
-                  subscription.waitForNotification(timeoutController.signal),
-                  waitFor(LIVE_HEARTBEAT_MS, timeoutController.signal),
+                const wakeReason = await Promise.race([
+                  subscription.waitForNotification(timeoutController.signal).then(() => "notification" as const),
+                  waitFor(LIVE_HEARTBEAT_MS, timeoutController.signal).then(() => "heartbeat" as const),
                 ]);
+                if (wakeReason === "heartbeat" && !sendBytes(streamController, encodeChatLiveHeartbeat())) return;
               } finally {
                 controller.signal.removeEventListener("abort", abortTimeout);
                 timeoutController.abort();

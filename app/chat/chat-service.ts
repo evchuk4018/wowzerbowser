@@ -268,6 +268,7 @@ export async function* streamChatResponse(
       if (!(await waitForChatRetry(retrySignal, retryAttempt++))) return;
       continue; // transient network loss: replay resumes strictly after sequence
     }
+    const sequenceBeforeSnapshot = sequence;
     for (const event of snapshot.events) {
       if (event.sequence <= sequence) continue;
       sequence = event.sequence;
@@ -275,6 +276,7 @@ export async function* streamChatResponse(
       if (event.type === "done") sawDone = true;
       yield event;
     }
+    if (sequence > sequenceBeforeSnapshot) retryAttempt = 0;
     if (snapshot.hasMore) continue;
     if (["completed", "failed", "cancelled"].includes(snapshot.status)) {
       for (const event of chatTerminalEvents({

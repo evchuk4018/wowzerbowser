@@ -163,7 +163,7 @@ export async function generateChatResponse(
     Promise.all(requestedPdfIds.map(async (pdfId) => [pdfId, await getAuthorizedDocument(ownerId, conversationId, pdfId)] as const)),
     chatRequest.projectId ? listAuthorizedProjectDocuments(ownerId, conversationId) : Promise.resolve([]),
     chatRequest.projectId ? listAuthorizedProjectImages(ownerId, conversationId) : Promise.resolve([]),
-    !automationExecution ? listConnectorCatalog(ownerId).catch((error) => {
+    !automationExecution ? listConnectorCatalog(ownerId, { refreshLocalDriveTools: false }).catch((error) => {
       console.warn({ event: "connectors-unavailable", ownerId, failure: error instanceof Error ? error.name : "UnknownError" });
       return [];
     }) : Promise.resolve([]),
