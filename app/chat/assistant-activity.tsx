@@ -77,11 +77,104 @@ function PythonDisclosure({ activity }: { activity: PythonActivity }) {
 }
 
 function WebDisclosure({ activity }: { activity: WebActivity }) {
-  const [open, setOpen] = useState(false); const liveDuration = useLiveDuration(activity.startedAt, activity.status === "running"); const duration = activity.durationMs ?? liveDuration;
-  const web = activity.result?.web; const utility = activity.result?.utility;
-  const label = web?.kind === "search" ? `Search: ${web.query}` : web?.kind === "page" ? `Page: ${web.source.url}` : utility?.kind === "time" ? `Time: ${utility.timeZone}` : utility?.kind === "date" ? `Date: ${utility.timeZone}` : utility?.kind === "location" ? "Deployment location" : activity.call.name === "web_search" ? "Web search" : activity.call.name === "fetch_page" ? "Fetch page" : activity.call.name;
-  const output = web?.kind === "search" ? web.results.map((item) => `${item.title}\n${item.url}\n${item.snippet}`).join("\n\n") : web?.kind === "page" ? `${web.source.title}\n${web.source.url}\n\n${web.markdown}` : utility?.kind === "time" ? `${utility.currentTime}\n${utility.timeZone}` : utility?.kind === "date" ? `${utility.currentDate}\n${utility.timeZone}` : utility?.kind === "location" ? utility.available ? `${utility.location}\nSource: deployment metadata` : utility.message : activity.result?.stderr ?? "Waiting for result…";
+  const [open, setOpen] = useState(false);
+  const liveDuration = useLiveDuration(activity.startedAt, activity.status === "running");
+  const duration = activity.durationMs ?? liveDuration;
+  const web = activity.result?.web;
+  const utility = activity.result?.utility;
+  const requestedUrl = urlArgumentForWebActivity(activity);
+  const label = web?.kind === "search"
+    ? `Search: ${web.query}`
+    : web?.kind === "page"
+      ? `Page: ${web.source.url}`
+      : utility?.kind === "time"
+        ? `Time: ${utility.timeZone}`
+        : utility?.kind === "date"
+          ? `Date: ${utility.timeZone}`
+          : utility?.kind === "location"
+            ? "Deployment location"
+            : activity.call.name === "web_search"
+              ? "Web search"
+              : activity.call.name === "fetch_page"
+                ? "Fetch page"
+                : activity.call.name;
+  const output = web?.kind === "search"
+    ? [
+      web.results.length > 0
+        ? [
+          "Sites visited",
+          ...uniqueWebValues(web.results.map((item) => siteForWebSource(item))).map((site) => `- ${site}`),
+        ].join("\n")
+        : "",
+      web.results.length > 0
+        ? [
+          "URLs fetched",
+          ...uniqueWebValues(web.results.map((item) => item.url)).map((url) => `- ${url}`),
+        ].join("\n")
+        : "",
+      web.results.length > 0
+        ? [
+          "Search results",
+          web.results.map((item, index) => `${index + 1}. ${item.title}\n${item.snippet}`).join("\n\n"),
+        ].join("\n")
+        : "No results",
+    ].filter(Boolean).join("\n\n")
+    : web?.kind === "page"
+      ? [
+        [
+          "Sites visited",
+          `- ${siteForWebSource(web.source)}`,
+        ].join("\n"),
+        [
+          "URLs fetched",
+          `- ${web.source.url}`,
+        ].join("\n"),
+        [
+          "Page content",
+          web.source.title,
+          web.markdown,
+        ].join("\n"),
+      ].join("\n\n")
+      : utility?.kind === "time"
+        ? `${utility.currentTime}\n${utility.timeZone}`
+        : utility?.kind === "date"
+          ? `${utility.currentDate}\n${utility.timeZone}`
+          : utility?.kind === "location"
+            ? utility.available
+              ? `${utility.location}\nSource: deployment metadata`
+              : utility.message
+            : activity.result?.stderr ?? (requestedUrl
+              ? `URL to fetch\n- ${requestedUrl}`
+              : "Waiting for result…");
   return <div className={`web-nested web-nested-${activity.status}`}><button type="button" className="web-nested-summary" aria-expanded={open} onClick={() => setOpen((value) => !value)}><span className="python-nested-chevron">{open ? "⌄" : "›"}</span><span className="web-activity-label">{label}</span><span className="python-activity-status">{activity.status === "running" ? "Running" : activity.status === "completed" ? "Completed" : "Failed"}</span>{duration !== undefined && <span className="python-activity-duration">{formatDuration(duration)}</span>}</button>{open && <pre className="web-output">{output}</pre>}</div>;
+}
+
+function uniqueWebValues(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function siteForWebUrl(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./i, "");
+  } catch {
+    return url;
+  }
+}
+
+function siteForWebSource(source: Pick<ChatSource, "publisher" | "url">): string {
+  return source.publisher.trim() || siteForWebUrl(source.url);
+}
+
+function urlArgumentForWebActivity(activity: WebActivity): string | undefined {
+  if (activity.call.name !== "fetch_page") return undefined;
+  try {
+    const argumentsValue = JSON.parse(activity.call.arguments) as { url?: unknown };
+    return typeof argumentsValue.url === "string" && argumentsValue.url.trim()
+      ? argumentsValue.url.trim()
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 function ImageDisclosure({ activity }: { activity: ImageActivity }) {
   const [open, setOpen] = useState(false);

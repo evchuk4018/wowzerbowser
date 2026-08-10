@@ -883,6 +883,9 @@ test("renders web activities inside thought-process disclosures", async () => {
   assert.match(activity, /const latestSummary = reasoningItems\.reduce/);
   assert.match(activity, /summary: latestSummary\.summary/);
   assert.match(activity, /web\.results/);
+  assert.match(activity, /Sites visited/);
+  assert.match(activity, /URLs fetched/);
+  assert.match(activity, /siteForWebSource/);
   assert.match(activity, /web\.markdown/);
   assert.match(`${stream}\n${history}`, /kind: call\.name === "run_python" \? "python" : "web"/);
   assert.match(styles, /\.web-nested/);
