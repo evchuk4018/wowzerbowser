@@ -19,7 +19,7 @@ export type ConnectorManifest = {
   defaultApproval: {
     read: ApprovalMode;
     write: ApprovalMode;
-    destructive: "always";
+    destructive: ApprovalMode;
   };
 };
 

@@ -8,7 +8,7 @@ import { normalizeMcpResult } from "../app/server/connectors/mcp/mcp-result-norm
 import { redactConnectorError, redactConnectorValue } from "../app/server/connectors/connector-redaction.ts";
 import { GoogleGmailProvider } from "../app/server/connectors/providers/google-gmail-provider.ts";
 import { MicrosoftOutlookProvider } from "../app/server/connectors/providers/microsoft-outlook-provider.ts";
-import { classifyLocalDriveToolAccess, LOCAL_DRIVE_WORKSPACE_DOWNLOAD_MAX_BYTES, LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME, LocalDriveProvider } from "../app/server/connectors/providers/local-drive-provider.ts";
+import { classifyLocalDriveToolAccess, localDriveToolRequiresApproval, LOCAL_DRIVE_WORKSPACE_DOWNLOAD_MAX_BYTES, LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME, LocalDriveProvider } from "../app/server/connectors/providers/local-drive-provider.ts";
 import { requiresConnectorApproval } from "../app/server/connectors/connector-policy.ts";
 import { exchangeMicrosoftOutlookCode, microsoftOutlookAuthorizationUrl, refreshMicrosoftOutlookAccessToken } from "../app/server/connectors/providers/microsoft-outlook-oauth.ts";
 import { outlookGetMessage, outlookSearch, MicrosoftOutlookAuthorizationError } from "../app/server/connectors/providers/microsoft-outlook-adapter.ts";
@@ -23,7 +23,7 @@ test("managed connector registry exposes the initial catalog", () => {
   assert.equal(MANAGED_CONNECTOR_MANIFESTS.find(({ id }) => id === "local_drive").provider, "local_drive");
 });
 
-test("Local Drive classifies every expected operation with the normal approval tier", async () => {
+test("Local Drive classifies operations while approving only explicit file overwrites", async () => {
   assert.deepEqual([
     classifyLocalDriveToolAccess("drive_list", ""),
     classifyLocalDriveToolAccess("drive_search", ""),
@@ -37,8 +37,16 @@ test("Local Drive classifies every expected operation with the normal approval t
     classifyLocalDriveToolAccess("drive_trash_item", ""),
     classifyLocalDriveToolAccess("drive_restore_item", ""),
     classifyLocalDriveToolAccess("drive_delete_permanently", ""),
-  ], ["read", "read", "read", "read", "write", "write", "write", "write", "write", "destructive", "destructive", "destructive"]);
-  assert.equal(await requiresConnectorApproval("owner", MANAGED_CONNECTOR_MANIFESTS.find(({ id }) => id === "local_drive"), "drive_delete_permanently", "destructive"), true);
+  ], ["read", "read", "read", "read", "read", "write", "write", "write", "write", "destructive", "destructive", "destructive"]);
+  const manifest = MANAGED_CONNECTOR_MANIFESTS.find(({ id }) => id === "local_drive");
+  assert.deepEqual(manifest.defaultApproval, { read: "never", write: "never", destructive: "never" });
+  assert.equal(await requiresConnectorApproval("owner", manifest, "drive_delete_permanently", "destructive"), false);
+  assert.equal(await requiresConnectorApproval("owner", manifest, LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME, "read", { overwrite: false }), false);
+  assert.equal(await requiresConnectorApproval("owner", manifest, LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME, "read", { overwrite: true }), true);
+  assert.equal(await requiresConnectorApproval("owner", manifest, "drive_write_file", "write", { name: "new.txt" }), false);
+  assert.equal(await requiresConnectorApproval("owner", manifest, "drive_write_file", "write", { overwrite_id: "existing-file" }), true);
+  assert.equal(localDriveToolRequiresApproval("drive_trash_item", {}), false);
+  assert.equal(await requiresConnectorApproval("owner", MANAGED_CONNECTOR_MANIFESTS.find(({ id }) => id === "slack"), "delete_message", "destructive"), true);
 });
 
 test("email connectors are placed in Tools", () => {
@@ -248,7 +256,7 @@ test("Local Drive MCP provider discovers and executes drive_list with auth on ev
     const tools = await provider.listTools({ ownerId: "owner", connectorId: "local_drive" });
     assert.deepEqual(tools.map(({ name }) => name), ["drive_list", "drive_search", "drive_get_metadata", "drive_read_text", "drive_write_file", "drive_create_folder", "drive_rename_item", "drive_move_item", "drive_trash_item", "drive_restore_item", "drive_delete_permanently", LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME]);
     assert.equal(tools.find(({ name }) => name === "drive_list").description, "List files and folders in a Local Drive folder.");
-    assert.equal(tools.find(({ name }) => name === LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME).access, "write");
+    assert.equal(tools.find(({ name }) => name === LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME).access, "read");
     assert.match(tools.find(({ name }) => name === LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME).description, /1 GiB/);
     assert.equal(tools.find(({ name }) => name === "drive_delete_permanently").access, "destructive");
     const result = await provider.callTool({ ownerId: "owner", connectorId: "local_drive", tool: tools[0], arguments: { folderId: "root" } });

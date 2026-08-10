@@ -73,7 +73,7 @@ export async function executeConnectorTool(call: ChatToolCall, context: { ownerI
     if (!row || row.enabled === false || (connectorId === "gmail" && row.access !== "read") || (await getPermission(context.ownerId, connectorId, row.name))?.enabled === false) return failed(call, "This connector tool is disabled.");
     const tool: ConnectorTool = { id: row.id, connectorId: row.connector_id, name: row.name, namespacedName: call.name, description: row.description, inputSchema: row.input_schema, access: row.access, enabled: row.enabled, connectorVersion: row.connector_version, discoveredAt: row.discovered_at, ...(row.connection_id ? { connectionId: row.connection_id } : {}) };
     const argumentsValue = parsedArguments(call);
-    if (await requiresConnectorApproval(context.ownerId, manifest, row.name, row.access)) {
+    if (await requiresConnectorApproval(context.ownerId, manifest, row.name, row.access, argumentsValue)) {
       const approval = await requestConnectorApproval({ ownerId: context.ownerId, jobId: context.jobId, conversationId: context.conversationId, connectorId, connectionId: connection.id, connectorName: manifest.name, accountLabel: connection.account_label, toolName: row.name, description: row.description, access: row.access, arguments: argumentsValue });
       await context.onApproval?.(approval.summary);
       const decision = await waitForConnectorApproval(context.ownerId, approval.id, context.signal);

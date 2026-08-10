@@ -10,7 +10,7 @@ import { workspacePath } from "../../../../lib/workspace-protocol";
 export const LOCAL_DRIVE_CONNECTOR_ID = "local_drive";
 export const LOCAL_DRIVE_MCP_ENDPOINT = "https://homelab.tail861ffd.ts.net/drive/mcp";
 export const LOCAL_DRIVE_HEALTH_ENDPOINT = "https://homelab.tail861ffd.ts.net/drive/api/health";
-export const LOCAL_DRIVE_VERSION = "1.1.0";
+export const LOCAL_DRIVE_VERSION = "1.2.0";
 export const LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME = "drive_download_to_workspace";
 export const LOCAL_DRIVE_WORKSPACE_DOWNLOAD_MAX_BYTES = 1024 * 1024 * 1024;
 
@@ -26,11 +26,11 @@ const LOCAL_DRIVE_TOOL_DESCRIPTIONS: Record<string, string> = {
   drive_move_item: "Move a Local Drive file or folder to another folder.",
   drive_trash_item: "Move a Local Drive file or folder to trash.",
   drive_restore_item: "Restore a Local Drive file or folder from trash.",
-  drive_delete_permanently: "Permanently delete a Local Drive file or folder. This always requires explicit approval.",
+  drive_delete_permanently: "Permanently delete a Local Drive file or folder.",
 };
 
-const LOCAL_DRIVE_READ_TOOLS = new Set(["drive_list", "drive_search", "drive_get_metadata", "drive_read_text"]);
-const LOCAL_DRIVE_WRITE_TOOLS = new Set([LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME, "drive_write_file", "drive_create_folder", "drive_rename_item", "drive_move_item"]);
+const LOCAL_DRIVE_READ_TOOLS = new Set(["drive_list", "drive_search", "drive_get_metadata", "drive_read_text", LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME]);
+const LOCAL_DRIVE_WRITE_TOOLS = new Set(["drive_write_file", "drive_create_folder", "drive_rename_item", "drive_move_item"]);
 const LOCAL_DRIVE_DESTRUCTIVE_TOOLS = new Set(["drive_trash_item", "drive_restore_item", "drive_delete_permanently"]);
 
 const WORKSPACE_DOWNLOAD_INPUT_SCHEMA = {
@@ -50,6 +50,13 @@ export function classifyLocalDriveToolAccess(name: string, description: string):
   if (LOCAL_DRIVE_WRITE_TOOLS.has(name)) return "write";
   if (LOCAL_DRIVE_DESTRUCTIVE_TOOLS.has(name)) return "destructive";
   return classifyConnectorToolAccess(name, description);
+}
+
+/** Local Drive is private; only explicit replacement of an existing file asks. */
+export function localDriveToolRequiresApproval(name: string, argumentsValue: Record<string, unknown>): boolean {
+  if (name === LOCAL_DRIVE_WORKSPACE_DOWNLOAD_TOOL_NAME) return argumentsValue.overwrite === true;
+  if (name === "drive_write_file") return typeof argumentsValue.overwrite_id === "string" && Boolean(argumentsValue.overwrite_id.trim());
+  return false;
 }
 
 export function localDriveToolDescription(name: string, description?: string): string {
