@@ -10,6 +10,7 @@ import {
   type UserMemoryWriter,
 } from "../../../lib/user-memory";
 import { databaseOwnerId, isoTimestamp, jsonb, query } from "../database/database";
+import { hashSensitiveMemory } from "./user-memory-hash";
 
 export type MemoryWriteContext = {
   ownerId: string;
@@ -21,7 +22,7 @@ export type MemoryWriteContext = {
 };
 
 type FolderRow = { id: string; parent_id: string | null; name: string; created_at: unknown };
-type MemoryRow = { id: string; folder_id: string; content: string; source_chat_id: string; source_job_id: string; writer: UserMemoryWriter; created_at: unknown; updated_at: unknown };
+type MemoryRow = { id: string; folder_id: string; content: string; is_sensitive: boolean; source_chat_id: string; source_job_id: string; writer: UserMemoryWriter; created_at: unknown; updated_at: unknown };
 
 async function ensureProfile(ownerId: string): Promise<void> {
   await query("insert into user_memory_profiles(owner_id) values($1) on conflict(owner_id) do nothing", [databaseOwnerId(ownerId)]);
@@ -71,7 +72,7 @@ function folderValue(row: FolderRow, paths: Map<string, string[]>): UserMemoryFo
 }
 
 function memoryValue(row: MemoryRow): UserMemory {
-  return { id: row.id, folderId: row.folder_id, content: row.content, sourceChatId: row.source_chat_id, sourceJobId: row.source_job_id, writer: row.writer, createdAt: isoTimestamp(row.created_at), updatedAt: isoTimestamp(row.updated_at) };
+  return { id: row.id, folderId: row.folder_id, content: row.content, sensitive: row.is_sensitive, sourceChatId: row.source_chat_id, sourceJobId: row.source_job_id, writer: row.writer, createdAt: isoTimestamp(row.created_at), updatedAt: isoTimestamp(row.updated_at) };
 }
 
 export async function getUserMemoryTree(ownerId: string): Promise<UserMemoryTree> {
@@ -80,7 +81,7 @@ export async function getUserMemoryTree(ownerId: string): Promise<UserMemoryTree
   const [[profile], folders, memories] = await Promise.all([
     query<{ revision: number }>("select revision from user_memory_profiles where owner_id=$1", [databaseOwner]),
     query<FolderRow>("select id,parent_id,name,created_at from user_memory_folders where owner_id=$1 and deleted_at is null order by name", [databaseOwner]),
-    query<MemoryRow>("select id,folder_id,content,source_chat_id,source_job_id,writer,created_at,updated_at from user_memories where owner_id=$1 and deleted_at is null order by updated_at desc", [databaseOwner]),
+    query<MemoryRow>("select id,folder_id,content,is_sensitive,source_chat_id,source_job_id,writer,created_at,updated_at from user_memories where owner_id=$1 and deleted_at is null order by updated_at desc", [databaseOwner]),
   ]);
   const paths = pathsFor(folders);
   return { revision: Number(profile.revision), folders: folders.map((row) => folderValue(row, paths)), memories: memories.map(memoryValue) };
@@ -121,18 +122,27 @@ function fingerprint(content: string): string {
   return createHash("sha256").update(normalizeMemoryKey(content)).digest("hex");
 }
 
-const memoryColumns = "id,folder_id,content,source_chat_id,source_job_id,writer,created_at,updated_at";
+const memoryColumns = "id,folder_id,content,is_sensitive,source_chat_id,source_job_id,writer,created_at,updated_at";
 
-export async function addUserMemory(context: MemoryWriteContext, folderId: string, content: string): Promise<UserMemory> {
+function persistedContent(content: string, sensitive: boolean): string {
+  return sensitive ? hashSensitiveMemory(content) : content;
+}
+
+function persistedFingerprint(content: string, sensitive: boolean): string {
+  return fingerprint(persistedContent(content, sensitive));
+}
+
+export async function addUserMemory(context: MemoryWriteContext, folderId: string, content: string, sensitive = false): Promise<UserMemory> {
   const owner = databaseOwnerId(context.ownerId);
+  const storedContent = persistedContent(content, sensitive);
   try {
-    const [row] = await query<MemoryRow>(`insert into user_memories(owner_id,folder_id,content,content_fingerprint,source_chat_id,source_job_id,writer) values($1,$2,$3,$4,$5,$6,$7) returning ${memoryColumns}`, [owner, folderId, content, fingerprint(content), context.sourceChatId, context.sourceJobId, context.writer]);
+    const [row] = await query<MemoryRow>(`insert into user_memories(owner_id,folder_id,content,is_sensitive,content_fingerprint,source_chat_id,source_job_id,writer) values($1,$2,$3,$4,$5,$6,$7,$8) returning ${memoryColumns}`, [owner, folderId, storedContent, sensitive, persistedFingerprint(content, sensitive), context.sourceChatId, context.sourceJobId, context.writer]);
     const memory = memoryValue(row);
     await audit(context, "add", { memoryId: memory.id, folderId, after: memory });
     return memory;
   } catch (error) {
     if ((error as { code?: string }).code !== "23505") throw error;
-    const [duplicate] = await query<MemoryRow>(`select ${memoryColumns} from user_memories where owner_id=$1 and folder_id=$2 and content_fingerprint=$3 and deleted_at is null`, [owner, folderId, fingerprint(content)]);
+    const [duplicate] = await query<MemoryRow>(`select ${memoryColumns} from user_memories where owner_id=$1 and folder_id=$2 and content_fingerprint=$3 and deleted_at is null`, [owner, folderId, persistedFingerprint(content, sensitive)]);
     if (!duplicate) throw error;
     return memoryValue(duplicate);
   }
@@ -144,9 +154,11 @@ async function currentMemory(ownerId: string, memoryId: string): Promise<MemoryR
   return row;
 }
 
-export async function editUserMemory(context: MemoryWriteContext, memoryId: string, content: string): Promise<UserMemory> {
+export async function editUserMemory(context: MemoryWriteContext, memoryId: string, content: string, sensitive?: boolean): Promise<UserMemory> {
   const before = await currentMemory(context.ownerId, memoryId);
-  const [row] = await query<MemoryRow>(`update user_memories set content=$1,content_fingerprint=$2,source_chat_id=$3,source_job_id=$4,writer=$5,updated_at=$6 where owner_id=$7 and id=$8 and deleted_at is null returning ${memoryColumns}`, [content, fingerprint(content), context.sourceChatId, context.sourceJobId, context.writer, new Date().toISOString(), databaseOwnerId(context.ownerId), memoryId]);
+  const nextSensitive = sensitive ?? before.is_sensitive;
+  const storedContent = persistedContent(content, nextSensitive);
+  const [row] = await query<MemoryRow>(`update user_memories set content=$1,is_sensitive=$2,content_fingerprint=$3,source_chat_id=$4,source_job_id=$5,writer=$6,updated_at=$7 where owner_id=$8 and id=$9 and deleted_at is null returning ${memoryColumns}`, [storedContent, nextSensitive, persistedFingerprint(content, nextSensitive), context.sourceChatId, context.sourceJobId, context.writer, new Date().toISOString(), databaseOwnerId(context.ownerId), memoryId]);
   if (!row) throw new Error("Memory not found.");
   const memory = memoryValue(row);
   await audit(context, "edit", { memoryId, folderId: memory.folderId, before: memoryValue(before), after: memory });
@@ -154,7 +166,10 @@ export async function editUserMemory(context: MemoryWriteContext, memoryId: stri
 }
 
 export async function editUserMemoryFromSettings(ownerId: string, memoryId: string, content: string): Promise<UserMemory | null> {
-  const [row] = await query<MemoryRow>(`update user_memories set content=$1,content_fingerprint=$2,updated_at=$3 where owner_id=$4 and id=$5 and deleted_at is null returning ${memoryColumns}`, [content, fingerprint(content), new Date().toISOString(), databaseOwnerId(ownerId), memoryId]);
+  const [before] = await query<MemoryRow>(`select ${memoryColumns} from user_memories where owner_id=$1 and id=$2 and deleted_at is null`, [databaseOwnerId(ownerId), memoryId]);
+  if (!before) return null;
+  const storedContent = persistedContent(content, before.is_sensitive);
+  const [row] = await query<MemoryRow>(`update user_memories set content=$1,content_fingerprint=$2,updated_at=$3 where owner_id=$4 and id=$5 and deleted_at is null returning ${memoryColumns}`, [storedContent, persistedFingerprint(content, before.is_sensitive), new Date().toISOString(), databaseOwnerId(ownerId), memoryId]);
   return row ? memoryValue(row) : null;
 }
 

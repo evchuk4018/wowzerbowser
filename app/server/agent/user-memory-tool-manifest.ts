@@ -47,10 +47,10 @@ export const USER_MEMORY_TOOL_DEFINITIONS: DeepSeekToolDefinition[] = [
     type: "function",
     function: {
       name: ADD_USER_MEMORY_TOOL,
-      description: "Add one explicitly supported, durable fact to the user's profile. Browse first to avoid duplicates.",
+      description: "Add one explicitly supported, durable fact to the user's profile. Browse first to avoid duplicates. Set sensitive=true for passwords, tokens, API keys, or other security-sensitive values; those are stored as keyed one-way hashes.",
       parameters: {
         type: "object", additionalProperties: false, required: ["path", "content"],
-        properties: { path, content: { type: "string", minLength: 1, maxLength: 2_000 } },
+        properties: { path, content: { type: "string", minLength: 1, maxLength: 2_000 }, sensitive: { type: "boolean", description: "Store only a keyed one-way hash of this value." } },
       },
     },
   },
@@ -58,12 +58,13 @@ export const USER_MEMORY_TOOL_DEFINITIONS: DeepSeekToolDefinition[] = [
     type: "function",
     function: {
       name: EDIT_USER_MEMORY_TOOL,
-      description: "Replace an existing memory with newer explicitly supported information.",
+      description: "Replace an existing memory with newer explicitly supported information. Preserve sensitive=true for security-sensitive values.",
       parameters: {
         type: "object", additionalProperties: false, required: ["memoryId", "content"],
         properties: {
           memoryId: { type: "string", minLength: 1, maxLength: 100 },
           content: { type: "string", minLength: 1, maxLength: 2_000 },
+          sensitive: { type: "boolean", description: "Store only a keyed one-way hash of this value." },
         },
       },
     },

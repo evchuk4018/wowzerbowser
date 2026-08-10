@@ -21,8 +21,6 @@ import {
   type MemoryWriteContext,
 } from "./user-memory-repository";
 
-const SECRET_PATTERN = /\b(?:sk-[a-z0-9_-]{16,}|bearer\s+[a-z0-9._-]{16,}|password\s*[:=]|api[_ -]?key\s*[:=]|-----begin [a-z ]+private key-----)\b/i;
-
 function validatePath(path: string[]): string[] {
   const normalized = path.map(normalizeMemoryText).filter(Boolean);
   const relative = normalized[0] === USER_MEMORY_ROOT_NAME ? normalized.slice(1) : normalized;
@@ -34,7 +32,6 @@ function validatePath(path: string[]): string[] {
 function validateContent(content: string): string {
   const normalized = normalizeMemoryText(content);
   if (!normalized || normalized.length > USER_MEMORY_MAX_CONTENT_LENGTH) throw new Error("Memory content must be between 1 and 2,000 characters.");
-  if (SECRET_PATTERN.test(normalized)) throw new Error("Secrets and credentials cannot be stored in user memory.");
   return normalized;
 }
 
@@ -82,18 +79,18 @@ export async function createUserMemoryFolder(context: MemoryWriteContext, path: 
   return folder;
 }
 
-export async function createUserMemory(context: MemoryWriteContext, path: string[], content: string) {
+export async function createUserMemory(context: MemoryWriteContext, path: string[], content: string, sensitive = false) {
   const validContent = validateContent(content);
   await assertProfileCapacity(context.ownerId, validContent.length + path.join("/").length);
   const folder = await ensureMemoryFolderPath(context, validatePath(path));
   if (!folder) throw new Error("A destination folder is required.");
-  return addUserMemory(context, folder.id, validContent);
+  return addUserMemory(context, folder.id, validContent, sensitive);
 }
 
-export async function updateUserMemory(context: MemoryWriteContext, memoryId: string, content: string) {
+export async function updateUserMemory(context: MemoryWriteContext, memoryId: string, content: string, sensitive?: boolean) {
   const validContent = validateContent(content);
   await assertProfileCapacity(context.ownerId, validContent.length);
-  return editUserMemory(context, memoryId, validContent);
+  return editUserMemory(context, memoryId, validContent, sensitive);
 }
 
 export class UserMemoryNotFoundError extends Error {

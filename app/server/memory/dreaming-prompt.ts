@@ -15,6 +15,7 @@ function profileData(tree: UserMemoryTree) {
     sourceChatId: memory.sourceChatId,
     timestamp: memory.updatedAt,
     writer: memory.writer,
+    sensitive: memory.sensitive,
   }));
 }
 
@@ -32,7 +33,8 @@ export function buildDreamingPrompt(tree: UserMemoryTree, sources: DreamingSourc
     '{"action":"delete","memoryId":"...","sourceChatId":"..." }',
     '{"action":"noop","reason":"No durable profile changes."}',
     "Keep only durable facts explicitly stated or clearly confirmed by the user.",
-    "Ignore guesses, assistant assertions, temporary details, incidental requests, unsupported inferences, and secrets.",
+    "Ignore guesses, assistant assertions, temporary details, incidental requests, and unsupported inferences.",
+    "Security-sensitive values may be retained when explicitly provided by the user, but mark add/update actions with sensitive=true so the server stores only a keyed one-way hash. The original value cannot be recovered from a hashed memory.",
     "Deduplicate equivalent facts. Update an existing memory instead of adding a duplicate.",
     "When supported facts contradict, the source with the newest completedAt wins; update or delete the outdated memory.",
     "It is correct and preferred to return exactly one noop when there is nothing durable to change.",
@@ -49,12 +51,13 @@ export function buildDreamingConsolidationPrompt(tree: UserMemoryTree, sources: 
     path: paths.get(memory.folderId) ?? USER_MEMORY_ROOT_NAME,
     content: memory.content,
     updatedAt: memory.updatedAt,
+    sensitive: memory.sensitive,
   }));
   return [
     "Create a concise long-term memory summary for an assistant that knows this user.",
     "Return plain text only, using a few short Title Case section headings and paragraphs.",
     "Combine durable, repeated, or clearly confirmed facts from the current profile and dream summaries.",
-    "Do not include secrets, guesses, temporary details, or facts that are only about one isolated request.",
+    "Do not include guesses, temporary details, or facts that are only about one isolated request.",
     "If facts evolve, preserve the broader stable preference while updating the specific detail.",
     "The summary is contextual: the assistant must use it only when relevant to the current conversation.",
     "Keep the result under 8,000 characters and around a couple of paragraphs per meaningful section.",

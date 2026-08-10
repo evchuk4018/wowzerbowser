@@ -18,6 +18,7 @@ export type UserMemory = {
   id: string;
   folderId: string;
   content: string;
+  sensitive: boolean;
   sourceChatId: string;
   sourceJobId: string;
   writer: UserMemoryWriter;
@@ -40,8 +41,8 @@ export type DreamingSource = {
 
 export type DreamingAction =
   | { action: "create_folder"; path: string[]; sourceChatId: string }
-  | { action: "add"; path: string[]; content: string; sourceChatId: string }
-  | { action: "update"; memoryId: string; content: string; sourceChatId: string }
+  | { action: "add"; path: string[]; content: string; sensitive?: boolean; sourceChatId: string }
+  | { action: "update"; memoryId: string; content: string; sensitive?: boolean; sourceChatId: string }
   | { action: "move"; memoryId: string; path: string[]; sourceChatId: string }
   | { action: "delete"; memoryId: string; sourceChatId: string }
   | { action: "noop"; reason: string };
@@ -69,12 +70,14 @@ export function parseDreamingActions(value: unknown): DreamingAction[] {
       ? (action.path as string[]).map(normalizeMemoryText).filter(Boolean)
       : null;
     const content = typeof action.content === "string" ? normalizeMemoryText(action.content) : "";
+    if (action.sensitive !== undefined && typeof action.sensitive !== "boolean") throw new Error("Dreaming returned an invalid sensitivity flag.");
+    const sensitive = action.sensitive as boolean | undefined;
     const memoryId = typeof action.memoryId === "string" ? action.memoryId.trim() : "";
     if (type === "noop") return { action: "noop", reason: typeof action.reason === "string" ? normalizeMemoryText(action.reason) : "" };
     if (!sourceChatId) throw new Error("Dreaming action provenance is missing.");
     if (type === "create_folder" && path) return { action: type, path, sourceChatId };
-    if (type === "add" && path && content) return { action: type, path, content, sourceChatId };
-    if (type === "update" && memoryId && content) return { action: type, memoryId, content, sourceChatId };
+    if (type === "add" && path && content) return { action: type, path, content, ...(sensitive === undefined ? {} : { sensitive }), sourceChatId };
+    if (type === "update" && memoryId && content) return { action: type, memoryId, content, ...(sensitive === undefined ? {} : { sensitive }), sourceChatId };
     if (type === "move" && memoryId && path) return { action: type, memoryId, path, sourceChatId };
     if (type === "delete" && memoryId) return { action: type, memoryId, sourceChatId };
     throw new Error("Dreaming returned an invalid action.");

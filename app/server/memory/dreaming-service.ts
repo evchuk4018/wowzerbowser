@@ -66,8 +66,8 @@ async function applyAction(ownerId: string, runId: string, index: number, action
     actionIndex: index * 100 + 99,
   };
   if (action.action === "create_folder") await createUserMemoryFolder(context, action.path);
-  else if (action.action === "add") await createUserMemory(context, action.path, action.content);
-  else if (action.action === "update") await updateUserMemory(context, action.memoryId, action.content);
+  else if (action.action === "add") await createUserMemory(context, action.path, action.content, action.sensitive);
+  else if (action.action === "update") await updateUserMemory(context, action.memoryId, action.content, action.sensitive);
   else if (action.action === "move") await relocateUserMemory(context, action.memoryId, action.path);
   else await deleteUserMemory(context, action.memoryId);
   await markDreamingActionApplied(runId, index);

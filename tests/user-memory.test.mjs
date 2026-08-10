@@ -7,6 +7,7 @@ import {
 } from "../lib/user-memory.ts";
 import { buildDreamingPrompt } from "../app/server/memory/dreaming-prompt.ts";
 import { buildDreamingConsolidationPrompt, formatConsolidatedPrompt } from "../app/server/memory/dreaming-prompt.ts";
+import { hashSensitiveMemory } from "../app/server/memory/user-memory-hash.ts";
 import {
   describeBackgroundError,
   formatBackgroundError,
@@ -14,6 +15,26 @@ import {
 } from "../app/server/observability/background-error.ts";
 
 const source = async (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+
+test("sensitive memory values use a keyed one-way hash", () => {
+  const previousKey = process.env.USER_MEMORY_HASH_KEY;
+  process.env.USER_MEMORY_HASH_KEY = "11".repeat(32);
+  try {
+    const digest = hashSensitiveMemory("sk-test-secret-value");
+    assert.match(digest, /^[0-9a-f]{64}$/);
+    assert.notEqual(digest, "sk-test-secret-value");
+    assert.equal(hashSensitiveMemory("sk-test-secret-value"), digest);
+  } finally {
+    if (previousKey === undefined) delete process.env.USER_MEMORY_HASH_KEY;
+    else process.env.USER_MEMORY_HASH_KEY = previousKey;
+  }
+});
+
+test("dreaming actions preserve sensitive writes", () => {
+  assert.deepEqual(parseDreamingActions({ actions: [{ action: "add", path: ["Security"], content: "token", sensitive: true, sourceChatId: "chat-1" }] }), [
+    { action: "add", path: ["Security"], content: "token", sensitive: true, sourceChatId: "chat-1" },
+  ]);
+});
 
 test("background errors preserve database fields and redact credentials", () => {
   const error = {

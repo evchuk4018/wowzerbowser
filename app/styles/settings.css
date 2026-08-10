@@ -952,6 +952,7 @@
 .memory-content { margin: 0; color: var(--text); font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
 .memory-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 13px; }
 .memory-meta { display: flex; flex-wrap: wrap; gap: 8px 12px; color: var(--quiet); font-size: 10px; }
+.memory-meta span:nth-child(2) { color: #e8bd71; }
 .memory-card-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
 .memory-primary-action { border-color: var(--accent) !important; background: var(--accent) !important; color: #20211f !important; }
 .memory-danger-action { color: #e18484 !important; }

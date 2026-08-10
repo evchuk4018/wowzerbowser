@@ -51,6 +51,12 @@ function pathArg(args: Record<string, unknown>, required = true): string[] | und
   return args.path as string[];
 }
 
+function optionalBooleanArg(args: Record<string, unknown>, key: string): boolean | undefined {
+  if (args[key] === undefined) return undefined;
+  if (typeof args[key] !== "boolean") throw new Error(`${key} must be a boolean.`);
+  return args[key];
+}
+
 export function userMemoryToolDefinitions() {
   return USER_MEMORY_TOOL_DEFINITIONS;
 }
@@ -68,8 +74,8 @@ export async function executeUserMemoryTool(call: ChatToolCall, context: UserMem
     if (call.name === BROWSE_USER_MEMORY_TOOL) result = await browseUserMemory(context.ownerId, pathArg(args, false));
     else if (call.name === READ_USER_MEMORY_TOOL) result = await readUserMemory(context.ownerId, stringArg(args, "memoryId"));
     else if (call.name === CREATE_MEMORY_FOLDER_TOOL) result = await createUserMemoryFolder(writeContext, pathArg(args)!);
-    else if (call.name === ADD_USER_MEMORY_TOOL) result = await createUserMemory(writeContext, pathArg(args)!, stringArg(args, "content"));
-    else if (call.name === EDIT_USER_MEMORY_TOOL) result = await updateUserMemory(writeContext, stringArg(args, "memoryId"), stringArg(args, "content"));
+    else if (call.name === ADD_USER_MEMORY_TOOL) result = await createUserMemory(writeContext, pathArg(args)!, stringArg(args, "content"), optionalBooleanArg(args, "sensitive"));
+    else if (call.name === EDIT_USER_MEMORY_TOOL) result = await updateUserMemory(writeContext, stringArg(args, "memoryId"), stringArg(args, "content"), optionalBooleanArg(args, "sensitive"));
     else if (call.name === MOVE_USER_MEMORY_TOOL) result = await relocateUserMemory(writeContext, stringArg(args, "memoryId"), pathArg(args)!);
     else if (call.name === DELETE_USER_MEMORY_TOOL) {
       await deleteUserMemory(writeContext, stringArg(args, "memoryId"));

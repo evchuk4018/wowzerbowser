@@ -159,6 +159,7 @@ export function MemorySettings({ hasSession }: { hasSession: () => Promise<boole
                           <div className="memory-card-footer">
                             <div className="memory-meta">
                               <span>{writerLabel(memory.writer)}</span>
+                              {memory.sensitive && <span>Hashed sensitive value</span>}
                               <time dateTime={memory.updatedAt}>Updated {formatDate(memory.updatedAt)}</time>
                             </div>
                             {editingId === memory.id ? (
@@ -178,7 +179,7 @@ export function MemorySettings({ hasSession }: { hasSession: () => Promise<boole
                               </div>
                             ) : (
                               <div className="memory-card-actions">
-                                <button type="button" onClick={() => { setEditingId(memory.id); setEditingContent(memory.content); setConfirmingId(null); }}>Edit</button>
+                                {!memory.sensitive && <button type="button" onClick={() => { setEditingId(memory.id); setEditingContent(memory.content); setConfirmingId(null); }}>Edit</button>}
                                 <button type="button" className="memory-danger-action" onClick={() => setConfirmingId(memory.id)}>Delete</button>
                               </div>
                             )}
