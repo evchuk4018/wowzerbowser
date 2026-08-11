@@ -1,0 +1,7 @@
+[Unit]
+Description=Apply the homelab container I/O priority policy
+After=default.target
+
+[Service]
+Type=oneshot
+ExecStart=/srv/storage/wowzerbowser/ops/io-priority/apply.sh apply

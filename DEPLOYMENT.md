@@ -63,6 +63,40 @@ may format it. Never select a device from an automated script. The deployment
 agent does not format disks, mount them, edit `/etc/fstab`, or modify the media
 directory.
 
+## I/O priority
+
+The host uses cgroup v2 relative I/O weights so interactive applications and
+explicit user work remain responsive while OCR, indexing, torrent metadata,
+resolvers, and other bulk work continue in the background. The policy covers
+the Wowzer Bowser containers and the separately deployed media, HomeTube, and
+other application containers. Unlisted containers receive a conservative
+background weight rather than unlimited priority.
+
+Install or refresh the persistent user timer from the guarded deployment
+checkout:
+
+```bash
+./docker/install-io-priority.sh
+```
+
+Inspect the current container weights without changing them:
+
+```bash
+./ops/io-priority/apply.sh status
+```
+
+Host-native bulk operations should use the idle-I/O wrapper:
+
+```bash
+./ops/io-priority/run-bulk.sh rsync -a --delete source/ destination/
+```
+
+The application queues remain the first priority boundary: HomeTube manual
+downloads outrank podcast and automatic downloads, qBittorrent queueing stays
+enabled, and Radarr/Sonarr remain the request path for media acquisition. The
+host policy is intentionally weighted rather than an absolute lockout so
+background work cannot permanently starve.
+
 ## Initial setup
 
 Install Docker Engine with the Compose plugin and confirm the deployment user

@@ -20,6 +20,9 @@ export STORAGE_MOUNT_GUARD=verified
 echo "deployment-update\tpull"
 git pull --ff-only origin main
 
+echo "deployment-update\tinstall-io-priority"
+"$script_dir/install-io-priority.sh"
+
 compose="$script_dir/compose.sh"
 echo "deployment-update\tvalidate-compose"
 "$compose" config >/dev/null

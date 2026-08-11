@@ -1,5 +1,19 @@
 name: ${COMPOSE_PROJECT_NAME:-wowzerbowser}
 
+# Relative cgroup v2 I/O weights. The host timer reapplies this policy to the
+# separately deployed media and HomeTube containers as well.
+x-io-interactive: &io-interactive
+  weight: 1000
+
+x-io-user-work: &io-user-work
+  weight: 650
+
+x-io-background: &io-background
+  weight: 250
+
+x-io-bulk: &io-bulk
+  weight: 100
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -14,6 +28,7 @@ services:
     restart: unless-stopped
     init: true
     stop_grace_period: 60s
+    blkio_config: *io-interactive
     cpus: "1.00"
     mem_limit: 768m
     pids_limit: 256
@@ -41,6 +56,7 @@ services:
     restart: unless-stopped
     init: true
     stop_grace_period: 60s
+    blkio_config: *io-background
     cpus: "2.00"
     mem_limit: 3g
     pids_limit: 256
@@ -71,6 +87,7 @@ services:
     restart: unless-stopped
     init: true
     stop_grace_period: 30s
+    blkio_config: *io-background
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -114,6 +131,7 @@ services:
       - application
     restart: unless-stopped
     init: true
+    blkio_config: *io-background
     cpus: "0.50"
     mem_limit: 512m
     pids_limit: 128
@@ -137,6 +155,7 @@ services:
     restart: unless-stopped
     init: true
     stop_grace_period: 30s
+    blkio_config: *io-background
     cpus: "0.50"
     mem_limit: 768m
     pids_limit: 128
@@ -165,6 +184,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     init: true
+    blkio_config: *io-background
     cpus: "0.50"
     mem_limit: 512m
     pids_limit: 256
@@ -181,6 +201,7 @@ services:
       - application
     restart: unless-stopped
     init: true
+    blkio_config: *io-bulk
     cpus: "0.25"
     mem_limit: 256m
     pids_limit: 128
@@ -191,6 +212,7 @@ services:
       - application
     restart: unless-stopped
     init: true
+    blkio_config: *io-bulk
     cpus: "0.25"
     mem_limit: 512m
     pids_limit: 256
@@ -214,6 +236,7 @@ services:
     command: ["postgres", "-c", "cron.database_name=firecrawl"]
     restart: unless-stopped
     init: true
+    blkio_config: *io-background
     cpus: "0.50"
     mem_limit: 768m
     pids_limit: 256
@@ -229,6 +252,7 @@ services:
       - application
     restart: unless-stopped
     init: true
+    blkio_config: *io-bulk
     cpus: "0.75"
     mem_limit: 1g
     pids_limit: 256
@@ -281,6 +305,7 @@ services:
     command: ["node", "dist/src/harness.js", "--start-docker"]
     restart: unless-stopped
     init: true
+    blkio_config: *io-background
     cpus: "1.00"
     mem_limit: 3g
     pids_limit: 512
@@ -351,6 +376,7 @@ services:
     restart: unless-stopped
     init: true
     stop_grace_period: 45s
+    blkio_config: *io-interactive
     cpus: "1.50"
     mem_limit: 3g
     pids_limit: 512
@@ -434,6 +460,7 @@ services:
     restart: unless-stopped
     init: true
     stop_grace_period: 30s
+    blkio_config: *io-user-work
     cpus: "1.50"
     mem_limit: 4g
     pids_limit: 512
@@ -470,6 +497,7 @@ services:
     restart: unless-stopped
     init: true
     stop_grace_period: 30s
+    blkio_config: *io-user-work
     cpus: "0.50"
     mem_limit: 1g
     pids_limit: 256

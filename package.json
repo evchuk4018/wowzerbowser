@@ -14,6 +14,7 @@
     "test:calendar": "tsx --conditions=react-server --test tests/google-calendar.test.mjs tests/integration-origin.test.mjs",
     "test:discord": "tsx --conditions=react-server --test tests/discord-integration.test.mjs",
     "test:deployment": "node --test tests/deployment-config.test.mjs",
+    "test:io-priority": "node --test tests/io-priority.test.mjs",
     "test:documents": "tsx --conditions=react-server --test tests/chat-document-provider.test.mjs tests/chat-document-routes.test.mjs tests/chat-document-service.test.mjs tests/chat-document-odl.test.mjs tests/opendataloader-pdf-adapter.test.mjs tests/pdf-tools.test.mjs",
     "audit:local-runtime": "node scripts/audit-local-runtime.mjs --source",
     "audit:client-bundle": "node scripts/audit-local-runtime.mjs --client",
