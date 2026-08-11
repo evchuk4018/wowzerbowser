@@ -110,3 +110,11 @@ test("worker source uses durable queue claims and the web routes do not execute 
   assert.match(imageWorker, /analyzeStoredChatImage/);
   assert.doesNotMatch(finalize, /ingestPdf|ingestDocx|readPendingDocumentUpload/);
 });
+
+test("completed chats release the interactive slot before post-chat memory work", async () => {
+  const worker = await source("scripts/background-worker.ts");
+  assert.match(worker, /function runPostChatWork\(/);
+  assert.match(worker, /void runPostChatWork\(ownerId, claim\.conversationId, claim\.jobId\)/);
+  assert.doesNotMatch(worker, /await processChatSummaryForCompletedJob\(ownerId, claim\.conversationId, claim\.jobId\)/);
+  assert.doesNotMatch(worker, /await processDreamingForCompletedJob\(ownerId, claim\.conversationId, claim\.jobId\)/);
+});

@@ -112,6 +112,20 @@ function schedulerTask<T>(task: string, run: () => Promise<T>): () => Promise<T>
   };
 }
 
+/**
+ * Summary and memory work is durable and recoverable by the memory scheduler.
+ * Keep it out of the interactive chat slot so a slow auxiliary model call
+ * cannot make the next user prompt sit in the queue.
+ */
+async function runPostChatWork(ownerId: string, conversationId: string, jobId: string): Promise<void> {
+  await processChatSummaryForCompletedJob(ownerId, conversationId, jobId).catch((error) => {
+    logBackgroundTaskFailure("chat-summary-worker-failed", { ownerId, conversationId, jobId }, error);
+  });
+  await processDreamingForCompletedJob(ownerId, conversationId, jobId).catch((error) => {
+    logBackgroundTaskFailure("user-memory-dreaming-worker-failed", { ownerId, conversationId, jobId }, error);
+  });
+}
+
 writeHeartbeat();
 const heartbeatTimer = setInterval(writeHeartbeat, heartbeatIntervalMs);
 const loop = new BackgroundWorkerLoop({
@@ -130,12 +144,9 @@ const loop = new BackgroundWorkerLoop({
     if (!terminal) return;
     console.log(JSON.stringify({ event: "background-worker-chat-terminal", workerId, conversationId: claim.conversationId, jobId: claim.jobId, status: terminal.status }));
     if (terminal.status !== "completed" || shutdownSignal.aborted) return;
-    await processChatSummaryForCompletedJob(ownerId, claim.conversationId, claim.jobId).catch((error) => {
-      logBackgroundTaskFailure("chat-summary-worker-failed", { ownerId, conversationId: claim.conversationId, jobId: claim.jobId }, error);
-    });
-    await processDreamingForCompletedJob(ownerId, claim.conversationId, claim.jobId).catch((error) => {
-      logBackgroundTaskFailure("user-memory-dreaming-worker-failed", { ownerId, conversationId: claim.conversationId, jobId: claim.jobId }, error);
-    });
+    // Do not hold the single interactive chat slot while auxiliary work runs.
+    // The memory scheduler recovers this work if the process shuts down first.
+    void runPostChatWork(ownerId, claim.conversationId, claim.jobId);
   },
   claimDocument: async () => {
     const claim = await claimNextDocumentProcessingJob(ownerId);
