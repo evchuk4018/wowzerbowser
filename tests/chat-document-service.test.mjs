@@ -129,3 +129,21 @@ test("PDF image candidates can be recovered from Markdown when JSON omits the im
 
   assert.match(registered.pages[0].markdown, /\/api\/chat\/documents\/document\/images\/image-1/);
 });
+
+test("PDF page metadata flags math context when visible content has no native formula", async () => {
+  let registered;
+  const output = odlOutput();
+  output.json.kids[0].content = "Evaluate the integral:";
+  const ingestPdf = createPdfIngestor({
+    convertPdfWithOpenDataLoader: async () => output,
+    prepareDocumentImages: async () => [],
+    getStorageObjectById: async () => storedObject,
+    registerDocument: async (input) => { registered = input; },
+  });
+
+  await ingestPdf(documentInput({ alreadyUploaded: true, storageObjectId: objectId }));
+
+  assert.equal(registered.pages[0].providerMetadata.mathDiagnostics.likelyMissingMath, true);
+  assert.ok(registered.pages[0].providerMetadata.mathDiagnostics.reasons.includes("math_context_without_native_formula"));
+  assert.match(registered.pages[0].markdown, /PDF extraction warning/);
+});

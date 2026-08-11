@@ -5,6 +5,8 @@ export const WORKSPACE_TOOL_INSTRUCTIONS = [
   "Use expectedSha256 when editing a file whose contents you previously read. If a patch fails because the contents changed, reread the file and make a fresh targeted patch.",
   "Use workspace_write for new files or deliberate full replacements. Use run_command to run bounded checks or scripts in the workspace; inspect stdout, stderr, exitCode, and changedFiles before claiming success.",
   "Use inspect_workspace_image for a focused visual question about a supported PNG, JPEG, WebP, or GIF in the workspace, including files imported from Local Drive. MP4 files are not supported.",
+  "Use inspect_workspace_pdf for selected pages of a PDF imported from Local Drive. It returns structured question and formula transcriptions; use it instead of writing a custom PDF-rendering or image-cropping script.",
+  "For math-heavy PDFs, native text may omit vector-rendered equations. Treat a missing expression as an extraction gap, inspect the rendered page, preserve the returned LaTeX exactly, and report [unclear] rather than guessing.",
   "All paths are relative to this conversation workspace. Never use absolute paths, parent traversal, .venv, or .runs.",
   "</workspace_policy>",
 ].join("\n");

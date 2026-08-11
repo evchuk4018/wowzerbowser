@@ -2,8 +2,8 @@ import "server-only";
 import type { ChatToolCall, ChatToolResult } from "../../../lib/chat-protocol";
 import { documentPageMarkdown } from "../../../lib/chat-document";
 import { getAuthorizedDocument, getDocumentPages } from "../chat/chat-document-store";
-import { inspectDocumentPage } from "../chat/document-page-visual-service";
-import { configuredPdfReadMaxPages, configuredPdfSearchMaxResults, configuredImageFollowupMaxQuestionCharacters, INSPECT_DOCUMENT_PAGE_TOOL_NAME, pdfToolDefinitions, READ_PDF_PAGES_TOOL_NAME, SEARCH_PDF_TOOL_NAME } from "./pdf-tool-manifest";
+import { inspectDocumentPage, inspectDocumentPages } from "../chat/document-page-visual-service";
+import { configuredPdfReadMaxPages, configuredPdfSearchMaxResults, configuredImageFollowupMaxQuestionCharacters, INSPECT_DOCUMENT_PAGE_TOOL_NAME, INSPECT_DOCUMENT_PAGES_TOOL_NAME, pdfToolDefinitions, READ_PDF_PAGES_TOOL_NAME, SEARCH_PDF_TOOL_NAME } from "./pdf-tool-manifest";
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const safeError = (error: unknown) => (error instanceof Error ? error.message : "Document inspection failed.").slice(0, 1_000);
@@ -11,7 +11,9 @@ const safeError = (error: unknown) => (error instanceof Error ? error.message : 
 export function availablePdfTools(hasAuthorizedDocument: boolean, hasAuthorizedPdf = hasAuthorizedDocument) {
   if (!hasAuthorizedDocument) return [];
   const definitions = pdfToolDefinitions();
-  return hasAuthorizedPdf ? definitions : definitions.filter((tool) => tool.function.name !== INSPECT_DOCUMENT_PAGE_TOOL_NAME);
+  return hasAuthorizedPdf
+    ? definitions
+    : definitions.filter((tool) => ![INSPECT_DOCUMENT_PAGE_TOOL_NAME, INSPECT_DOCUMENT_PAGES_TOOL_NAME].includes(tool.function.name));
 }
 
 const fail = (call: ChatToolCall, message: string): ChatToolResult => ({ id: call.id, name: call.name, ok: false, stdout: "", stderr: message });
@@ -40,6 +42,29 @@ export async function executePdfTool(call: ChatToolCall, context: { ownerId: str
         signal: context.signal,
       });
       return { id: call.id, name: call.name, ok: true, stdout: `[Untrusted PDF page ${result.pageNumber} visual inspection]\n${result.answer}`, stderr: "" };
+    } catch (error) {
+      return fail(call, safeError(error));
+    }
+  }
+  if (call.name === INSPECT_DOCUMENT_PAGES_TOOL_NAME) {
+    if (authorized.contentType !== "application/pdf") return fail(call, "Visual transcription is available only for PDFs.");
+    const pageNumbers = args.pageNumbers;
+    const question = typeof args.question === "string" ? args.question.trim() : "";
+    if (!Array.isArray(pageNumbers) || pageNumbers.some((pageNumber) => !Number.isSafeInteger(pageNumber))) return fail(call, "pageNumbers must be an array of page numbers.");
+    const maxQuestionCharacters = configuredImageFollowupMaxQuestionCharacters();
+    if (!question || question.length > maxQuestionCharacters) return fail(call, `question is required and must be ${maxQuestionCharacters} characters or shorter.`);
+    try {
+      const result = await inspectDocumentPages({
+        ownerId: context.ownerId,
+        conversationId: context.conversationId,
+        jobId: context.jobId,
+        documentId: pdfId,
+        pageNumbers: pageNumbers as number[],
+        question,
+        toolCallId: call.id,
+        signal: context.signal,
+      });
+      return { id: call.id, name: call.name, ok: true, stdout: JSON.stringify({ documentId: pdfId, pages: result.pages }), stderr: "" };
     } catch (error) {
       return fail(call, safeError(error));
     }

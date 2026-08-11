@@ -10,6 +10,7 @@ import { prepareDocumentImages, deleteDocumentImages, type DocumentImageCandidat
 import { DOCUMENT_INGESTION_STAGES, DocumentIngestionTiming, type DocumentIngestionStage } from "./document-ingestion-timing";
 import { configuredVisionModel } from "./chat-model-catalog-service";
 import { getPdfOcrConcurrency } from "./pdf-page-ocr";
+import { diagnosePdfMathExtraction } from "./pdf-math-diagnostics";
 
 function finishOwnedTiming(timing: DocumentIngestionTiming, skipped: readonly DocumentIngestionStage[]) {
   markSkippedStages(timing, skipped);
@@ -88,9 +89,10 @@ function pageText(elements: readonly OpenDataLoaderElement[]): string {
   return parts.join("\n\n").trim();
 }
 
-function pageProviderMetadata(elements: readonly OpenDataLoaderElement[]): ChatDocumentProviderMetadata {
+function pageProviderMetadata(elements: readonly OpenDataLoaderElement[], mathDiagnostics: ReturnType<typeof diagnosePdfMathExtraction>): ChatDocumentProviderMetadata {
   return {
     provider: "opendataloader",
+    mathDiagnostics,
     elements: elements.map((element) => ({
       type: element.type,
       id: element.id,
@@ -198,12 +200,19 @@ function createPdfPages(output: OpenDataLoaderPdfOutput, images: readonly ChatDo
     const pageNumber = index + 1;
     const elements = elementsByPage.get(pageNumber) ?? [];
     const text = pageText(topLevelElementsByPage.get(pageNumber) ?? []);
+    const mathDiagnostics = diagnosePdfMathExtraction({
+      text,
+      visualElementCount: elements.length,
+      imageCount: elements.filter((element) => element.type === "image").length,
+      renderedPageAvailable: true,
+    });
+    const pageMarkdown = markdownForPage(markdownPages[index] ?? "", candidates, images, pageNumber, documentId, conversationId);
     return {
       pageNumber,
       text,
-       markdown: markdownForPage(markdownPages[index] ?? "", candidates, images, pageNumber, documentId, conversationId),
+       markdown: `${pageMarkdown}${mathDiagnostics.needsVisualInspection ? "\n\n[PDF extraction warning: visible mathematical content may be missing from native text or extraction quality is uncertain; inspect the rendered page before transcribing formulas.]" : ""}`.trim(),
       extractionMethod: text || (markdownPages[index] ?? "").trim() ? "opendataloader" : "blank",
-      providerMetadata: pageProviderMetadata(elements),
+      providerMetadata: pageProviderMetadata(elements, mathDiagnostics),
     };
   });
 }

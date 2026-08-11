@@ -18,6 +18,8 @@ import {
 } from "../server/agent/image-tool";
 import { availableWorkspaceImageTools, INSPECT_WORKSPACE_IMAGE_TOOL_NAME } from "../server/agent/workspace-image-tool-manifest";
 import { executeInspectWorkspaceImageTool } from "../server/agent/workspace-image-tool";
+import { executeInspectWorkspacePdfTool } from "../server/agent/workspace-pdf-tool";
+import { INSPECT_WORKSPACE_PDF_TOOL_NAME } from "../server/agent/workspace-pdf-tool-manifest";
 import { isLocalPythonConfigured, LocalPythonExecutor } from "../server/python/local-python-executor";
 import { getAuthoritativeChatImageIdsForRequest } from "../server/chat/chat-history-store";
 import { listAuthorizedProjectImages } from "../server/chat/chat-image-store";
@@ -27,6 +29,7 @@ import { getAuthorizedDocument, getDocumentPages, listAuthorizedProjectDocuments
 import { availablePdfEditTools } from "../server/agent/pdf-edit-tool-manifest";
 import { executePdfEditTool } from "../server/agent/pdf-edit-tool";
 import { PDF_EDIT_TOOL_INSTRUCTIONS } from "../server/agent/pdf-edit-tool-instructions";
+import { PDF_TOOL_INSTRUCTIONS } from "../server/agent/pdf-tool-instructions";
 import { ingestDocx, ingestPdf } from "../server/chat/chat-document-service";
 import { DOCX_CONTENT_TYPE, createInlineDocumentPageLoader, documentContext } from "../../lib/chat-document";
 import { IncrementalCitationFilter, parseCitationMarkup, validCitationSources, type ChatSource } from "../../lib/chat-citations";
@@ -199,7 +202,7 @@ export async function generateChatResponse(
   const potentialTodoTools = automationExecution || subagentExecution ? [] : TODO_TOOL_DEFINITIONS;
   const toolGroups: FocusedToolGroup[] = [
     ...(pythonTools.length ? [{ id: "python", summary: "Run Python for computation, data processing, or generated files.", keywords: ["python", "calculate", "compute", "chart", "spreadsheet", "generate file"], fallback: true }] : []),
-    ...(workspaceTools.length ? [{ id: "workspace", summary: "Inspect, create, edit, search, and run checks against persistent conversation files.", keywords: ["file", "files", "code", "html", "javascript", "typescript", "python", "edit", "create", "write", "workspace", "script"], fallback: true }] : []),
+    ...(workspaceTools.length ? [{ id: "workspace", summary: "Inspect, create, edit, search, and run checks against persistent conversation files, including visual inspection of imported PDFs.", keywords: ["file", "files", "code", "html", "javascript", "typescript", "python", "edit", "create", "write", "workspace", "script", "pdf", "equation", "formula", "integral", "parametric"], fallback: true }] : []),
     ...(imageTools.length ? [{ id: "image", summary: "Inspect an attached image.", keywords: ["image", "photo", "picture", "screenshot"], required: Boolean(latestMessage?.attachments?.length) }] : []),
     ...(workspaceImageTools.length ? [{ id: "workspace-image", summary: "Inspect an image file in the persistent workspace, including one imported from Local Drive.", keywords: ["workspace image", "local drive image", "drive photo", "image file", "photo file", "describe image"], fallback: true }] : []),
     ...(webTools.length ? [{ id: "web", summary: "Search the web, fetch pages, and check current time, date, or deployment location.", keywords: ["current", "latest", "today", "web", "search", "url", "time", "date", "location", "news"], fallback: true }] : []),
@@ -553,6 +556,7 @@ export async function generateChatResponse(
             ...deepResearchInstructionsFor(Boolean(activeDeepResearchTools.length)),
             ...(subagentExecution ? [SUBAGENT_CHILD_INSTRUCTIONS] : [SUBAGENT_TOOL_INSTRUCTIONS]),
             ...(pdfEditTools.length ? PDF_EDIT_TOOL_INSTRUCTIONS : []),
+            ...(activePdfReadTools.length || activeWorkspaceTools.some((tool) => tool.function.name === INSPECT_WORKSPACE_PDF_TOOL_NAME) ? [PDF_TOOL_INSTRUCTIONS] : []),
             ...(activePhaseTools.length ? [PHASE_BREAK_INSTRUCTIONS] : []),
             ...customToolInstructions(activeCustomTools),
             ...(skillTools.length ? [skillCatalogInstructions(skills)] : []),
@@ -664,6 +668,16 @@ export async function generateChatResponse(
             if (activeWorkspaceTools.some((tool) => tool.function.name === call.name)) {
               if (!isLocalPythonConfigured()) throw new Error("Workspace tools are not configured.");
               if (!executor) executor = new LocalPythonExecutor(ownerId, conversationId, responseDeadlineAt).withWorkspaceId(chatRequest.projectId ?? conversationId);
+              if (call.name === INSPECT_WORKSPACE_PDF_TOOL_NAME) {
+                return executeInspectWorkspacePdfTool(call, {
+                  ownerId,
+                  conversationId,
+                  jobId: responseId,
+                  signal: roundSignal,
+                  responseDeadlineAt,
+                  executor,
+                });
+              }
               return executeWorkspaceTool(call, { ownerId, conversationId, projectId: chatRequest.projectId, executor });
             }
             if (call.name === "run_python" && activePythonTools.length) {

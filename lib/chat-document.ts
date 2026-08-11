@@ -1,6 +1,7 @@
 export const MAX_INLINE_PDF_TOKENS = 32_000;
 export const MAX_INLINE_PDF_PAGES = 40;
 export const MAX_PDF_PAGES_PER_READ = 20;
+export const MAX_PDF_VISUAL_TRANSCRIPTION_PAGES = 20;
 export const MAX_PDF_SEARCH_RESULTS = 10;
 export const MAX_PDF_BYTES = 25 * 1024 * 1024;
 export const MAX_DOCUMENT_IMAGES = 32;

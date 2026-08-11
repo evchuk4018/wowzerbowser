@@ -77,4 +77,6 @@ test("connector reads are parallel-safe while writes default to serial", () => {
 
 test("full-page PDF visual inspection is parallel-safe", () => {
   assert.equal(toolExecutionMetadata("inspect_document_page").executionPolicy, "parallel-safe");
+  assert.equal(toolExecutionMetadata("inspect_document_pages").executionPolicy, "parallel-safe");
+  assert.equal(toolExecutionMetadata("inspect_workspace_pdf").executionPolicy, "parallel-safe");
 });

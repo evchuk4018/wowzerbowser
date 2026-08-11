@@ -1,14 +1,15 @@
 import "server-only";
 
 import { ChatImageError } from "../../../lib/chat-image";
-import { ChatDocumentError } from "../../../lib/chat-document";
+import { ChatDocumentError, MAX_PDF_VISUAL_TRANSCRIPTION_PAGES } from "../../../lib/chat-document";
 import { estimateUsageFromText } from "../../../lib/usage-pricing";
 import { askOpenRouterAboutImage } from "../../providers/openrouter/openrouter-image-adapter";
 import { OPENROUTER_QWEN_FLASH_MODEL } from "../../providers/openrouter/openrouter-config";
 import { configuredVisionModel } from "./chat-model-catalog-service";
-import { downloadAuthorizedDocumentBytes } from "./chat-document-store";
+import { downloadAuthorizedDocumentBytes, getAuthorizedDocument } from "./chat-document-store";
 import { pdfPageVisualPrompt } from "./document-page-visual-prompt";
-import { renderPdfPage } from "./pdf-page-renderer";
+import { renderPdfPage, renderPdfPagesSettled } from "./pdf-page-renderer";
+import { transcribeRenderedPdfPage, type PdfPageVisualTranscription } from "./pdf-page-visual-transcription";
 import { recordPromptUsage } from "../usage/prompt-cost-service";
 import { runtimeConfigSnapshot } from "../config/runtime-config-service";
 
@@ -30,6 +31,83 @@ export type InspectDocumentPageResult = {
   answer: string;
   model: string | null;
 };
+
+export type InspectDocumentPagesInput = {
+  ownerId: string;
+  conversationId: string;
+  jobId?: string;
+  documentId: string;
+  pageNumbers: readonly number[];
+  question: string;
+  toolCallId: string;
+  signal?: AbortSignal;
+};
+
+export type InspectDocumentPagesResult = {
+  pages: Array<PdfPageVisualTranscription | { pageNumber: number; error: string }>;
+};
+
+const BATCH_CONCURRENCY = 3;
+
+function validatePageNumbers(pageNumbers: readonly number[], pageCount: number): number[] {
+  const unique = [...new Set(pageNumbers)];
+  if (
+    unique.length < 1
+    || unique.length > MAX_PDF_VISUAL_TRANSCRIPTION_PAGES
+    || unique.some((pageNumber) => !Number.isSafeInteger(pageNumber) || pageNumber < 1 || pageNumber > pageCount)
+  ) {
+    throw new ChatDocumentError("invalid_page", `Select between 1 and ${MAX_PDF_VISUAL_TRANSCRIPTION_PAGES} pages within the document.`);
+  }
+  return unique.sort((left, right) => left - right);
+}
+
+async function mapBounded<T, R>(items: readonly T[], concurrency: number, map: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (true) {
+      const index = next++;
+      if (index >= items.length) return;
+      results[index] = await map(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
+  return results;
+}
+
+export async function inspectDocumentPages(input: InspectDocumentPagesInput): Promise<InspectDocumentPagesResult> {
+  const question = input.question.trim();
+  const maxQuestionCharacters = Math.min(runtimeConfigSnapshot().imageFollowupMaxQuestionCharacters, MAX_SAFE_FOLLOWUP_QUESTION_CHARACTERS);
+  if (!question || question.length > maxQuestionCharacters) {
+    throw new ChatImageError("invalid_question", "The document page question is invalid.");
+  }
+  const bytes = await downloadAuthorizedDocumentBytes(input.ownerId, input.conversationId, input.documentId);
+  if (!bytes) throw new ChatDocumentError("document_storage_invalid", "The PDF bytes are unavailable.", 404);
+  const document = await getAuthorizedDocument(input.ownerId, input.conversationId, input.documentId);
+  if (!document || document.contentType !== "application/pdf") throw new ChatDocumentError("document_storage_invalid", "The authorized document is not a PDF.", 400);
+  const pageNumbers = validatePageNumbers(input.pageNumbers, document.pageCount);
+  const rendered = await renderPdfPagesSettled(bytes, pageNumbers, { signal: input.signal, scale: 2 });
+  const pages = await mapBounded(pageNumbers, BATCH_CONCURRENCY, async (pageNumber) => {
+    const page = rendered.renderedPages.find((candidate) => candidate.pageNumber === pageNumber);
+    const failure = rendered.failures.get(pageNumber);
+    if (failure || !page) return { pageNumber, error: failure instanceof Error ? failure.message : "The page could not be rendered." };
+    try {
+      return await transcribeRenderedPdfPage({
+        ownerId: input.ownerId,
+        conversationId: input.conversationId,
+        jobId: input.jobId,
+        requestId: `${input.toolCallId}:pdf-page-${pageNumber}`,
+        page,
+        question,
+        signal: input.signal,
+      });
+    } catch (error) {
+      if (input.signal?.aborted) throw error;
+      return { pageNumber, error: error instanceof Error ? error.message : "The page could not be transcribed." };
+    }
+  });
+  return { pages };
+}
 
 export async function inspectDocumentPage(input: InspectDocumentPageInput): Promise<InspectDocumentPageResult> {
   const question = input.question.trim();

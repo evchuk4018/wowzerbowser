@@ -104,6 +104,7 @@ export type OpenRouterImageRequestOptions = {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   retryDelayMs?: number;
+  responseFormat?: Record<string, unknown>;
 };
 
 type OpenRouterImageRequest = {
@@ -237,7 +238,12 @@ export async function askOpenRouterAboutImage(
   options: OpenRouterImageRequestOptions = {},
 ): Promise<OpenRouterImageAnswer> {
   const responseLimit = Math.min(runtimeConfigSnapshot().imageAnalysisMaxResponseCharacters, 32_000);
-  const payload = await requestOpenRouterImage({ prompt: question, bytes, contentType }, options);
+  const payload = await requestOpenRouterImage({
+    prompt: question,
+    bytes,
+    contentType,
+    ...(options.responseFormat ? { responseFormat: options.responseFormat } : {}),
+  }, options);
   const content = answerText(payload.choices?.[0]?.message?.content);
   if (!content) throw new OpenRouterImageError("empty_answer", "Image understanding returned an empty answer.");
   if (content.length > responseLimit) {

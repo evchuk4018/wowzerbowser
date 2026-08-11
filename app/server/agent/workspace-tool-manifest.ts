@@ -1,6 +1,7 @@
 import type { ModelToolDefinition } from "../../../lib/model-tool-protocol";
 import { WORKSPACE_LIMITS } from "../../../lib/workspace-protocol";
 import { runtimeConfigSnapshot } from "../config/runtime-config-service";
+import { INSPECT_WORKSPACE_PDF_TOOL_DEFINITION } from "./workspace-pdf-tool-manifest";
 
 export const WORKSPACE_LIST_TOOL_NAME = "workspace_list";
 export const WORKSPACE_SEARCH_TOOL_NAME = "workspace_search";
@@ -38,6 +39,7 @@ export function workspaceToolDefinitions(): ModelToolDefinition[] {
     { type: "function", function: { name: WORKSPACE_PATCH_TOOL_NAME, description: "Make a targeted edit to an existing text file. Use oldText/newText for an exact replacement or patch for a unified diff, and verify expected occurrences.", parameters: { type: "object", additionalProperties: false, required: ["path"], properties: { path, oldText: { type: "string", maxLength: 65536 }, newText: { type: "string", maxLength: 65536 }, patch: { type: "string", maxLength: 65536 }, expectedOccurrences: { type: "integer", minimum: 0, maximum: 100 }, expectedSha256: { type: "string", pattern: "^[0-9a-f]{64}$" } } } } },
     { type: "function", function: { name: WORKSPACE_DELETE_TOOL_NAME, description: "Delete an existing workspace file after confirming the exact path.", parameters: { type: "object", additionalProperties: false, required: ["path"], properties: { path } } } },
     { type: "function", function: { name: RUN_COMMAND_TOOL_NAME, description: "Run a bounded command inside the persistent conversation workspace. Use argv-style command and args, never a host path or an unrestricted shell string.", parameters: { type: "object", additionalProperties: false, required: ["command"], properties: { command: { type: "string", minLength: 1, maxLength: 128 }, args: { type: "array", items: { type: "string", maxLength: WORKSPACE_LIMITS.maxCommandArgLength }, maxItems: WORKSPACE_LIMITS.maxCommandArgs }, cwd: { ...path }, stdin: { type: "string", maxLength: 65536 }, timeoutMs: { type: "integer", minimum: 100, maximum: WORKSPACE_LIMITS.maxCommandTimeoutMs } } } } },
+    INSPECT_WORKSPACE_PDF_TOOL_DEFINITION,
   ];
 }
 
