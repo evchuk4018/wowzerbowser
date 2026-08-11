@@ -7,6 +7,7 @@ const root = process.cwd();
 const policyPath = join(root, "ops", "io-priority", "apply.sh");
 const composePath = join(root, "compose.yaml");
 const installerPath = join(root, "docker", "install-io-priority.sh");
+const dockerIgnorePath = join(root, ".dockerignore");
 
 test("I/O policy defines bounded relative weights and a safe default", async () => {
   const policy = await readFile(policyPath, "utf8");
@@ -49,4 +50,11 @@ test("installer uses the persistent user systemd timer", async () => {
   assert.match(installer, /systemctl --user daemon-reload/);
   assert.match(installer, /systemctl --user enable --now homelab-io-policy\.timer/);
   assert.match(installer, /XDG_RUNTIME_DIR/);
+});
+
+test("Docker build context excludes homelab runtime data", async () => {
+  const dockerIgnore = await readFile(dockerIgnorePath, "utf8");
+  for (const entry of ["hometube", "hometube-postgres", "hometube-media", "files", "deployment.env*"]) {
+    assert.match(dockerIgnore, new RegExp(`^${entry.replace("*", "\\*")}$`, "m"));
+  }
 });
