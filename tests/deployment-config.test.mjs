@@ -114,6 +114,7 @@ test("OpenDataLoader uses a private bounded hybrid runtime", async () => {
   assert.match(hybridBlock, /dockerfile: docker\/opendataloader\/Dockerfile/);
   assert.doesNotMatch(hybridBlock, /^    ports:/m);
   assert.match(hybridBlock, /health.*\n\s+test:.*\/health/s);
+  assert.match(hybridBlock, /test: \["CMD", "python", "-c", "import cv2, easyocr, urllib\.request;.*\/health/s);
   assert.match(hybridBlock, /cpus: "2\.00"/);
   assert.match(hybridBlock, /mem_limit: 3g/);
   assert.match(compose, /opendataloader-model-cache:/);
@@ -123,7 +124,10 @@ test("OpenDataLoader uses a private bounded hybrid runtime", async () => {
   assert.equal(JSON.parse(packageJson).dependencies["@opendataloader/pdf"], "2.5.0");
   assert.match(hybridDockerfile, /python:3\.12/);
   assert.match(hybridDockerfile, /openjdk-17-jre-headless/);
+  assert.match(hybridDockerfile, /libgl1/);
+  assert.match(hybridDockerfile, /libxcb1/);
   assert.match(hybridDockerfile, /opendataloader-pdf\[hybrid\]==2\.5\.0/);
+  assert.match(hybridDockerfile, /python -c "import cv2, easyocr"/);
   assert.match(hybridDockerfile, /--device.*cpu/);
   assert.match(hybridDockerfile, /--ocr-engine.*easyocr/);
   assert.match(hybridDockerfile, /--ocr-lang.*en/);
