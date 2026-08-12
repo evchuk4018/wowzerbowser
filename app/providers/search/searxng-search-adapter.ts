@@ -1,9 +1,10 @@
 import "server-only";
 
-import type { SearchCandidate, SearchProviderQuery } from "../../server/search/search-types";
+import { SearchProviderBlockedError, type SearchCandidate, type SearchProviderQuery } from "../../server/search/search-types";
 import { array, record, requireOk, searchRequest } from "./search-http";
 import { candidate } from "./search-candidate";
 import { runtimeConfigSnapshot } from "../../server/config/runtime-config-service";
+import { markSearXNGBlocked, scheduleSearXNGRequest } from "../../server/search/searxng-request-control";
 
 const FRESHNESS: Record<NonNullable<SearchProviderQuery["freshness"]>, string> = {
   day: "day",
@@ -14,6 +15,20 @@ const FRESHNESS: Record<NonNullable<SearchProviderQuery["freshness"]>, string> =
 
 type SearXNGProvider = Extract<SearchCandidate["provider"], "searxng" | "searxng-reddit">;
 type CandidateFilter = (item: SearchCandidate) => boolean;
+
+function engineFailures(value: unknown): string[] {
+  return array(value).flatMap((entry) => {
+    if (Array.isArray(entry)) {
+      const engine = typeof entry[0] === "string" ? entry[0].trim() : "engine";
+      const reason = typeof entry[1] === "string" ? entry[1].trim() : "unavailable";
+      return [`${engine}: ${reason}`];
+    }
+    const row = record(entry);
+    const engine = typeof row.engine === "string" ? row.engine.trim() : "engine";
+    const reason = typeof row.error === "string" ? row.error.trim() : typeof row.reason === "string" ? row.reason.trim() : "unavailable";
+    return [`${engine}: ${reason}`];
+  });
+}
 
 function isRedditUrl(url: string): boolean {
   try {
@@ -29,6 +44,7 @@ async function searchSearXNGWithProvider(
   provider: SearXNGProvider,
   signal?: AbortSignal,
   filter?: CandidateFilter,
+  engines?: string,
 ): Promise<SearchCandidate[]> {
   const base = runtimeConfigSnapshot().searxngUrl;
   const endpoint = new URL("/search", `${base.replace(/\/$/, "")}/`);
@@ -37,40 +53,56 @@ async function searchSearXNGWithProvider(
     format: "json",
     categories: query.focus === "news" ? "news" : "general",
     pageno: "1",
+    ...(engines ? { engines } : {}),
     ...(query.freshness ? { time_range: FRESHNESS[query.freshness] } : {}),
   });
-  const response = await searchRequest(endpoint.toString(), {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: form.toString(),
-  }, signal);
-  requireOk(response, "SearXNG");
-  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-  if (!contentType.includes("json")) throw new Error("SearXNG search returned a non-JSON response.");
-  const body = record(await response.json());
-  const results: SearchCandidate[] = [];
-  let upstreamRank = 0;
-  for (const item of array(body.results)) {
-    upstreamRank += 1;
-    const row = record(item);
-    const result = candidate({
-      title: row.title,
-      url: row.url,
-      snippet: row.content ?? row.description,
-      publishedAt: row.publishedDate ?? row.published_at,
-      provider,
-      query,
-      rank: upstreamRank,
-      extraSnippets: row.engines,
-    });
-    if (!result || (filter && !filter(result))) continue;
-    results.push(result);
-    if (results.length >= query.count) break;
-  }
-  return results;
+  return scheduleSearXNGRequest(provider, signal, async () => {
+    const response = await searchRequest(endpoint.toString(), {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: form.toString(),
+    }, signal);
+    if (!response.ok) {
+      if ([403, 404, 429].includes(response.status)) {
+        const reasons = [`HTTP ${response.status}`];
+        markSearXNGBlocked(reasons);
+        throw new SearchProviderBlockedError(provider, reasons);
+      }
+      requireOk(response, "SearXNG");
+    }
+    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+    if (!contentType.includes("json")) throw new Error("SearXNG search returned a non-JSON response.");
+    const body = record(await response.json());
+    const failures = engineFailures(body.unresponsive_engines);
+    const results: SearchCandidate[] = [];
+    let upstreamRank = 0;
+    for (const item of array(body.results)) {
+      upstreamRank += 1;
+      const row = record(item);
+      const result = candidate({
+        title: row.title,
+        url: row.url,
+        snippet: row.content ?? row.description,
+        publishedAt: row.publishedDate ?? row.published_at,
+        provider,
+        query,
+        rank: upstreamRank,
+        extraSnippets: row.engines,
+      });
+      if (!result || (filter && !filter(result))) continue;
+      results.push(result);
+      if (results.length >= query.count) break;
+    }
+    if (!results.length && failures.length) {
+      markSearXNGBlocked(failures);
+      throw new SearchProviderBlockedError(provider, failures);
+    }
+    if (failures.length) console.warn(`[search] SearXNG returned partial results; unavailable engines: ${failures.join(", ").slice(0, 500)}`);
+    return results;
+  });
 }
 
 export async function searchSearXNG(query: SearchProviderQuery, signal?: AbortSignal): Promise<SearchCandidate[]> {
@@ -78,8 +110,7 @@ export async function searchSearXNG(query: SearchProviderQuery, signal?: AbortSi
 }
 
 export async function searchSearXNGWikipedia(query: SearchProviderQuery, signal?: AbortSignal): Promise<SearchCandidate[]> {
-  const wikipediaQuery: SearchProviderQuery = { ...query, query: `${query.query.trim()} Wikipedia` };
-  return searchSearXNGWithProvider(wikipediaQuery, "searxng", signal);
+  return searchSearXNGWithProvider(query, "searxng", signal, undefined, "wikipedia");
 }
 
 export async function searchSearXNGReddit(query: SearchProviderQuery, signal?: AbortSignal): Promise<SearchCandidate[]> {

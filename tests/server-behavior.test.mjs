@@ -25,6 +25,7 @@ import {
   executeWebTool,
   WEB_TOOL_DEFINITIONS,
 } from "../app/server/agent/web-tools.ts";
+import { resetSearchProviderReliability } from "../app/server/search/search-provider-reliability.ts";
 import {
   availableImageTools,
   executeInspectImageTool,
@@ -183,10 +184,11 @@ test("time, date, and location tools validate inputs and produce bounded structu
   if (original === undefined) delete process.env.DEPLOYMENT_LOCATION; else process.env.DEPLOYMENT_LOCATION = original;
 });
 
-test("web search queries every self-hosted provider and caps higher counts", async () => {
+test("news web search queries only focused providers and caps higher counts", async () => {
   const originalFetch = globalThis.fetch;
   const originalStack = process.env.SEARCH_STACK_ENABLED;
   process.env.SEARCH_STACK_ENABLED = "true";
+  resetSearchProviderReliability();
   const requestedUrls = [];
   const requested = [];
   globalThis.fetch = async (url, init = {}) => {
@@ -203,17 +205,15 @@ test("web search queries every self-hosted provider and caps higher counts", asy
     assert.equal(result.ok, true);
     assert.equal(result.web?.kind, "search");
     assert.equal(result.web?.query, "current date");
-    assert.equal(requestedUrls.length, 12);
+    assert.equal(requestedUrls.length, 2);
     const searxngRequests = requested.filter(({ url }) => url.includes("searxng"));
-    assert.equal(searxngRequests.length, 9);
+    assert.equal(searxngRequests.length, 1);
     for (const searxngRequest of searxngRequests) {
       assert.equal(searxngRequest.init.method, "POST");
       assert.equal(searxngRequest.init.headers["Content-Type"], "application/x-www-form-urlencoded");
       assert.equal(new URLSearchParams(searxngRequest.init.body).get("categories"), "news");
     }
-    assert.deepEqual(searxngRequests.map(({ init }) => new URLSearchParams(init.body).get("q")).sort(), [
-      "current date", "current date Wikipedia", "current date reddit", "current date latest updates", "current date latest updates Wikipedia", "current date latest updates reddit", "current date recent coverage", "current date recent coverage Wikipedia", "current date recent coverage reddit",
-    ].sort());
+    assert.deepEqual(searxngRequests.map(({ init }) => new URLSearchParams(init.body).get("q")), ["current date"]);
     assert.ok(requestedUrls.some((url) => url.includes("miniflux")));
     assert.equal(result.web?.results[0]?.url, "https://news.example.com/story");
     assert.equal("provider" in (result.web?.results[0] ?? {}), false);
@@ -221,9 +221,10 @@ test("web search queries every self-hosted provider and caps higher counts", asy
 
     const capped = await executeWebTool({ id: "search-2", name: "web_search", arguments: '{"query":"current date","count":21,"focus":"news","freshness":"day"}' });
     assert.equal(capped.ok, true);
-    assert.equal(requestedUrls.length, 12);
+    assert.equal(requestedUrls.length, 2);
   } finally {
     globalThis.fetch = originalFetch;
+    resetSearchProviderReliability();
     if (originalStack === undefined) delete process.env.SEARCH_STACK_ENABLED; else process.env.SEARCH_STACK_ENABLED = originalStack;
   }
 });

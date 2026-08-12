@@ -8,6 +8,8 @@ import { searchSelfHosted } from "../app/server/search/search-service.ts";
 import { runSubagents } from "../app/server/agent/subagent-coordinator.ts";
 import { ResearchTraceCoordinator } from "../app/server/research/deep-research-service.ts";
 
+process.env.SEARCH_PROVIDER_MIN_INTERVAL_MS = "0";
+
 const source = (overrides = {}) => ({
   id: `src_${String(overrides.rank ?? 1).padStart(16, "0")}`,
   title: "Result",
@@ -58,7 +60,7 @@ test("direct extraction rejects private and credential-bearing URLs before fetch
   await assert.rejects(assertPublicResearchUrl("https://user:pass@example.com"), /public HTTP/i);
 });
 
-test("independent self-hosted searches query all providers concurrently", async () => {
+test("independent self-hosted searches serialize focused SearXNG requests", async () => {
   const previousFetch = globalThis.fetch;
   let active = 0;
   let maximum = 0;
@@ -74,14 +76,14 @@ test("independent self-hosted searches query all providers concurrently", async 
     active -= 1;
     if (requestUrl.hostname === "miniflux") return Response.json({ entries: [{ title: value, url: "https://example.com/result", content: `${value} evidence` }] });
     if (requestUrl.hostname.includes("wikipedia")) return Response.json({ query: { pages: { "1": { title: value, fullurl: "https://example.com/result", extract: `${value} evidence` } } } });
-    return Response.json({ results: [{ title: value, url: "https://example.com/result", content: `${value} evidence` }] });
+    return Response.json({ results: [{ title: value, url: "https://reddit.com/r/example/result", content: `${value} evidence` }] });
   };
   try {
     await Promise.all([
       searchSelfHosted({ query: "one", focus: "reference", queryIndex: 0, intent: "official" }),
       searchSelfHosted({ query: "two", focus: "general", queryIndex: 1, intent: "analysis" }),
     ]);
-    assert.equal(maximum, 8);
+    assert.equal(maximum, 1);
   } finally {
     globalThis.fetch = previousFetch;
   }
@@ -99,13 +101,13 @@ test("self-hosted search focus preserves the unified provider contract", async (
     const value = requestQuery || "page";
     if (requestUrl.hostname === "miniflux") return Response.json({ entries: [{ title: value, url: "https://example.com/result", content: `${value} evidence` }] });
     if (requestUrl.hostname.includes("wikipedia")) return Response.json({ query: { pages: { "1": { title: value, fullurl: "https://example.com/result", extract: `${value} evidence` } } } });
-    return Response.json({ results: [{ title: value, url: "https://example.com/result", content: `${value} evidence` }] });
+    return Response.json({ results: [{ title: value, url: "https://reddit.com/r/example/result", content: `${value} evidence` }] });
   };
   try {
     const results = await searchSelfHosted({ query: "page", focus: "community" });
     assert.equal(results.length, 1);
-    assert.equal(new Set(requested.map((url) => url.hostname)).size, 2);
-    assert.equal(requested.filter((url) => url.pathname === "/search").length, 3);
+    assert.equal(new Set(requested.map((url) => url.hostname)).size, 1);
+    assert.equal(requested.filter((url) => url.pathname === "/search").length, 1);
   } finally {
     globalThis.fetch = previousFetch;
   }

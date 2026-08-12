@@ -17,7 +17,7 @@ test("Compose pins Firecrawl to a reproducible image", async () => {
   assert.match(compose, /image: ghcr\.io\/firecrawl\/firecrawl@sha256:[a-f0-9]{64}/);
   assert.doesNotMatch(compose, /image: ghcr\.io\/firecrawl\/firecrawl:latest/);
   assert.match(compose, /command: \["postgres", "-c", "cron\.database_name=firecrawl"\]/);
-  assert.match(compose, /firecrawl:\n(?:(?!\n  \S).)*?mem_limit: 3g/s);
+  assert.match(compose, /firecrawl:\r?\n(?:(?!\r?\n  \S).)*?mem_limit: 3g/s);
 });
 
 test("Compose keeps the app port localhost-only and PostgreSQL unpublished", async () => {
@@ -43,8 +43,11 @@ test("search and retrieval services stay private to the Compose network", async 
   assert.doesNotMatch(compose, /MEDIAWIKI_API_URL|mediawiki/i);
   assert.match(compose, /FIRECRAWL_URL: \$\{FIRECRAWL_URL:-http:\/\/firecrawl:3002\}/);
   assert.doesNotMatch(compose, /redlib|REDLIB/i);
-  assert.match(compose, /rabbitmq-diagnostics.*\n\s+interval: 10s\n\s+timeout: 20s\n\s+retries: 6\n\s+start_period: 120s/s);
+  assert.match(compose, /rabbitmq-diagnostics.*\r?\n\s+interval: 10s\r?\n\s+timeout: 20s\r?\n\s+retries: 6\r?\n\s+start_period: 120s/s);
   assert.match(compose, /test: \["CMD", "wget", "--spider", "--quiet", "http:\/\/127\.0\.0\.1:8080\/" \]/);
+  const searxngBlock = compose.slice(compose.indexOf("  searxng:"), compose.indexOf("  miniflux-postgres:"));
+  assert.match(searxngBlock, /http:\/\/127\.0\.0\.1:8080\/healthz/);
+  assert.doesNotMatch(searxngBlock, /\/search|q['"]?: ['"]?healthcheck/i);
 });
 
 test("deployment surfaces do not retain the removed Redlib provider", async () => {
@@ -61,7 +64,7 @@ test("Local Drive credentials are deployment-only", async () => {
   const compose = await read("compose.yaml");
   assert.match(envExample, /^LOCAL_DRIVE_API_TOKEN=$/m);
   assert.match(audit, /LOCAL_DRIVE_API_TOKEN/u);
-  assert.match(compose, /env_file:\n\s+- path: \$\{DEPLOYMENT_ENV_FILE:-\.env\}/u);
+  assert.match(compose, /env_file:\r?\n\s+- path: \$\{DEPLOYMENT_ENV_FILE:-\.env\}/u);
   assert.doesNotMatch(envExample, /NEXT_PUBLIC_LOCAL_DRIVE_API_TOKEN/u);
 });
 

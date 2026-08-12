@@ -281,7 +281,7 @@ export class LocalPythonExecutor {
 
   async run(inputValue: unknown): Promise<LocalExecResult> {
     const startedAt = Date.now();
-    if (startedAt >= this.responseDeadlineAt) throw new Error("The response reached its 240-second execution limit.");
+    if (startedAt >= this.responseDeadlineAt) throw new Error("The response reached its configured execution limit.");
     const input = validatePythonToolInput(inputValue);
     const callDeadlineAt = Math.min(this.responseDeadlineAt, startedAt + PYTHON_TOOL_LIMITS.callTimeoutMs);
     const session = await this.ensureSession(callDeadlineAt);
@@ -411,7 +411,7 @@ export class LocalPythonExecutor {
     const cwd = workspaceDirectoryPath(input.cwd);
     const startedAt = Date.now();
     const deadlineAt = Math.min(this.responseDeadlineAt, startedAt + timeoutMs);
-    if (startedAt >= this.responseDeadlineAt) throw new Error("The response reached its 240-second execution limit.");
+    if (startedAt >= this.responseDeadlineAt) throw new Error("The response reached its configured execution limit.");
     const session = await this.ensureSession(deadlineAt);
     return requestJson<LocalCommandResult>("/v1/command", {
       session,

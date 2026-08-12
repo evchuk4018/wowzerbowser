@@ -155,6 +155,7 @@ export async function executeToolBatch<T, R>(
   execute: (call: T) => Promise<R>,
   signal: AbortSignal,
   concurrency = DEFAULT_CONCURRENCY,
+  onSettled?: (outcome: PromiseSettledResult<R>, index: number) => Promise<void> | void,
 ): Promise<PromiseSettledResult<R>[]> {
   const results: PromiseSettledResult<R>[] = new Array(calls.length);
   let nextIndex = 0;
@@ -165,6 +166,7 @@ export async function executeToolBatch<T, R>(
       if (index >= calls.length) return;
       if (signal.aborted) {
         results[index] = { status: "rejected", reason: signal.reason ?? new DOMException("The tool batch was cancelled.", "AbortError") };
+        await onSettled?.(results[index], index);
         continue;
       }
       try {
@@ -172,6 +174,7 @@ export async function executeToolBatch<T, R>(
       } catch (reason) {
         results[index] = { status: "rejected", reason };
       }
+      await onSettled?.(results[index], index);
     }
   };
   await Promise.all(Array.from({ length: workerCount }, () => worker()));

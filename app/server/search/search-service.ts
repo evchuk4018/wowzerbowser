@@ -1,5 +1,6 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
 import type { SearchFocus } from "../../../lib/search-protocol";
 import { searchMiniflux } from "../../providers/search/miniflux-search-adapter";
 import { searchSearXNG, searchSearXNGReddit, searchSearXNGWikipedia } from "../../providers/search/searxng-search-adapter";
@@ -32,15 +33,19 @@ function configuredSearchMaxResults(focus: SearchFocus): number {
 }
 
 export class SearchUnavailableError extends Error {
-  constructor(failedProviders: SearchProviderName[] = []) {
-    super(failedProviders.length ? `Search providers are unavailable (${failedProviders.join(", ")}).` : "Search providers are unavailable.");
+  constructor(failedProviders: SearchProviderName[] = [], reasons: string[] = []) {
+    const details = [...new Set(reasons.map((reason) => reason.replace(/\s+/gu, " ").trim()).filter(Boolean))]
+      .join("; ")
+      .slice(0, 500);
+    const providers = failedProviders.length ? failedProviders.join(", ") : "unknown provider";
+    super(`Search providers are temporarily unavailable (${providers}${details ? `: ${details}` : ""}). Do not retry web_search in this response. State that current web results could not be verified and do not invent results.`);
     this.name = "SearchUnavailableError";
   }
 }
 
 export class SearchNoResultsError extends Error {
   constructor() {
-    super("No search results were found.");
+    super("No relevant search results were found.");
     this.name = "SearchNoResultsError";
   }
 }
@@ -51,7 +56,16 @@ type ProviderOutcome = {
   name: SearchProviderName;
   state: ProviderState;
   candidates: SearchCandidate[];
+  rawCount: number;
   error?: unknown;
+};
+
+type ProviderRequest = {
+  name: SearchProviderName;
+  cacheNamespace: string;
+  circuitProvider: SearchProviderName;
+  query: SearchProviderQuery;
+  request: () => Promise<SearchCandidate[]>;
 };
 
 function providerErrorMessage(error: unknown): string {
@@ -65,6 +79,55 @@ function filterCandidates(candidates: SearchCandidate[], query: SearchProviderQu
     const relevanceScore = scoreSearchCandidate(item, relevanceQuery);
     return isSearchCandidateRelevant(item, relevanceQuery) ? [{ ...item, relevanceScore }] : [];
   });
+}
+
+function queryHash(query: string): string {
+  return createHash("sha256").update(query).digest("hex").slice(0, 16);
+}
+
+function providersFor(query: SearchProviderQuery, signal?: AbortSignal): ProviderRequest[] {
+  if (query.focus === "community") {
+    return [{ name: "searxng-reddit", cacheNamespace: "reddit", circuitProvider: "searxng", query, request: () => searchSearXNGReddit(query, signal) }];
+  }
+  if (query.focus === "reference") {
+    return [{ name: "searxng", cacheNamespace: "wikipedia", circuitProvider: "searxng", query, request: () => searchSearXNGWikipedia(query, signal) }];
+  }
+  const providers: ProviderRequest[] = [
+    { name: "searxng", cacheNamespace: "general", circuitProvider: "searxng", query, request: () => searchSearXNG(query, signal) },
+  ];
+  if (query.focus === "news") providers.push({ name: "miniflux", cacheNamespace: "news", circuitProvider: "miniflux", query, request: () => searchMiniflux(query, signal) });
+  return providers;
+}
+
+async function runQuery(query: SearchProviderQuery, signal?: AbortSignal): Promise<ProviderOutcome[]> {
+  return Promise.all(providersFor(query, signal).map(async ({ name, cacheNamespace, circuitProvider, request }): Promise<ProviderOutcome> => {
+    const startedAt = Date.now();
+    try {
+      const raw = await searchProviderWithReliability({ provider: name, cacheNamespace, circuitProvider, query, signal, execute: request });
+      const candidates = filterCandidates(raw, query);
+      console.info(JSON.stringify({
+        event: "search_provider_result",
+        provider: name,
+        cacheNamespace,
+        queryHash: queryHash(query.query),
+        rawCount: raw.length,
+        filteredCount: candidates.length,
+        latencyMs: Date.now() - startedAt,
+      }));
+      return { name, state: candidates.length ? "fulfilled-with-results" : "fulfilled-empty", candidates, rawCount: raw.length };
+    } catch (error) {
+      console.warn(`[search] provider ${name} rejected: ${providerErrorMessage(error)}`);
+      return { name, state: "rejected", candidates: [], rawCount: 0, error };
+    }
+  }));
+}
+
+function unavailableFrom(outcomes: ProviderOutcome[]): SearchUnavailableError {
+  const rejected = outcomes.filter((outcome) => outcome.state === "rejected");
+  return new SearchUnavailableError(
+    [...new Set(rejected.map((outcome) => outcome.name))],
+    rejected.flatMap((outcome) => outcome.error instanceof Error ? [outcome.error.message] : []),
+  );
 }
 
 export async function searchSelfHosted(input: {
@@ -96,7 +159,7 @@ export async function searchSelfHosted(input: {
       ...(input.freshness ? { freshness: input.freshness } : {}),
       relevanceQuery: input.query,
     }];
-  const queries: SearchProviderQuery[] = plans.map((planned) => ({
+  const queries: SearchProviderQuery[] = plans.slice(0, input.expandQueries ? 2 : 1).map((planned) => ({
     query: planned.query,
     focus,
     count,
@@ -105,26 +168,15 @@ export async function searchSelfHosted(input: {
     ...(planned.freshness ? { freshness: planned.freshness } : {}),
     relevanceQuery: planned.relevanceQuery,
   }));
-  const providers: Array<[SearchProviderName, SearchProviderQuery, () => Promise<SearchCandidate[]>]> = queries.flatMap((query) => [
-    ["searxng", query, () => searchSearXNG(query, input.signal)] as [SearchProviderName, SearchProviderQuery, () => Promise<SearchCandidate[]>],
-    ["searxng-reddit", query, () => searchSearXNGReddit(query, input.signal)] as [SearchProviderName, SearchProviderQuery, () => Promise<SearchCandidate[]>],
-    ["searxng", query, () => searchSearXNGWikipedia(query, input.signal)] as [SearchProviderName, SearchProviderQuery, () => Promise<SearchCandidate[]>],
-    ["miniflux", query, () => searchMiniflux(query, input.signal)] as [SearchProviderName, SearchProviderQuery, () => Promise<SearchCandidate[]>],
-  ]);
-  const outcomes: ProviderOutcome[] = await Promise.all(providers.map(async ([name, query, request]): Promise<ProviderOutcome> => {
-    try {
-      const candidates = filterCandidates(await searchProviderWithReliability({ provider: name, query, signal: input.signal, execute: request }), query);
-      return { name, state: candidates.length ? "fulfilled-with-results" : "fulfilled-empty", candidates };
-    } catch (error) {
-      console.warn(`[search] provider ${name} rejected: ${providerErrorMessage(error)}`);
-      return { name, state: "rejected", candidates: [], error };
-    }
-  }));
+  if (!queries.length) throw new SearchNoResultsError();
+  let outcomes = await runQuery(queries[0], input.signal);
+  const healthyGenuineEmpty = outcomes.every((outcome) => outcome.state === "fulfilled-empty" && outcome.rawCount === 0);
+  if (healthyGenuineEmpty && queries[1]) outcomes = await runQuery(queries[1], input.signal);
   const failedProviders = [...new Set(outcomes.filter((outcome) => outcome.state === "rejected").map((outcome) => outcome.name))];
   const candidates = outcomes.flatMap((outcome) => outcome.candidates);
   if (failedProviders.length && candidates.length) console.warn(`[search] partial provider failures: ${failedProviders.join(", ")}`);
   if (!candidates.length) {
-    if (failedProviders.length) throw new SearchUnavailableError(failedProviders);
+    if (failedProviders.length) throw unavailableFrom(outcomes);
     throw new SearchNoResultsError();
   }
   return rankSearchCandidates(candidates, { focus, maxResults: count });

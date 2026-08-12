@@ -54,6 +54,23 @@ test("one failed parallel call does not cancel its peers", async () => {
   assert.deepEqual(settled[1], { status: "fulfilled", value: "completed" });
 });
 
+test("publishes parallel outcomes as they settle while preserving the returned model order", async () => {
+  const published = [];
+  const settled = await executeToolBatch(
+    ["slow", "fast"],
+    async (call) => {
+      await delay(call === "slow" ? 20 : 1);
+      return call.toUpperCase();
+    },
+    new AbortController().signal,
+    2,
+    async (outcome, index) => published.push([index, outcome.status === "fulfilled" ? outcome.value : "failed"]),
+  );
+
+  assert.deepEqual(published, [[1, "FAST"], [0, "SLOW"]]);
+  assert.deepEqual(settled.map((item) => item.status === "fulfilled" ? item.value : "failed"), ["SLOW", "FAST"]);
+});
+
 test("cancellation prevents work that has not started", async () => {
   const controller = new AbortController();
   controller.abort(new Error("cancelled"));

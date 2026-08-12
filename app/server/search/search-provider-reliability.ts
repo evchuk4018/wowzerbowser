@@ -1,7 +1,9 @@
 import "server-only";
 
-import type { SearchCandidate, SearchProviderName, SearchProviderQuery } from "./search-types";
+import { createHash } from "node:crypto";
+import { SearchProviderBlockedError, type SearchCandidate, type SearchProviderName, type SearchProviderQuery } from "./search-types";
 import { runtimeConfigSnapshot } from "../config/runtime-config-service";
+import { resetSearXNGRequestControl } from "./searxng-request-control";
 
 type CacheEntry = {
   expiresAt: number;
@@ -44,9 +46,14 @@ function circuit(provider: SearchProviderName): CircuitState {
   return created;
 }
 
-function cacheKey(provider: SearchProviderName, query: SearchProviderQuery): string {
+function queryHash(query: string): string {
+  return createHash("sha256").update(query).digest("hex").slice(0, 16);
+}
+
+function cacheKey(provider: SearchProviderName, namespace: string, query: SearchProviderQuery): string {
   return JSON.stringify([
     provider,
+    namespace,
     query.query,
     query.relevanceQuery ?? query.query,
     query.focus,
@@ -85,35 +92,45 @@ function recordSuccess(provider: SearchProviderName): void {
   state.probeInFlight = false;
 }
 
-function recordFailure(provider: SearchProviderName, signal?: AbortSignal): void {
+function recordFailure(provider: SearchProviderName, signal?: AbortSignal, immediate = false): void {
   const state = circuit(provider);
   state.probeInFlight = false;
   if (signal?.aborted) return;
-  state.consecutiveFailures += 1;
+  state.consecutiveFailures = immediate ? failureThreshold() : state.consecutiveFailures + 1;
   if (state.consecutiveFailures >= failureThreshold()) state.openedAt = Date.now();
 }
 
 export async function searchProviderWithReliability(input: {
   provider: SearchProviderName;
+  cacheNamespace?: string;
+  circuitProvider?: SearchProviderName;
   query: SearchProviderQuery;
   signal?: AbortSignal;
   execute: () => Promise<SearchCandidate[]>;
 }): Promise<SearchCandidate[]> {
   const { provider, query, signal, execute } = input;
-  const key = cacheKey(provider, query);
+  const cacheNamespace = input.cacheNamespace ?? provider;
+  const circuitProvider = input.circuitProvider ?? provider;
+  const key = cacheKey(provider, cacheNamespace, query);
   const cached = cache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return hydrate(cached.candidates, provider, query);
+  if (cached && cached.expiresAt > Date.now()) {
+    console.info(JSON.stringify({ event: "search_provider_cache_hit", provider, cacheNamespace, queryHash: queryHash(query.query) }));
+    return hydrate(cached.candidates, provider, query);
+  }
   if (cached) cache.delete(key);
-  if (circuitIsOpen(provider)) throw new SearchProviderCircuitOpenError(provider);
+  if (circuitIsOpen(circuitProvider)) {
+    console.warn(JSON.stringify({ event: "search_provider_circuit_open", provider: circuitProvider, queryHash: queryHash(query.query) }));
+    throw new SearchProviderCircuitOpenError(circuitProvider);
+  }
 
   try {
     const candidates = await execute();
-    recordSuccess(provider);
+    recordSuccess(circuitProvider);
     const ttl = cacheTtlMs();
     if (ttl > 0) cache.set(key, { expiresAt: Date.now() + ttl, candidates: candidates.map(cloneCandidate) });
     return hydrate(candidates, provider, query);
   } catch (error) {
-    recordFailure(provider, signal);
+    recordFailure(circuitProvider, signal, error instanceof SearchProviderBlockedError);
     throw error;
   }
 }
@@ -121,4 +138,5 @@ export async function searchProviderWithReliability(input: {
 export function resetSearchProviderReliability(): void {
   cache.clear();
   circuits.clear();
+  resetSearXNGRequestControl();
 }

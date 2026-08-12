@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { ChatResearchTraceEntry, ChatUsage, ResearchBudget } from "../../../lib/chat-protocol";
 import { canonicalSourceUrl, sourceForUrl, type ChatSource } from "../../../lib/chat-citations";
-import { searchSelfHosted } from "../search/search-service";
+import { SearchUnavailableError, searchSelfHosted } from "../search/search-service";
 import { recordPromptUsage } from "../usage/prompt-cost-service";
 import { ReasoningTitleCoordinator, type ReasoningTitleUsage } from "../chat/reasoning-title-service";
 import { researchLimits } from "./research-config";
@@ -177,8 +177,10 @@ async function executeQuery(query: ResearchQuery, index: number, run: ResearchRu
       queryIndex: index,
       intent: query.intent,
     });
-  } catch {
-    run.warnings.push(`Self-hosted search providers returned no results for query ${index + 1}.`);
+  } catch (error) {
+    run.warnings.push(error instanceof SearchUnavailableError
+      ? `Search could not be verified for query ${index + 1}: ${error.message}`
+      : `Self-hosted search providers returned no relevant results for query ${index + 1}.`);
     return [];
   }
 }

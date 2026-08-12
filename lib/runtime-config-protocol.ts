@@ -2,6 +2,7 @@ export type RuntimeConfigValue = boolean | number | string | string[];
 
 export type RuntimeConfigKey =
   | "searchStackEnabled"
+  | "chatResponseTimeoutMs"
   | "webSearchMaxResultsGeneral"
   | "webSearchMaxResultsNews"
   | "webSearchMaxResultsCommunity"
@@ -10,6 +11,7 @@ export type RuntimeConfigKey =
   | "searchProviderRequestTimeoutMs"
   | "searchProviderMaxAttempts"
   | "searchProviderRetryDelayMs"
+  | "searchProviderMinIntervalMs"
   | "searxngUrl"
   | "searxngFormats"
   | "searxngLimiter"
@@ -149,6 +151,7 @@ const descriptor = <Key extends RuntimeConfigKey>(input: RuntimeConfigDescriptor
 
 export const RUNTIME_CONFIG_DESCRIPTORS: RuntimeConfigDescriptor[] = [
   descriptor({ key: "searchStackEnabled", label: "Search stack enabled", description: "Make the self-hosted web search tools available to the assistant.", category: "search", type: "boolean", envName: "SEARCH_STACK_ENABLED", defaultValue: false, restartRequired: false }),
+  descriptor({ key: "chatResponseTimeoutMs", label: "Chat response timeout", description: "Maximum wall-clock time for an interactive response, including tool and delegated work.", category: "chat", type: "integer", envName: "CHAT_RESPONSE_TIMEOUT_MS", defaultValue: 500_000, minimum: 60_000, maximum: 3_600_000, restartRequired: false }),
   descriptor({ key: "webSearchMaxResultsGeneral", label: "Web results: general", description: "Maximum results returned for a general web search.", category: "search", type: "integer", envName: "WEB_SEARCH_MAX_RESULTS_GENERAL", defaultValue: 20, minimum: 1, maximum: 50, restartRequired: false }),
   descriptor({ key: "webSearchMaxResultsNews", label: "Web results: news", description: "Maximum results returned for a news-focused web search.", category: "search", type: "integer", envName: "WEB_SEARCH_MAX_RESULTS_NEWS", defaultValue: 20, minimum: 1, maximum: 50, restartRequired: false }),
   descriptor({ key: "webSearchMaxResultsCommunity", label: "Web results: community", description: "Maximum results returned for a community-focused web search.", category: "search", type: "integer", envName: "WEB_SEARCH_MAX_RESULTS_COMMUNITY", defaultValue: 20, minimum: 1, maximum: 50, restartRequired: false }),
@@ -157,6 +160,7 @@ export const RUNTIME_CONFIG_DESCRIPTORS: RuntimeConfigDescriptor[] = [
   descriptor({ key: "searchProviderRequestTimeoutMs", label: "Search request timeout", description: "How long an individual search-provider request may run.", category: "search", type: "integer", envName: "SEARCH_PROVIDER_REQUEST_TIMEOUT_MS", defaultValue: 12_000, minimum: 1_000, maximum: 60_000, restartRequired: false }),
   descriptor({ key: "searchProviderMaxAttempts", label: "Search retry attempts", description: "Maximum attempts for a search-provider request, including the first attempt.", category: "search", type: "integer", envName: "SEARCH_PROVIDER_MAX_ATTEMPTS", defaultValue: 2, minimum: 1, maximum: 4, restartRequired: false }),
   descriptor({ key: "searchProviderRetryDelayMs", label: "Search retry delay", description: "Delay between transient search-provider attempts in milliseconds.", category: "search", type: "integer", envName: "SEARCH_PROVIDER_RETRY_DELAY_MS", defaultValue: 25, minimum: 0, maximum: 5_000, restartRequired: false }),
+  descriptor({ key: "searchProviderMinIntervalMs", label: "Search request spacing", description: "Minimum spacing between starts of requests to the self-hosted SearXNG provider.", category: "search", type: "integer", envName: "SEARCH_PROVIDER_MIN_INTERVAL_MS", defaultValue: 1_000, minimum: 0, maximum: 10_000, restartRequired: false }),
   descriptor({ key: "focusedContextRecentTurns", label: "Recent chat turns", description: "Number of recent conversation turns always included in the assistant context.", category: "chat", type: "integer", envName: "FOCUSED_CONTEXT_RECENT_TURNS", defaultValue: 2, minimum: 1, maximum: 8, restartRequired: false }),
   descriptor({ key: "focusedContextMaxOlderTurns", label: "Older chat turns", description: "Maximum additional older turns selected for the current request.", category: "chat", type: "integer", envName: "FOCUSED_CONTEXT_MAX_OLDER_TURNS", defaultValue: 4, minimum: 0, maximum: 12, restartRequired: false }),
   descriptor({ key: "focusedContextMaxHistoryCharacters", label: "Chat context size", description: "Maximum serialized conversation characters included after focused context selection.", category: "chat", type: "integer", envName: "FOCUSED_CONTEXT_MAX_HISTORY_CHARACTERS", defaultValue: 96_000, minimum: 8_000, maximum: 250_000, restartRequired: false }),

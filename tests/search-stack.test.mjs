@@ -9,6 +9,8 @@ import { isSearchCandidateRelevant, scoreSearchCandidate } from "../app/server/s
 import { resetSearchProviderReliability } from "../app/server/search/search-provider-reliability.ts";
 import { planSearchQueries } from "../app/server/search/search-query-planner.ts";
 
+process.env.SEARCH_PROVIDER_MIN_INTERVAL_MS = "0";
+
 test("normal search planning expands only intent-bearing requests", () => {
   const lookup = planSearchQueries({ query: "what is TypeScript", focus: "general" });
   assert.equal(lookup.length, 1);
@@ -65,7 +67,7 @@ test("successful provider results are cached for the short reliability window", 
     const input = { query: "cache reliability", focus: "general", count: 5 };
     assert.ok((await searchSelfHosted(input)).length > 0);
     assert.ok((await searchSelfHosted(input)).length > 0);
-    assert.equal(calls, 4);
+    assert.equal(calls, 1);
   } finally {
     globalThis.fetch = previousFetch;
     resetSearchProviderReliability();
@@ -73,36 +75,116 @@ test("successful provider results are cached for the short reliability window", 
   }
 });
 
-test("a failing provider opens its circuit without taking healthy providers down", async () => {
+test("a blocked provider opens its circuit immediately and suppresses repeat requests", async () => {
   const previousFetch = globalThis.fetch;
   const previousTtl = process.env.SEARCH_PROVIDER_CACHE_TTL_MS;
-  const previousThreshold = process.env.SEARCH_PROVIDER_FAILURE_THRESHOLD;
-  let failingNormalCalls = 0;
+  let calls = 0;
   process.env.SEARCH_PROVIDER_CACHE_TTL_MS = "0";
-  process.env.SEARCH_PROVIDER_FAILURE_THRESHOLD = "3";
   resetSearchProviderReliability();
-  globalThis.fetch = async (url, init = {}) => {
-    const value = String(url);
-    if (value.includes("searxng")) {
-      const query = new URLSearchParams(init.body).get("q") ?? "";
-      if (!query.endsWith("reddit")) {
-        failingNormalCalls += 1;
-        throw new Error("normal SearXNG unavailable");
-      }
-      return Response.json({ results: [{ title: "Circuit breaker discussion", url: "https://reddit.com/r/selfhosted/circuit", content: "Circuit breaker community evidence" }] });
-    }
-    if (value.includes("wikipedia")) return Response.json({ query: { pages: { "1": { title: "Circuit breaker", fullurl: "https://example.com/circuit", extract: "Circuit breaker reference evidence" } } } });
-    return Response.json({ entries: [{ title: "Circuit breaker", url: "https://example.com/circuit", content: "Circuit breaker news evidence" }] });
+  globalThis.fetch = async () => {
+    calls += 1;
+    return Response.json({ results: [], unresponsive_engines: [["duckduckgo", "CAPTCHA"]] });
   };
   try {
-    const input = { query: "circuit breaker", focus: "community", count: 5 };
-    for (let attempt = 0; attempt < 4; attempt += 1) assert.ok((await searchSelfHosted(input)).length > 0);
-    assert.equal(failingNormalCalls, 8);
+    const input = { query: "circuit breaker", focus: "general", count: 5 };
+    await assert.rejects(searchSelfHosted(input), /CAPTCHA.*do not retry/i);
+    await assert.rejects(searchSelfHosted(input), /temporarily unavailable.*do not retry/i);
+    assert.equal(calls, 1);
   } finally {
     globalThis.fetch = previousFetch;
     resetSearchProviderReliability();
     if (previousTtl === undefined) delete process.env.SEARCH_PROVIDER_CACHE_TTL_MS; else process.env.SEARCH_PROVIDER_CACHE_TTL_MS = previousTtl;
-    if (previousThreshold === undefined) delete process.env.SEARCH_PROVIDER_FAILURE_THRESHOLD; else process.env.SEARCH_PROVIDER_FAILURE_THRESHOLD = previousThreshold;
+  }
+});
+
+test("queued SearXNG requests stop after the first request reports blocked engines", async () => {
+  const previousFetch = globalThis.fetch;
+  const originalNow = Date.now;
+  const previousCircuitOpen = process.env.SEARCH_PROVIDER_CIRCUIT_OPEN_MS;
+  let calls = 0;
+  process.env.SEARCH_PROVIDER_CIRCUIT_OPEN_MS = "1000";
+  resetSearchProviderReliability();
+  globalThis.fetch = async () => {
+    calls += 1;
+    if (calls === 1) return Response.json({ results: [], unresponsive_engines: [["duckduckgo", "CAPTCHA"]] });
+    return Response.json({ results: [{ title: "Recovered provider", url: "https://example.com/recovered", content: "Provider recovered" }] });
+  };
+  try {
+    const query = { query: "provider block", focus: "general", count: 5, queryIndex: 0, intent: "lookup" };
+    const outcomes = await Promise.allSettled([
+      searchSearXNG(query),
+      searchSearXNGWikipedia({ ...query, focus: "reference", intent: "reference" }),
+    ]);
+    assert.deepEqual(outcomes.map(({ status }) => status), ["rejected", "rejected"]);
+    assert.equal(calls, 1);
+    assert.match(String(outcomes[1].reason), /CAPTCHA/);
+    Date.now = () => originalNow() + 1_001;
+    assert.equal((await searchSearXNG(query))[0]?.title, "Recovered provider");
+    assert.equal(calls, 2);
+  } finally {
+    Date.now = originalNow;
+    globalThis.fetch = previousFetch;
+    resetSearchProviderReliability();
+    if (previousCircuitOpen === undefined) delete process.env.SEARCH_PROVIDER_CIRCUIT_OPEN_MS; else process.env.SEARCH_PROVIDER_CIRCUIT_OPEN_MS = previousCircuitOpen;
+  }
+});
+
+test("partial SearXNG results remain usable while engine failures are disclosed in diagnostics", async () => {
+  const previousFetch = globalThis.fetch;
+  resetSearchProviderReliability();
+  globalThis.fetch = async () => Response.json({
+    results: [{ title: "Search reliability guide", url: "https://example.com/search", content: "Search reliability evidence" }],
+    unresponsive_engines: [["duckduckgo", "CAPTCHA"]],
+  });
+  try {
+    const results = await searchSelfHosted({ query: "search reliability", focus: "general", count: 5 });
+    assert.equal(results.length, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+    resetSearchProviderReliability();
+  }
+});
+
+test("general and Wikipedia searches use distinct cache namespaces", async () => {
+  const previousFetch = globalThis.fetch;
+  let calls = 0;
+  resetSearchProviderReliability();
+  globalThis.fetch = async (_url, init = {}) => {
+    calls += 1;
+    const engines = new URLSearchParams(init.body).get("engines");
+    return Response.json({ results: [{
+      title: engines ? "TypeScript Wikipedia reference" : "TypeScript general guide",
+      url: engines ? "https://en.wikipedia.org/wiki/TypeScript" : "https://example.com/typescript",
+      content: "TypeScript reference guide",
+    }] });
+  };
+  try {
+    await searchSelfHosted({ query: "TypeScript", focus: "general", count: 5 });
+    await searchSelfHosted({ query: "TypeScript", focus: "reference", count: 5 });
+    assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = previousFetch;
+    resetSearchProviderReliability();
+  }
+});
+
+test("expanded search runs only one conditional fallback after a healthy empty response", async () => {
+  const previousFetch = globalThis.fetch;
+  const queries = [];
+  resetSearchProviderReliability();
+  globalThis.fetch = async (_url, init = {}) => {
+    const query = new URLSearchParams(init.body).get("q") ?? "";
+    queries.push(query);
+    if (queries.length === 1) return Response.json({ results: [] });
+    return Response.json({ results: [{ title: "Best note taking apps comparison", url: "https://example.com/apps", content: "Reviews comparison of note taking apps" }] });
+  };
+  try {
+    const results = await searchSelfHosted({ query: "best note taking apps", focus: "general", count: 5, expandQueries: true });
+    assert.equal(results.length, 1);
+    assert.deepEqual(queries, ["best note taking apps", "best note taking apps reviews comparison"]);
+  } finally {
+    globalThis.fetch = previousFetch;
+    resetSearchProviderReliability();
   }
 });
 
@@ -116,8 +198,6 @@ test("community search uses an exact SearXNG Reddit query and filters non-Reddit
     if (value.includes("searxng")) {
       const query = new URLSearchParams(init.body).get("q");
       calls.push({ url: value, init, query });
-      if (query === "self hosted search") return Response.json({ results: [] });
-      if (query === "self hosted search Wikipedia") return Response.json({ results: [] });
       if (query === "self hosted search reddit") return Response.json({ results: [
         { title: "Unrelated result", url: "https://example.com/not-reddit", content: "Should be filtered" },
         { title: "Self-hosted search", url: "https://www.reddit.com/r/selfhosted/comments/abc123/self_hosted_search/", content: "Community experience" },
@@ -132,8 +212,8 @@ test("community search uses an exact SearXNG Reddit query and filters non-Reddit
   };
   try {
     const results = await searchSelfHosted({ query: "self hosted search", focus: "community", count: 3, queryIndex: 0, intent: "community" });
-    assert.equal(calls.length, 3);
-    assert.deepEqual(calls.map(({ query }) => query).sort(), ["self hosted search", "self hosted search Wikipedia", "self hosted search reddit"]);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls.map(({ query }) => query), ["self hosted search reddit"]);
     assert.equal(results.length, 3);
     assert.equal(results[0].provider, "searxng-reddit");
     assert.equal(results[0].rank, 2);
@@ -157,10 +237,11 @@ test("SearXNG Reddit-query failures preserve upstream HTTP statuses", async () =
   process.env.SEARXNG_URL = "http://searxng:8080";
   try {
     for (const status of [403, 404]) {
+      resetSearchProviderReliability();
       globalThis.fetch = async () => new Response("upstream failure", { status, headers: { "content-type": "application/json" } });
       await assert.rejects(
         searchSearXNGReddit({ query: "weather cup", focus: "community", count: 5, queryIndex: 0, intent: "community" }),
-        new RegExp(`status ${status}`),
+        new RegExp(`HTTP ${status}`),
       );
     }
   } finally {
@@ -169,22 +250,28 @@ test("SearXNG Reddit-query failures preserve upstream HTTP statuses", async () =
   }
 });
 
-test("Wikipedia search appends Wikipedia to the SearXNG query", async () => {
+test("Wikipedia search targets only the Wikipedia SearXNG engine", async () => {
   const previousFetch = globalThis.fetch;
   const previousUrl = process.env.SEARXNG_URL;
   process.env.SEARXNG_URL = "http://searxng:8080";
+  resetSearchProviderReliability();
   let requestedQuery = "";
+  let requestedEngines = "";
   globalThis.fetch = async (_url, init = {}) => {
-    requestedQuery = new URLSearchParams(init.body).get("q") ?? "";
+    const body = new URLSearchParams(init.body);
+    requestedQuery = body.get("q") ?? "";
+    requestedEngines = body.get("engines") ?? "";
     return Response.json({ results: [{ title: "Reference", url: "https://en.wikipedia.org/wiki/Reference", content: "Reference evidence" }] });
   };
   try {
     const results = await searchSearXNGWikipedia({ query: "TypeScript", focus: "reference", count: 5, queryIndex: 0, intent: "reference" });
-    assert.equal(requestedQuery, "TypeScript Wikipedia");
+    assert.equal(requestedQuery, "TypeScript");
+    assert.equal(requestedEngines, "wikipedia");
     assert.equal(results[0].provider, "searxng");
     assert.equal(results[0].url, "https://en.wikipedia.org/wiki/Reference");
   } finally {
     globalThis.fetch = previousFetch;
+    resetSearchProviderReliability();
     if (previousUrl === undefined) delete process.env.SEARXNG_URL; else process.env.SEARXNG_URL = previousUrl;
   }
 });
@@ -303,25 +390,25 @@ test("general search does not return irrelevant Wikipedia results", async () => 
   try {
     await assert.rejects(
       searchSelfHosted({ query: "Pokémon Weather Cup Magcargo", focus: "general", count: 10 }),
-      (error) => error instanceof SearchNoResultsError && /no search results/i.test(error.message),
+      (error) => error instanceof SearchNoResultsError && /no relevant search results/i.test(error.message),
     );
   } finally {
     globalThis.fetch = previousFetch;
   }
 });
 
-test("search returns healthy provider results when another provider is unavailable", async () => {
+test("news search returns healthy Miniflux results when SearXNG is unavailable", async () => {
   const previousFetch = globalThis.fetch;
   resetSearchProviderReliability();
   globalThis.fetch = async (url) => {
     const value = String(url);
-    if (value.includes("searxng")) return Response.json({ results: [{ title: "Weather Cup guide", url: "https://example.com/weather-cup", content: "Magcargo matchup evidence" }] });
-    return Response.json({ entries: [] });
+    if (value.includes("searxng")) throw new Error("connection refused");
+    return Response.json({ entries: [{ title: "Weather Cup guide", url: "https://example.com/weather-cup", content: "Magcargo matchup evidence" }] });
   };
   try {
-    const results = await searchSelfHosted({ query: "Pokémon Weather Cup Magcargo", focus: "general", count: 10 });
+    const results = await searchSelfHosted({ query: "Pokémon Weather Cup Magcargo", focus: "news", count: 10 });
     assert.equal(results.length, 1);
-    assert.equal(results[0].provider, "searxng");
+    assert.equal(results[0].provider, "miniflux");
   } finally {
     globalThis.fetch = previousFetch;
     resetSearchProviderReliability();
@@ -333,11 +420,9 @@ test("search reports rejected provider names when no provider has usable results
   globalThis.fetch = async () => { throw new Error("connection refused"); };
   try {
     await assert.rejects(
-      searchSelfHosted({ query: "weather cup", focus: "general", count: 10 }),
+      searchSelfHosted({ query: "weather cup", focus: "news", count: 10 }),
       (error) => error instanceof SearchUnavailableError
         && /searxng/.test(error.message)
-        && /searxng-reddit/.test(error.message)
-        && !/mediawiki/i.test(error.message)
         && /miniflux/.test(error.message),
     );
   } finally {

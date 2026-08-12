@@ -97,8 +97,6 @@ import {
   type ChatExecutionOptions,
 } from "./chat-response-preparation";
 
-const MAX_RESPONSE_MS = 240_000;
-
 export type ChatRoundUsage = {
   round: number;
   usage: ChatUsage | null;
@@ -122,6 +120,7 @@ export async function generateChatResponse(
 ): Promise<{ awaitingApproval: boolean }> {
   const automationExecution = isAutomationExecution(executionOptions);
   const subagentExecution = isSubagentExecution(executionOptions);
+  const configuration = runtimeConfigSnapshot();
   chatRequest = normalizeChatRequestModel(chatRequest);
   if (chatRequest.projectId) {
     const project = await getProject(ownerId, chatRequest.projectId);
@@ -131,7 +130,8 @@ export async function generateChatResponse(
   const selectedMetadata = await (automationExecution ? authorizeAutomationModel(ownerId, chatRequest.model) : authorizeChatModel(ownerId, chatRequest.model));
   const providerAdapter = chatProviderAdapter(chatRequest.model.provider);
   providerAdapter.assertConfigured();
-  const responseDeadlineAt = Date.now() + MAX_RESPONSE_MS;
+  const responseTimeoutMs = configuration.chatResponseTimeoutMs;
+  const responseDeadlineAt = Date.now() + responseTimeoutMs;
   const responseId = chatRequest.jobId;
   const conversationId = stableConversationId(chatRequest);
   const latestPreviousAssistant = [...chatRequest.messages].reverse().find((message) => message.role === "assistant")?.content;
@@ -311,7 +311,6 @@ export async function generateChatResponse(
   const todoTools = selected("todos") && !automationExecution && (planner.plannedThisTurn || Boolean(planner.list?.items.length)) ? TODO_TOOL_DEFINITIONS : [];
   const automationResultTools = selected("automation-result") && automationExecution ? [COMPLETE_AUTOMATION_RUN_TOOL_DEFINITION] : [];
   const contextTools = focusedPlan?.searchEntries.length ? [currentChatContextToolDefinition()] : [];
-  const configuration = runtimeConfigSnapshot();
   const documentContextLimits = { maxInlineTokens: configuration.documentInlineMaxTokens, maxInlinePages: configuration.documentInlineMaxPages };
   const pagesForInlineDocument = createInlineDocumentPageLoader((document) => getDocumentPages(ownerId, conversationId, document.id), documentContextLimits);
   const contextualMessages = await Promise.all(chatRequest.messages.map(async (message) => {
@@ -864,6 +863,7 @@ export async function generateChatResponse(
             await enqueue({ type: "tool_result", result });
             for (const artifact of result.artifacts ?? []) await enqueue({ type: "artifact", artifact });
           };
+          let toolResultEmissionTail = Promise.resolve();
 
           for (const batch of batches) {
             const first = batch[0];
@@ -882,24 +882,29 @@ export async function generateChatResponse(
               continue;
             }
             for (const { call } of batch) await enqueue({ type: "tool_call", call });
-            const settled = await executeToolBatch(
+            await executeToolBatch(
               batch,
               ({ call, index }) => executeToolCall(call, index),
               roundSignal,
+              undefined,
+              async (outcome, index) => {
+                const { call } = batch[index];
+                const result: ChatToolResult = outcome.status === "fulfilled"
+                  ? outcome.value
+                  : {
+                      id: call.id,
+                      name: call.name,
+                      ok: false,
+                      stdout: "",
+                      stderr: outcome.reason instanceof Error ? outcome.reason.message : "Tool execution failed.",
+                    };
+                const emission = toolResultEmissionTail.then(() => emitToolResult(call, result));
+                toolResultEmissionTail = emission.catch(() => undefined);
+                await emission;
+              },
             );
             if (roundSignal.aborted) throw roundSignal.reason ?? new Error("The tool batch was cancelled.");
-            for (const [{ call }, outcome] of batch.map((item, index) => [item, settled[index]] as const)) {
-              const result = outcome.status === "fulfilled"
-                ? outcome.value
-                : {
-                    id: call.id,
-                    name: call.name,
-                    ok: false,
-                    stdout: "",
-                    stderr: outcome.reason instanceof Error ? outcome.reason.message : "Tool execution failed.",
-                  };
-              await emitToolResult(call, result);
-            }
+            await toolResultEmissionTail;
           }
           replayRounds.push({
             content: contentParts.join(""),
@@ -910,7 +915,8 @@ export async function generateChatResponse(
         }
       } catch (error: unknown) {
         if (!signal.aborted) {
-          const message = deadline.aborted ? "The response exceeded its 240-second limit." : error instanceof Error ? error.message : "DeepSeek is unavailable.";
+          const timeoutSeconds = Math.ceil(responseTimeoutMs / 1_000);
+          const message = deadline.aborted ? `The response exceeded its configured ${timeoutSeconds}-second limit.` : error instanceof Error ? error.message : "DeepSeek is unavailable.";
           await enqueue({ type: "error", message });
         }
       } finally {
