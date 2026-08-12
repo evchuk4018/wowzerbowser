@@ -474,7 +474,7 @@ test("keeps the transcript scroll viewport full-width with compact mobile compos
   assert.ok(mobileResponsiveTranscript);
   assert.match(mobileResponsiveTranscript, /width: calc\(100% - 28px - env\(safe-area-inset-left\) - env\(safe-area-inset-right\)\);/);
   assert.match(mobileResponsiveTranscript, /padding-top: 70px;/);
-  assert.match(mobileResponsiveTranscript, /padding-bottom: calc\(100px \+ env\(safe-area-inset-bottom\)\);/);
+  assert.match(mobileResponsiveTranscript, /padding-bottom: calc\(220px \+ env\(safe-area-inset-bottom\)\);/);
   assert.ok(mobileTranscriptBlock);
   assert.match(mobileTranscriptBlock, /padding-inline: 0;/);
 });

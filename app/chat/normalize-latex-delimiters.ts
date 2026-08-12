@@ -3,7 +3,7 @@ type ProtectedRange = {
   end: number;
 };
 
-export function normalizeLatexDelimiters(content: string): string {
+function protectedRangesFor(content: string): ProtectedRange[] {
   const protectedRanges: ProtectedRange[] = [];
   let index = 0;
 
@@ -81,9 +81,68 @@ export function normalizeLatexDelimiters(content: string): string {
     index += 1;
   }
 
+  return protectedRanges;
+}
+
+function isEscaped(content: string, index: number): boolean {
+  let backslashCount = 0;
+  for (let backslashIndex = index - 1; backslashIndex >= 0 && content[backslashIndex] === "\\"; backslashIndex -= 1) {
+    backslashCount += 1;
+  }
+  return backslashCount % 2 === 1;
+}
+
+function isLikelyCurrencyMarker(content: string, index: number): boolean {
+  if (content[index] !== "$" || content[index + 1] === "$" || isEscaped(content, index)) return false;
+  if (!/\d/.test(content[index + 1] ?? "")) return false;
+
+  let amountEnd = index + 1;
+  while (/[\d,]/.test(content[amountEnd] ?? "")) amountEnd += 1;
+  if (content[amountEnd] === "." && /\d/.test(content[amountEnd + 1] ?? "")) {
+    amountEnd += 1;
+    while (/\d/.test(content[amountEnd] ?? "")) amountEnd += 1;
+  }
+
+  const amount = content.slice(index + 1, amountEnd);
+  const remainder = content.slice(amountEnd);
+  if (!amount || content[amountEnd] === "$" || content[index - 1] === "$") return false;
+  if (/^[A-Za-z]/.test(remainder) && amount.length >= 2) return true;
+  if (/^\s*[-–—]\s*\$?\d/.test(remainder)) return true;
+  if (/^\s+[A-Za-z]/.test(remainder)) return true;
+  if (!remainder || /^[.,;:!?)]/.test(remainder) || /^\s*[.,;:!?)]/.test(remainder)) return true;
+  const startsMathOperator = /^\s*[+\-/=^_]/.test(remainder) || /^\s*\*(?!\*)/.test(remainder);
+  if (amount.includes(",") && !startsMathOperator) return true;
+  return false;
+}
+
+function escapeCurrencyMarkers(content: string): string {
+  const protectedRanges = protectedRangesFor(content);
+  let protectedIndex = 0;
+  let index = 0;
+  let result = "";
+
+  while (index < content.length) {
+    const protectedRange = protectedRanges[protectedIndex];
+    if (protectedRange && index >= protectedRange.start) {
+      result += content.slice(protectedRange.start, protectedRange.end);
+      index = protectedRange.end;
+      protectedIndex += 1;
+      continue;
+    }
+
+    if (isLikelyCurrencyMarker(content, index)) result += "\\";
+    result += content[index];
+    index += 1;
+  }
+
+  return result;
+}
+
+export function normalizeLatexDelimiters(content: string): string {
+  const protectedRanges = protectedRangesFor(content);
   const replacements = new Map<number, string>();
   let protectedIndex = 0;
-  index = 0;
+  let index = 0;
 
   while (index < content.length) {
     const protectedRange = protectedRanges[protectedIndex];
@@ -145,7 +204,7 @@ export function normalizeLatexDelimiters(content: string): string {
     index += 2;
   }
 
-  if (replacements.size === 0) return content;
+  if (replacements.size === 0) return escapeCurrencyMarkers(content);
 
   let result = "";
   let resultIndex = 0;
@@ -169,5 +228,5 @@ export function normalizeLatexDelimiters(content: string): string {
     }
   }
 
-  return result;
+  return escapeCurrencyMarkers(result);
 }
