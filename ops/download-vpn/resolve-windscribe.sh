@@ -38,11 +38,29 @@ tmp_path="${resolved_path}.tmp.$$"
 trap 'rm -f -- "$tmp_path"' EXIT HUP INT TERM
 
 awk -v replacement="$endpoint_ip:$endpoint_port" '
+  function ipv4_values(value,    n, parts, i, token, result) {
+    n = split(value, parts, /,[[:space:]]*/)
+    result = ""
+    for (i = 1; i <= n; i++) {
+      token = parts[i]
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", token)
+      if (token != "" && token !~ /:/) {
+        if (result != "") result = result ", "
+        result = result token
+      }
+    }
+    return result
+  }
   BEGIN { replaced = 0 }
   {
     if (!replaced && $0 ~ /^[[:space:]]*[Ee]ndpoint[[:space:]]*=/) {
       sub(/=.*/, "= " replacement)
       replaced = 1
+    }
+    if ($0 ~ /^[[:space:]]*[Aa]ddress[[:space:]]*=/ || $0 ~ /^[[:space:]]*[Aa]llowed[Ii][Pp][Ss][[:space:]]*=/) {
+      value = $0
+      sub(/^[^=]*=[[:space:]]*/, "", value)
+      sub(/=.*/, "= " ipv4_values(value))
     }
     print
   }

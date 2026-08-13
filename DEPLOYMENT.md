@@ -318,7 +318,9 @@ Keep that regular file owned by the service user with mode `0600`. Never put its
 contents in this checkout, Compose environment variables, GitHub, or logs.
 Gluetun requires a numeric peer endpoint; the supervisor resolves the
 hostname into a separate runtime-only `windscribe-philadelphia.resolved.conf`
-with mode `0600` and leaves the supplied source profile unchanged.
+with mode `0600` and leaves the supplied source profile unchanged. The
+IPv4-only derived copy removes IPv6 interface/peer-route entries; IPv6 Internet
+traffic is blocked rather than sent outside Windscribe.
 
 The isolated set is:
 

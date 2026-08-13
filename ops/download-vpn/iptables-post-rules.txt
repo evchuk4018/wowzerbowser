@@ -2,7 +2,7 @@
 # interface inside this namespace. The host policy table sends only packets
 # arriving from the dedicated exit bridge here; Docker media services remain
 # unchanged.
-iptables -I FORWARD 1 -i eth0 -s 100.64.0.0/10 -o tun0 -j ACCEPT
+iptables -I FORWARD 1 -s 100.64.0.0/10 -o tun0 -j ACCEPT
 iptables -I FORWARD 1 -i tun0 -d 100.64.0.0/10 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 iptables -t nat -A POSTROUTING -s 100.64.0.0/10 -o tun0 -j MASQUERADE
 

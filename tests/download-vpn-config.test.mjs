@@ -74,4 +74,6 @@ test("Tailscale exit routing is fail-closed and persistent", async () => {
   const resolver = await read("ops/download-vpn/resolve-windscribe.sh");
   assert.match(resolver, /getent ahostsv4/);
   assert.match(resolver, /chmod 600/);
+  assert.match(resolver, /ipv4_values/);
+  assert.match(resolver, /\[Aa\]llowed\[Ii\]\[Pp\]\[Ss\]/);
 });

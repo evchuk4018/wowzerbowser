@@ -28,7 +28,9 @@ Gluetun requires a numeric WireGuard endpoint. At startup,
 `resolve-windscribe.sh` resolves only the profile's endpoint hostname and
 creates the runtime-only `windscribe-philadelphia.resolved.conf` beside the
 source profile, also mode `0600`. The source profile remains authoritative and
-is never rewritten or displayed.
+is never rewritten or displayed. Because the existing VPN namespace is
+IPv4-only, the derived copy also removes IPv6 interface-address and peer-route
+entries; IPv6 Internet traffic is blocked rather than sent outside Windscribe.
 
 ## Startup and operations
 
