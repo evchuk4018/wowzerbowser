@@ -46,6 +46,7 @@ import {
   WORKSPACE_LIST_TOOL_NAME,
   WORKSPACE_WRITE_TOOL_NAME,
 } from "./workspace-tool-manifest";
+import { SPREADSHEET_TOOL_NAME } from "./spreadsheet-tool-manifest";
 import { RUN_SUBAGENT_TOOL_NAME } from "./subagent-tool-manifest";
 
 export type ToolExecutionPolicy = "parallel-safe" | "serial";
@@ -93,6 +94,7 @@ export const TOOL_EXECUTION_METADATA: Readonly<Record<string, ToolExecutionMetad
   [WORKSPACE_WRITE_TOOL_NAME]: { executionPolicy: "serial" },
   [WORKSPACE_PATCH_TOOL_NAME]: { executionPolicy: "serial" },
   [WORKSPACE_DELETE_TOOL_NAME]: { executionPolicy: "serial" },
+  [SPREADSHEET_TOOL_NAME]: { executionPolicy: "serial" },
   [EDIT_SOURCE_BACKED_DOCUMENT_TOOL_NAME]: { executionPolicy: "serial" },
   [EDIT_PDF_TOOL_NAME]: { executionPolicy: "serial" },
   [ADD_USER_MEMORY_TOOL]: { executionPolicy: "serial" },

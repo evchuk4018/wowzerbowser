@@ -9,6 +9,9 @@ import { runPythonInstructionsFor } from "../server/agent/python-tool-instructio
 import { availableWorkspaceTools } from "../server/agent/workspace-tool-manifest";
 import { executeWorkspaceTool } from "../server/agent/workspace-tool";
 import { WORKSPACE_TOOL_INSTRUCTIONS } from "../server/agent/workspace-tool-instructions";
+import { availableSpreadsheetTools, SPREADSHEET_TOOL_NAME } from "../server/agent/spreadsheet-tool-manifest";
+import { executeSpreadsheetTool } from "../server/agent/spreadsheet-tool";
+import { SPREADSHEET_TOOL_INSTRUCTIONS } from "../server/agent/spreadsheet-tool-instructions";
 import { availableWebTools, executeWebTool } from "../server/agent/web-tools";
 import { webToolInstructionsFor } from "../server/agent/web-tool-instructions";
 import {
@@ -137,6 +140,7 @@ export async function generateChatResponse(
   const latestPreviousAssistant = [...chatRequest.messages].reverse().find((message) => message.role === "assistant")?.content;
   const pythonTools = availableChatTools();
   const workspaceTools = availableWorkspaceTools(isLocalPythonConfigured());
+  const spreadsheetTools = availableSpreadsheetTools(isLocalPythonConfigured());
   const webTools = availableWebTools();
   const requestedPdfIds = [...new Set(chatRequest.messages.flatMap((message) => message.documents?.map((item) => item.id) ?? []))];
   const [
@@ -203,6 +207,7 @@ export async function generateChatResponse(
   const toolGroups: FocusedToolGroup[] = [
     ...(pythonTools.length ? [{ id: "python", summary: "Run Python for computation, data processing, or generated files.", keywords: ["python", "calculate", "compute", "chart", "spreadsheet", "generate file"], fallback: true }] : []),
     ...(workspaceTools.length ? [{ id: "workspace", summary: "Inspect, create, edit, search, and run checks against persistent conversation files, including visual inspection of imported PDFs.", keywords: ["file", "files", "code", "html", "javascript", "typescript", "python", "edit", "create", "write", "workspace", "script", "pdf", "equation", "formula", "integral", "parametric"], fallback: true }] : []),
+    ...(spreadsheetTools.length ? [{ id: "spreadsheet", summary: "Create, inspect, and edit persistent .xlsx workbooks with formulas, formatting, tables, and basic charts.", keywords: ["spreadsheet", "xlsx", "excel", "workbook", "worksheet", "cell", "formula", "table", "chart", "budget", "csv"], fallback: true }] : []),
     ...(imageTools.length ? [{ id: "image", summary: "Inspect an attached image.", keywords: ["image", "photo", "picture", "screenshot"], required: Boolean(latestMessage?.attachments?.length) }] : []),
     ...(workspaceImageTools.length ? [{ id: "workspace-image", summary: "Inspect an image file in the persistent workspace, including one imported from Local Drive.", keywords: ["workspace image", "local drive image", "drive photo", "image file", "photo file", "describe image"], fallback: true }] : []),
     ...(webTools.length ? [{ id: "web", summary: "Search the web, fetch pages, and check current time, date, or deployment location.", keywords: ["current", "latest", "today", "web", "search", "url", "time", "date", "location", "news"], fallback: true }] : []),
@@ -295,6 +300,7 @@ export async function generateChatResponse(
   const selected = (group: string) => !focusedPlan || focusedPlan.selectedToolGroups.has(group);
   const activePythonTools = selected("python") ? pythonTools : [];
   const activeWorkspaceTools = selected("workspace") ? workspaceTools : [];
+  const activeSpreadsheetTools = selected("spreadsheet") ? spreadsheetTools : [];
   const activeImageTools = selected("image") ? imageTools : [];
   const activeWorkspaceImageTools = selected("workspace-image") ? workspaceImageTools : [];
   const activeWebTools = selected("web") ? webTools : [];
@@ -324,7 +330,7 @@ export async function generateChatResponse(
   }));
   chatRequest = { ...chatRequest, messages: contextualMessages };
   const allowedProjectIds = new Set([...authoritativePdfs.values()].map((document) => document.projectId).filter((projectId): projectId is string => Boolean(projectId)));
-  const baseToolDefinitions = [...activePythonTools, ...activeWorkspaceTools, ...activeImageTools, ...activeWorkspaceImageTools, ...activeWebTools, ...activeDeepResearchTools, ...pdfEditTools, ...activePhaseTools, ...customDefinitions, ...activeChatMemoryTools, ...activeUserMemoryTools, ...skillTools, ...todoTools, ...automationResultTools, ...contextTools, ...(connectorDiscoveryAvailable && selected("connectors") ? [SEARCH_CONNECTOR_TOOLS_DEFINITION] : []), ...(subagentExecution ? [] : [subagentToolDefinition()])];
+  const baseToolDefinitions = [...activePythonTools, ...activeWorkspaceTools, ...activeSpreadsheetTools, ...activeImageTools, ...activeWorkspaceImageTools, ...activeWebTools, ...activeDeepResearchTools, ...pdfEditTools, ...activePhaseTools, ...customDefinitions, ...activeChatMemoryTools, ...activeUserMemoryTools, ...skillTools, ...todoTools, ...automationResultTools, ...contextTools, ...(connectorDiscoveryAvailable && selected("connectors") ? [SEARCH_CONNECTOR_TOOLS_DEFINITION] : []), ...(subagentExecution ? [] : [subagentToolDefinition()])];
   const imageToolAdvertised = activeImageTools.some((tool) => tool.function.name === INSPECT_IMAGE_TOOL_NAME);
 
   const enqueue = async (event: ChatStreamEvent) => {
@@ -551,6 +557,7 @@ export async function generateChatResponse(
           const systemInstructions = [
             ...runPythonInstructionsFor(Boolean(activePythonTools.length)),
             ...(activeWorkspaceTools.length || activeWorkspaceImageTools.length ? [WORKSPACE_TOOL_INSTRUCTIONS] : []),
+            ...(activeSpreadsheetTools.length ? [SPREADSHEET_TOOL_INSTRUCTIONS] : []),
             ...webToolInstructionsFor(Boolean(activeWebTools.length)),
             ...deepResearchInstructionsFor(Boolean(activeDeepResearchTools.length)),
             ...(subagentExecution ? [SUBAGENT_CHILD_INSTRUCTIONS] : [SUBAGENT_TOOL_INSTRUCTIONS]),
@@ -665,6 +672,11 @@ export async function generateChatResponse(
             break;
           }
           const executeToolCall = async (call: ChatToolCall, callIndex: number): Promise<ChatToolResult> => {
+            if (call.name === SPREADSHEET_TOOL_NAME && activeSpreadsheetTools.length) {
+              if (!isLocalPythonConfigured()) throw new Error("Spreadsheet tools are not configured.");
+              if (!executor) executor = new LocalPythonExecutor(ownerId, conversationId, responseDeadlineAt).withWorkspaceId(chatRequest.projectId ?? conversationId);
+              return executeSpreadsheetTool(call, { ownerId, conversationId, projectId: chatRequest.projectId, executor });
+            }
             if (activeWorkspaceTools.some((tool) => tool.function.name === call.name)) {
               if (!isLocalPythonConfigured()) throw new Error("Workspace tools are not configured.");
               if (!executor) executor = new LocalPythonExecutor(ownerId, conversationId, responseDeadlineAt).withWorkspaceId(chatRequest.projectId ?? conversationId);

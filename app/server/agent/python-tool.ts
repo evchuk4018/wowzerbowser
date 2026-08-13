@@ -6,6 +6,7 @@ import { isLocalPythonConfigured, LocalPythonExecutor } from "../python/local-py
 import { validatePythonToolInput } from "../../../lib/python-tool-policy";
 import { registerGeneratedDocumentProvenance } from "../documents/generated-document-provenance";
 import { workspaceContentType, workspaceFileFor } from "../../../lib/workspace-protocol";
+import { XLSX_CONTENT_TYPE } from "../../../lib/spreadsheet-protocol";
 import {
   PYTHON_TOOL_DEFINITION,
   PYTHON_TOOL_NAME,
@@ -177,5 +178,6 @@ function contentTypeFor(path: string): string {
   if (extension === "txt" || extension === "md" || extension === "py" || extension === "html" || extension === "htm" || extension === "css" || extension === "js" || extension === "mjs" || extension === "cjs" || extension === "jsx" || extension === "ts" || extension === "tsx" || extension === "json" || extension === "svg" || extension === "xml" || extension === "yaml" || extension === "yml" || extension === "png" || extension === "jpg" || extension === "jpeg" || extension === "webp" || extension === "gif" || extension === "avif" || extension === "ico") return workspaceContentType(path);
   if (extension === "pdf") return "application/pdf";
   if (extension === "docx") return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (extension === "xlsx") return XLSX_CONTENT_TYPE;
   return "application/octet-stream";
 }

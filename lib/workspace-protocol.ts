@@ -92,7 +92,7 @@ export function workspaceLanguage(path: string): string {
     cjs: "javascript", jsx: "javascriptreact", ts: "typescript", mts: "typescript",
     cts: "typescript", tsx: "typescriptreact", md: "markdown", markdown: "markdown",
     json: "json", py: "python", svg: "xml", xml: "xml", yaml: "yaml", yml: "yaml",
-    sh: "shell", bash: "shell", txt: "plaintext",
+    sh: "shell", bash: "shell", txt: "plaintext", xlsx: "excel",
   };
   return languages[extension] ?? "plaintext";
 }
@@ -106,7 +106,7 @@ export function workspaceContentType(path: string): string {
     cts: "text/typescript; charset=utf-8", tsx: "text/typescript; charset=utf-8", md: "text/markdown; charset=utf-8",
     markdown: "text/markdown; charset=utf-8", json: "application/json", py: "text/x-python; charset=utf-8",
     svg: "image/svg+xml", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif", avif: "image/avif", ico: "image/x-icon",
-    xml: "application/xml", yaml: "text/yaml; charset=utf-8", yml: "text/yaml; charset=utf-8",
+    xml: "application/xml", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", yaml: "text/yaml; charset=utf-8", yml: "text/yaml; charset=utf-8",
     sh: "text/x-shellscript; charset=utf-8", bash: "text/x-shellscript; charset=utf-8", txt: "text/plain; charset=utf-8",
   };
   return types[extension] ?? "text/plain; charset=utf-8";
