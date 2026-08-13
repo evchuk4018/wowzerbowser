@@ -23,3 +23,5 @@ config/runtime.env
 config/searxng
 deployment.env*
 .codex-*
+secrets
+ops/download-vpn/*.conf

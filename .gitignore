@@ -42,3 +42,8 @@ next-env.d.ts
 /dist/
 /outputs/
 /work/
+
+# Runtime-only VPN material is installed outside the checkout. Keep any
+# accidental local copies out of source control as well.
+/secrets/
+/ops/download-vpn/*.conf

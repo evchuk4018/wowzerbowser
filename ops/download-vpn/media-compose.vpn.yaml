@@ -1,0 +1,29 @@
+services:
+  jellyseerr:
+    network_mode: "container:download-vpn"
+    ports: !reset []
+    networks: !reset []
+
+  radarr:
+    network_mode: "container:download-vpn"
+    ports: !reset []
+    networks: !reset []
+
+  sonarr:
+    network_mode: "container:download-vpn"
+    ports: !reset []
+    networks: !reset []
+
+  qbittorrent:
+    network_mode: "container:download-vpn"
+    ports: !reset []
+    networks: !reset []
+
+  prowlarr:
+    network_mode: "container:download-vpn"
+    ports: !reset []
+    networks: !reset []
+
+  flaresolverr:
+    network_mode: "container:download-vpn"
+    networks: !reset []

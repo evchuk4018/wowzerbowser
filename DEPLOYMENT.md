@@ -302,6 +302,99 @@ The Gateway container does not receive access to `/srv/storage/media`.
 If Discord is not configured, omit the profile. The core stack does not require
 Discord credentials or a Discord Gateway connection.
 
+## Download-only Windscribe isolation
+
+Download-related services use a separate Docker network namespace; the host's
+default route is unchanged. The implementation lives in
+`ops/download-vpn/`. The gateway uses the supplied WireGuard profile and
+Gluetun's built-in firewall as a kill switch. Its WireGuard configuration is
+deployment-only and must be installed at:
+
+```text
+/srv/storage/wowzerbowser/secrets/windscribe-philadelphia.conf
+```
+
+Keep that regular file owned by the service user with mode `0600`. Never put its
+contents in this checkout, Compose environment variables, GitHub, or logs.
+
+The isolated set is:
+
+* media acquisition: qBittorrent, Prowlarr, Radarr, Sonarr, Jellyseerr, and
+  FlareSolverr;
+* the HomeTube worker, including its `yt-dlp` process; and
+* the music acquisition worker when the optional `spotdl` path is enabled.
+
+Jellyfin, Navidrome, both music and HomeTube databases, HomeTube web, the
+Drive project (`app-web`/`app-postgres`), Tailscale, SSH, the host, and the
+Wowzer Bowser services remain outside the VPN. The gateway is attached to
+existing Docker bridges only for required local service and database traffic;
+it does not attach the Drive or media playback traffic to the VPN namespace.
+
+The gateway disables IPv6 inside the shared namespace because Docker's
+existing bridges do not provide routed IPv6. Its internal DNS listener uses
+protected upstream DNS over the VPN path; VPN-required containers do not use
+the host resolver directly.
+
+Install and enable the user-systemd supervisors after the secret is in place
+(`loginctl` linger is already enabled for `evanh`):
+
+```bash
+/srv/storage/wowzerbowser/ops/download-vpn/install-systemd.sh
+systemctl --user status wowzerbowser-download-vpn.service
+systemctl --user status wowzerbowser-tailscale-exit.service
+```
+
+It waits for Docker and the storage mount, starts the gateway, waits for the
+actual Gluetun healthcheck, and then starts the isolated services. If the
+tunnel fails, it stops only the VPN-required services; normal services keep
+their existing networking. Docker and systemd restart policies recover the
+gateway after a container, Docker, or host restart.
+
+The externally managed media, HomeTube, and music Compose files are not
+rewritten. The supervisor creates timestamped backups beside them before an
+apply. The overlays are `media-compose.vpn.yaml`,
+`hometube-compose.vpn.yaml`, and `music-compose.vpn.yaml`.
+
+For a future downloader, add it to the relevant overlay with
+`network_mode: "container:download-vpn"`, clear its normal `networks`, and
+use `127.0.0.1` as its DNS. Add only its administration port and any required
+local bridge CIDR to the gateway. Verify its exit IP and repeat the intentional
+gateway-stop test before enabling it.
+
+For rollback, stop and disable `wowzerbowser-download-vpn.service`, stop the
+isolated containers, restore the timestamped Compose backups, and start the
+original media/HomeTube/music Compose projects with their original commands.
+Do not remove persistent volumes or run `docker compose down -v`.
+
+## Tailscale exit node through Windscribe
+
+The host advertises itself as a Tailscale exit node with the installed
+Tailscale CLI. The existing host default route remains on the LAN. A dedicated
+Docker bridge (`wowzerbowser-download-vpn-exit`, `172.24.0.0/28`) leads only to
+the healthy Windscribe gateway. Traffic arriving from `tailscale0` uses host
+policy table `51820`; Tailnet-to-Tailnet, LAN, and Docker-local destinations
+are explicitly kept direct, while the table's default is a blackhole whenever
+the gateway is not healthy. The host firewall drops any other forwarded
+traffic from `tailscale0`, and the Gluetun namespace NATs only the Tailnet
+source range through `tun0`.
+
+IPv4 forwarding is enabled with loose reverse-path filtering. IPv6 forwarding
+is enabled only so Tailnet-to-Tailnet traffic can continue; Internet-bound
+IPv6 received on `tailscale0` is dropped and the exit table has a blackhole
+IPv6 default. Tailscale netfilter is set to `nodivert` so it does not move its
+own broad forwarding accept rule ahead of the fail-closed chain.
+
+The supervisor files are:
+
+* `ops/download-vpn/wowzerbowser-download-vpn.service` for the existing
+  Windscribe-isolated containers;
+* `ops/download-vpn/wowzerbowser-tailscale-exit.service` for the exit-node
+  advertisement and host routing/firewall reconciliation.
+
+After the server-side check passes, select `homelab` as the Exit Node in the
+Tailscale iPhone app. If the Admin Console marks the advertised exit node as
+pending approval, approve it under the device's route settings first.
+
 ## Tailscale Serve
 
 Tailscale runs on the host, not in a container. After the web health check is

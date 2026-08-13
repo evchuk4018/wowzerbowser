@@ -1,0 +1,17 @@
+[Unit]
+Description=Windscribe gateway for download-only homelab services
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/srv/storage/wowzerbowser
+ConditionPathExists=/srv/storage/wowzerbowser/secrets/windscribe-philadelphia.conf
+
+[Service]
+Type=simple
+ExecStart=/srv/storage/wowzerbowser/ops/download-vpn/supervise.sh
+ExecStop=/srv/storage/wowzerbowser/ops/download-vpn/stop.sh
+Restart=always
+RestartSec=30s
+TimeoutStopSec=120s
+
+[Install]
+WantedBy=default.target

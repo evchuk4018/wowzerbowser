@@ -1,0 +1,19 @@
+services:
+  postgres:
+    networks:
+      default:
+        aliases:
+          - music-postgres
+
+  navidrome:
+    networks:
+      default:
+        aliases:
+          - music-navidrome
+
+  worker:
+    network_mode: "container:download-vpn"
+    networks: !reset []
+    environment:
+      DATABASE_URL: postgresql://${MUSICPLAYER_POSTGRES_USER:-musicplayer}:${MUSICPLAYER_POSTGRES_PASSWORD:-change-me}@music-postgres:5432/${MUSICPLAYER_POSTGRES_DB:-musicplayer}
+      NAVIDROME_URL: http://music-navidrome:4533

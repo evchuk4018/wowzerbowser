@@ -1,0 +1,13 @@
+services:
+  postgres:
+    networks:
+      default:
+        aliases:
+          - hometube-postgres
+
+  worker:
+    network_mode: "container:download-vpn"
+    networks: !reset []
+    environment:
+      DATABASE_URL: postgresql://${HOMETUBE_POSTGRES_USER:-hometube}:${HOMETUBE_POSTGRES_PASSWORD:?Set HOMETUBE_POSTGRES_PASSWORD in the deployment environment}@hometube-postgres:5432/${HOMETUBE_POSTGRES_DB:-hometube}
+      OPENDATALOADER_URL: http://opendataloader-hybrid:5002
