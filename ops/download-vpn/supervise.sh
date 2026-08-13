@@ -14,6 +14,20 @@ music_compose="${music_root}/docker-compose.yml"
 music_homelab_override="${deployment_root}/files/home music/deploy/homelab/docker-compose.musicplayer.override.yml"
 music_overlay="${deployment_root}/ops/download-vpn/music-compose.vpn.yaml"
 
+env_value() {
+  key=$1
+  awk -F= -v key="$key" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' "$deployment_root/deployment.env"
+}
+
+hometube_postgres_password=$(env_value HOMETUBE_POSTGRES_PASSWORD)
+if [ -z "$hometube_postgres_password" ]; then
+  hometube_postgres_password=$(env_value POSTGRES_PASSWORD)
+fi
+if [ -z "$hometube_postgres_password" ]; then
+  echo "HomeTube Compose requires an existing PostgreSQL password in deployment.env" >&2
+  exit 78
+fi
+
 vpn_compose() {
   docker compose -p wowzerbowser-download-vpn --env-file "$deployment_root/deployment.env" \
     -f "$vpn_file" "$@"
@@ -26,7 +40,7 @@ stop_targets() {
 start_normal_targets() {
   docker compose -p media-stack --project-directory "$media_root" --env-file "$media_root/.env" \
     -f "$media_compose" up -d jellyfin || return 1
-  docker compose -p hometube --project-directory "$deployment_root/hometube" \
+  HOMETUBE_POSTGRES_PASSWORD="$hometube_postgres_password" docker compose -p hometube --project-directory "$deployment_root/hometube" \
     --env-file "$deployment_root/deployment.env" -f "$hometube_compose" \
     up -d postgres web || return 1
   docker compose -p musicplayer --project-directory "$music_root" --env-file "$music_root/.env" \
@@ -37,7 +51,7 @@ start_vpn_targets() {
   docker compose -p media-stack --project-directory "$media_root" --env-file "$media_root/.env" \
     -f "$media_compose" -f "$media_overlay" up -d \
     jellyseerr radarr sonarr qbittorrent prowlarr flaresolverr || return 1
-  docker compose -p hometube --project-directory "$deployment_root/hometube" \
+  HOMETUBE_POSTGRES_PASSWORD="$hometube_postgres_password" docker compose -p hometube --project-directory "$deployment_root/hometube" \
     --env-file "$deployment_root/deployment.env" -f "$hometube_compose" \
     -f "$hometube_overlay" up -d worker || return 1
   docker compose -p musicplayer --project-directory "$music_root" --env-file "$music_root/.env" \

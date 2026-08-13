@@ -7,6 +7,11 @@ media_root=/opt/media-stack
 secret_path=${WINDSCRIBE_CONF_PATH:-/srv/storage/wowzerbowser/secrets/windscribe-philadelphia.conf}
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 
+env_value() {
+  key=$1
+  awk -F= -v key="$key" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' "$deployment_root/deployment.env"
+}
+
 if [ ! -f "$secret_path" ] || [ -L "$secret_path" ]; then
   echo "Install the WireGuard profile at $secret_path before applying the gateway." >&2
   exit 78
@@ -18,6 +23,15 @@ if [ "$(stat -c '%u:%g:%a' "$secret_path")" != "$expected_secret_mode" ]; then
 fi
 
 "$deployment_root/docker/require-storage-mount.sh"
+
+hometube_postgres_password=$(env_value HOMETUBE_POSTGRES_PASSWORD)
+if [ -z "$hometube_postgres_password" ]; then
+  hometube_postgres_password=$(env_value POSTGRES_PASSWORD)
+fi
+if [ -z "$hometube_postgres_password" ]; then
+  echo "HomeTube Compose requires an existing PostgreSQL password in deployment.env" >&2
+  exit 78
+fi
 
 backup_file() {
   source_path=$1
@@ -42,7 +56,7 @@ docker compose -p wowzerbowser-download-vpn --env-file "$deployment_root/deploym
 docker compose -p media-stack --project-directory "$media_root" --env-file "$media_root/.env" \
   -f "$media_root/compose.yml" -f "$deployment_root/ops/download-vpn/media-compose.vpn.yaml" \
   config >/dev/null
-docker compose -p hometube --project-directory "$deployment_root/hometube" \
+HOMETUBE_POSTGRES_PASSWORD="$hometube_postgres_password" docker compose -p hometube --project-directory "$deployment_root/hometube" \
   --env-file "$deployment_root/deployment.env" -f "$deployment_root/hometube/docker-compose.yml" \
   -f "$deployment_root/ops/download-vpn/hometube-compose.vpn.yaml" config >/dev/null
 docker compose -p musicplayer --project-directory "$deployment_root/files/musicplayer" \

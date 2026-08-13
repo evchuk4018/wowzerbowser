@@ -46,6 +46,8 @@ test("boot supervision requires a restrictive secret and keeps normal services o
   const unit = await read("ops/download-vpn/wowzerbowser-download-vpn.service");
   assert.match(supervisor, /\/srv\/storage\/wowzerbowser\/secrets\/windscribe-philadelphia\.conf/);
   assert.match(supervisor, /expected_secret_mode/);
+  assert.match(supervisor, /env_value HOMETUBE_POSTGRES_PASSWORD/);
+  assert.match(supervisor, /env_value POSTGRES_PASSWORD/);
   assert.match(supervisor, /stop_targets/);
   assert.match(supervisor, /start_vpn_targets/);
   assert.match(unit, /WantedBy=default\.target/);
