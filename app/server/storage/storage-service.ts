@@ -15,6 +15,22 @@ import {
   listStorageObjectsForConversation,
 } from "./storage-repository";
 
+type AbandonedStorageCleanupDependencies = {
+  listAbandonedStorageObjects: typeof listAbandonedStorageObjects;
+  deleteObjectFile: typeof localFilesystemStorageProvider.deleteObjectFile;
+  deleteStorageObjectMetadata: typeof deleteStorageObjectMetadata;
+  cleanupTemporaryFiles: typeof localFilesystemStorageProvider.cleanupTemporaryFiles;
+};
+
+function logAbandonedStorageCleanupFailure(object: StorageObject, phase: "file" | "metadata", error: unknown): void {
+  console.warn(JSON.stringify({
+    event: "abandoned-storage-cleanup-failed",
+    objectId: object.objectId,
+    phase,
+    error: error instanceof Error ? error.message : String(error),
+  }));
+}
+
 export async function createPendingStorageObject(input: StorageObjectInput): Promise<StorageObject> {
   return createStorageObject(input);
 }
@@ -84,16 +100,34 @@ export async function deleteStorageObjectsForConversation(ownerId: string, conve
   }
 }
 
-export async function cleanupAbandonedStorage(input: { ownerId: string; now?: Date; olderThanMs?: number; limit?: number }): Promise<number> {
+export async function cleanupAbandonedStorage(
+  input: { ownerId: string; now?: Date; olderThanMs?: number; limit?: number },
+  dependencies: AbandonedStorageCleanupDependencies = {
+    listAbandonedStorageObjects,
+    deleteObjectFile: localFilesystemStorageProvider.deleteObjectFile,
+    deleteStorageObjectMetadata,
+    cleanupTemporaryFiles: localFilesystemStorageProvider.cleanupTemporaryFiles,
+  },
+): Promise<number> {
   const limit = Math.max(1, Math.min(input.limit ?? 100, 100));
   const olderThanMs = input.olderThanMs ?? 60 * 60 * 1_000;
-  const objects = await listAbandonedStorageObjects(input.ownerId, new Date((input.now ?? new Date()).getTime() - olderThanMs), limit);
+  const objects = await dependencies.listAbandonedStorageObjects(input.ownerId, new Date((input.now ?? new Date()).getTime() - olderThanMs), limit);
   let cleaned = 0;
   for (const object of objects) {
-    await localFilesystemStorageProvider.deleteObjectFile(object).catch(() => undefined);
-    await deleteStorageObjectMetadata({ ownerId: input.ownerId, objectId: object.objectId }).catch(() => undefined);
+    try {
+      await dependencies.deleteObjectFile(object);
+    } catch (error) {
+      logAbandonedStorageCleanupFailure(object, "file", error);
+      continue;
+    }
+    try {
+      await dependencies.deleteStorageObjectMetadata({ ownerId: input.ownerId, objectId: object.objectId });
+    } catch (error) {
+      logAbandonedStorageCleanupFailure(object, "metadata", error);
+      continue;
+    }
     cleaned += 1;
   }
-  cleaned += await localFilesystemStorageProvider.cleanupTemporaryFiles({ olderThanMs, limit: Math.max(0, limit - cleaned) });
+  cleaned += await dependencies.cleanupTemporaryFiles({ olderThanMs, limit: Math.max(0, limit - cleaned) });
   return cleaned;
 }
