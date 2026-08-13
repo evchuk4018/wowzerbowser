@@ -284,6 +284,8 @@ export type ChatRequest = {
   thinking: boolean;
   reasoningEffort: ChatReasoningEffort;
   contextMode: "full" | "focused";
+  /** Browser-resolved IANA timezone used for local-time requests such as reminders. */
+  timeZone?: string;
   mode?: "normal" | "deep_research";
   deepResearchPhase?: "plan" | "execute";
   deepResearchPlan?: DeepResearchPlan;
@@ -494,6 +496,19 @@ function readBoundedNonEmptyString(value: unknown, field: string, maximum: numbe
   const result = readNonEmptyString(value, field);
   if (result.length > maximum) throw new ChatRequestValidationError(`${field} is too long.`);
   return result;
+}
+
+function readOptionalTimeZone(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !value.trim() || value.trim().length > 100) {
+    throw new ChatRequestValidationError("timeZone must be a non-empty IANA timezone.");
+  }
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value.trim() }).format();
+  } catch {
+    throw new ChatRequestValidationError("timeZone must be a valid IANA timezone.");
+  }
+  return value.trim();
 }
 
 function readNullableBoundedString(value: unknown, field: string, maximum: number): string | null {
@@ -925,6 +940,7 @@ export function parseChatRequest(value: unknown): ChatRequest {
   if (contextMode !== "full" && contextMode !== "focused") {
     throw new ChatRequestValidationError("contextMode is invalid.");
   }
+  const timeZone = readOptionalTimeZone(value.timeZone);
 
   if (!CHAT_REASONING_EFFORTS.includes(value.reasoningEffort as ChatReasoningEffort)) {
     throw new ChatRequestValidationError("reasoningEffort is invalid.");
@@ -1012,6 +1028,7 @@ export function parseChatRequest(value: unknown): ChatRequest {
     thinking: value.thinking,
     reasoningEffort: value.reasoningEffort as ChatReasoningEffort,
     contextMode,
+    ...(timeZone === undefined ? {} : { timeZone }),
     mode,
     ...(deepResearchPhase === undefined ? {} : { deepResearchPhase }),
     ...(deepResearchPlan === undefined ? {} : { deepResearchPlan }),

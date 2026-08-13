@@ -33,7 +33,7 @@ import {
   READ_USER_MEMORY_TOOL,
 } from "./user-memory-tool-manifest";
 import { READ_SKILL_TOOL_NAME } from "./skill-tool-manifest";
-import { AUTOMATION_TOOL_NAMES } from "./automation-tool-manifest";
+import { AUTOMATION_TOOL_NAMES, REMINDER_TOOL_NAMES } from "./automation-tool-manifest";
 import { CALENDAR_TOOL_NAMES } from "./calendar-tool-manifest";
 import { GET_TODOS_TOOL_NAME } from "./todo-tool";
 import { SEARCH_CURRENT_CHAT_TOOL_NAME } from "./current-chat-context-tool-manifest";
@@ -103,6 +103,11 @@ export const TOOL_EXECUTION_METADATA: Readonly<Record<string, ToolExecutionMetad
   [AUTOMATION_TOOL_NAMES.create]: { executionPolicy: "serial" },
   [AUTOMATION_TOOL_NAMES.update]: { executionPolicy: "serial" },
   [AUTOMATION_TOOL_NAMES.delete]: { executionPolicy: "serial" },
+  [REMINDER_TOOL_NAMES.list]: { executionPolicy: "parallel-safe" },
+  [REMINDER_TOOL_NAMES.get]: { executionPolicy: "parallel-safe" },
+  [REMINDER_TOOL_NAMES.create]: { executionPolicy: "serial" },
+  [REMINDER_TOOL_NAMES.update]: { executionPolicy: "serial" },
+  [REMINDER_TOOL_NAMES.cancel]: { executionPolicy: "serial" },
   [CALENDAR_TOOL_NAMES.create]: { executionPolicy: "serial" },
   [CALENDAR_TOOL_NAMES.update]: { executionPolicy: "serial" },
   [CALENDAR_TOOL_NAMES.delete]: { executionPolicy: "serial" },

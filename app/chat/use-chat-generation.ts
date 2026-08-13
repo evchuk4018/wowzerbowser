@@ -187,6 +187,7 @@ export function buildChatGenerationRequest(input: {
     mode: input.mode,
     ...(input.mode === "deep_research" ? { deepResearchPhase: "plan" as const } : {}),
     contextMode: input.settings.focusedContextEnabled ? "focused" : "full",
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Etc/UTC",
     conversationId: input.conversation.id,
     ...(input.projectId ? { projectId: input.projectId } : {}),
     jobId: input.jobId,

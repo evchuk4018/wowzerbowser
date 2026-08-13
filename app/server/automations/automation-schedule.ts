@@ -18,8 +18,27 @@ function localDateToUtc(year: number, month: number, day: number, hour: number, 
   return new Date(guess);
 }
 
+function reminderAtToUtc(at: string, timeZone: string): Date {
+  if (/[zZ]|[+-]\d{2}:\d{2}$/.test(at)) return new Date(at);
+  const [date, time] = at.split("T");
+  const [year, month, day] = date.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  return localDateToUtc(year, month, day, hour, minute, timeZone);
+}
+
+export function reminderTimeInUtc(at: string, timeZone: string): Date {
+  const result = reminderAtToUtc(at, timeZone);
+  if (!Number.isFinite(result.getTime())) throw new Error("Could not calculate the reminder time.");
+  return result;
+}
+
 export function nextAutomationRun(schedule: AutomationSchedule, timeZone: string, after = new Date()): Date {
   if (schedule.kind === "interval") return new Date(after.getTime() + schedule.everyMinutes * 60_000);
+  if (schedule.kind === "once") {
+    const candidate = reminderTimeInUtc(schedule.at, timeZone);
+    if (candidate.getTime() <= after.getTime()) throw new Error("Reminder time must be in the future.");
+    return candidate;
+  }
   const current = localParts(after, timeZone);
   const [hour, minute] = schedule.localTime.split(":").map(Number);
   for (let offset = 0; offset <= 8; offset += 1) {
@@ -44,6 +63,7 @@ export function nextFutureAutomationRun(
   claimedFor: Date,
   now = new Date(),
 ): Date {
+  if (schedule.kind === "once") throw new Error("A one-off reminder has no next occurrence.");
   if (schedule.kind === "interval") {
     const intervalMs = schedule.everyMinutes * 60_000;
     const elapsed = now.getTime() - claimedFor.getTime();

@@ -54,7 +54,7 @@ import { skillCatalogInstructions } from "../server/agent/skill-instructions";
 import { executeReadSkillTool, executeSkillMutationTool } from "../server/agent/skill-tool";
 import { READ_SKILL_TOOL_NAME, SKILL_TOOL_DEFINITIONS, SKILL_TOOL_NAMES } from "../server/agent/skill-tool-manifest";
 import { builtinSkillFallbacks } from "../server/skills/builtin-skills";
-import { AUTOMATION_SKILL_KEY, AUTOMATION_TOOL_DEFINITIONS, messageUnlocksAutomationTools } from "../server/agent/automation-tool-manifest";
+import { AUTOMATION_SKILL_KEY, AUTOMATION_TOOL_DEFINITIONS, messageUnlocksAutomationTools, reminderInstructionsFor } from "../server/agent/automation-tool-manifest";
 import { executeAutomationTool } from "../server/agent/automation-tool";
 import { COMPLETE_AUTOMATION_RUN_TOOL_DEFINITION, COMPLETE_AUTOMATION_RUN_TOOL_NAME, executeCompleteAutomationRun, type AutomationRunResult } from "../server/agent/automation-run-result-tool";
 import { availableDeepResearchTools } from "../server/agent/deep-research-tool-manifest";
@@ -563,6 +563,7 @@ export async function generateChatResponse(
             ...(calendarDefinitions.length ? [
               "For calendar requests, use list_calendar_events with an explicit RFC 3339 timeMin and timeMax based on the automation timezone or the user's requested timezone.",
             ] : []),
+            ...(automationDefinitions.length ? [reminderInstructionsFor(chatRequest.timeZone)] : []),
             ...(consolidatedMemory ? [consolidatedMemory] : []),
             ...(contextTools.length ? [CURRENT_CHAT_CONTEXT_TOOL_INSTRUCTIONS] : []),
             ...(projectDocuments.length ? [
@@ -784,7 +785,7 @@ export async function generateChatResponse(
             if ((call.name === SKILL_TOOL_NAMES.create || call.name === SKILL_TOOL_NAMES.update) && skillTools.length) {
               return executeSkillMutationTool(call, ownerId);
             }
-            if (automationDefinitions.some((tool) => tool.function.name === call.name)) return executeAutomationTool(call, ownerId);
+            if (automationDefinitions.some((tool) => tool.function.name === call.name)) return executeAutomationTool(call, ownerId, { defaultTimeZone: chatRequest.timeZone });
             if (calendarDefinitions.some((tool) => tool.function.name === call.name)) return executeCalendarTool(call, ownerId);
             if (automationExecution && call.name === COMPLETE_AUTOMATION_RUN_TOOL_NAME) {
               const completed = executeCompleteAutomationRun(call);

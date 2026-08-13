@@ -42,16 +42,18 @@ For timed events, use RFC 3339 dateTime values and include an IANA timeZone when
   {
     key: "manage-automations",
     version: 2,
-    name: "Manage recurring automations",
-    summary: "Create and manage scheduled reports and conditional live checks.",
+    name: "Manage automations and reminders",
+    summary: "Create and manage scheduled reports, conditional checks, and one-off reminders.",
     instructions: `<skill>
-Use this skill when the user asks to create, view, change, pause, resume, or delete a recurring automation.
+Use this skill when the user asks to create, view, change, pause, resume, cancel, or delete a recurring automation or one-off reminder.
 
 Choose report when every scheduled run should create a chat, such as a daily news brief. Choose live_check when a chat should be created only after a measurable condition becomes true. Live checks pause after the first match.
 
+For a one-off reminder, use create_reminder with a short title, the message to deliver verbatim, and a local YYYY-MM-DDTHH:mm time. Resolve relative dates in the user's IANA timezone. Use list_reminders or get_reminder before editing or cancelling, and keep completed or cancelled reminders visible as history.
+
 Make the instructions self-contained: identify what to check, relevant sources or constraints, the exact condition for live checks, and what a useful result should contain. Use an explicit IANA timezone. If the user's timezone cannot be established, ask before creating a clock-time schedule. Intervals must be at least 15 minutes.
 
-List or read existing automations before editing or deleting. After a mutation, clearly confirm the name, type, human-readable schedule, timezone, and active or paused status.
+List or read existing automations before editing or deleting. After a mutation, clearly confirm the name, type, human-readable schedule, timezone, and active, paused, completed, or cancelled status.
 
 Use create_automation to create the requested schedule as soon as all required details are known, including after a short follow-up answer supplies the timezone. The automation tools are built in; do not claim that a separate API, Python package, or sandbox call is needed.
 </skill>`,

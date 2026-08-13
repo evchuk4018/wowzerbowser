@@ -81,28 +81,29 @@ export async function runClaimedAutomation(
     });
   }
 
-  let initialNextRunAt: string;
-  try {
-    initialNextRunAt = nextFutureAutomationRun(
+  const isReminder = automation.kind === "reminder";
+  let initialNextRunAt: string | null = isReminder ? run.scheduled_for : null;
+  const nextRunAt = (): string | null => {
+    if (isReminder) return null;
+    return nextFutureAutomationRun(
       automation.schedule,
       automation.timeZone,
       new Date(run.scheduled_for),
       dependencies.now(),
     ).toISOString();
-  } catch (error) {
-    return finish(run, dependencies, {
-      outcome: "failed",
-      error: formatBackgroundError(error),
-      nextRunAt: null,
-      pause: true,
-    });
+  };
+  if (!isReminder) {
+    try {
+      initialNextRunAt = nextRunAt();
+    } catch (error) {
+      return finish(run, dependencies, {
+        outcome: "failed",
+        error: formatBackgroundError(error),
+        nextRunAt: null,
+        pause: true,
+      });
+    }
   }
-  const nextRunAt = (): string => nextFutureAutomationRun(
-    automation.schedule,
-    automation.timeZone,
-    new Date(run.scheduled_for),
-    dependencies.now(),
-  ).toISOString();
 
   // A normal run is shorter than this lease, but refreshing it makes a
   // provider retry or a future longer model deadline recoverable without
@@ -112,6 +113,39 @@ export async function runClaimedAutomation(
   }, 60_000);
 
   try {
+    if (isReminder) {
+      const title = automation.name;
+      const message = automation.instructions;
+      const { conversationId } = await dependencies.deliver.deliver({
+        ownerId: run.owner_id,
+        runId: run.id,
+        title,
+        prompt: message,
+        message,
+      });
+      if (conversationId) {
+        await dependencies.queueDiscord({
+          ownerId: run.owner_id,
+          runId: run.id,
+          conversationId,
+          title,
+          prompt: message,
+          message,
+        }).catch(() => {
+          console.error({ event: "discord-automation-enqueue-failed", automationRunId: run.id });
+        });
+      }
+      return finish(run, dependencies, {
+        outcome: "notified",
+        matched: true,
+        title,
+        output: message,
+        conversationId,
+        nextRunAt: null,
+        pause: false,
+        complete: true,
+      });
+    }
     const preferences = await dependencies.getPreferences(run.owner_id);
     const jobId = randomUUID();
     let content = "";
@@ -186,7 +220,7 @@ export async function runClaimedAutomation(
       outcome: "failed",
       error: formatBackgroundError(error),
       nextRunAt: (() => {
-        try { return nextRunAt(); } catch { return initialNextRunAt; }
+        try { return isReminder ? run.scheduled_for : nextRunAt(); } catch { return initialNextRunAt; }
       })(),
       pause: false,
     });

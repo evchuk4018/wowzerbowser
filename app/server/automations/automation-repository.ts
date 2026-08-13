@@ -3,6 +3,15 @@ import type { Automation, AutomationMutation } from "../../../lib/automation-pro
 import { databaseOwnerId, isoTimestamp, jsonb, query, withTransaction } from "../database/database";
 const columns = "id,name,kind,instructions,schedule,time_zone,status,next_run_at,last_run_at,last_outcome,last_error,consecutive_failures,created_at,updated_at";
 
+export type AutomationRowInput = {
+  name: string;
+  kind: Automation["kind"];
+  instructions: string;
+  schedule: Automation["schedule"];
+  timeZone: string;
+  status?: Automation["status"];
+};
+
 function value(row: Record<string, unknown>): Automation {
   return {
     id: String(row.id), name: String(row.name), kind: row.kind as Automation["kind"], instructions: String(row.instructions),
@@ -22,10 +31,19 @@ export async function getAutomationRow(ownerId: string, id: string): Promise<Aut
   return row ? value(row) : null;
 }
 
-export async function insertAutomationRow(ownerId: string, input: AutomationMutation, nextRunAt: string | null): Promise<Automation> {
+export async function insertAutomationRow(ownerId: string, input: AutomationRowInput | AutomationMutation, nextRunAt: string | null): Promise<Automation> {
   const [row] = await query<Record<string, unknown>>(`insert into automations(owner_id,name,kind,instructions,schedule,time_zone,status,next_run_at)
     values($1,$2,$3,$4,$5::jsonb,$6,$7,$8) returning ${columns}`, [databaseOwnerId(ownerId), input.name, input.kind, input.instructions, jsonb(input.schedule), input.timeZone, input.status ?? "active", nextRunAt]);
   return value(row);
+}
+
+export async function cancelReminderRow(ownerId: string, id: string): Promise<Automation | null> {
+  const now = new Date().toISOString();
+  const [row] = await query<Record<string, unknown>>(`update automations
+    set status='cancelled',next_run_at=null,updated_at=$1
+    where owner_id=$2 and id=$3 and kind='reminder' and deleted_at is null and status in ('active','paused')
+    returning ${columns}`, [now, databaseOwnerId(ownerId), id]);
+  return row ? value(row) : null;
 }
 
 export async function updateAutomationRow(ownerId: string, id: string, values: Record<string, unknown>): Promise<Automation | null> {
@@ -85,6 +103,7 @@ export async function finishAutomationRun(
     conversationId?: string;
     nextRunAt: string | null;
     pause: boolean;
+    complete?: boolean;
     now?: Date;
   },
 ): Promise<boolean> {
@@ -109,9 +128,14 @@ export async function finishAutomationRun(
     const shouldPause = automation.status !== "active" || automation.deleted_at !== null || input.pause || failures >= 3;
     const persistedNextRunAt = automation.next_run_at == null ? null : isoTimestamp(automation.next_run_at);
     const nextRunAt = shouldPause ? null : (persistedNextRunAt ?? input.nextRunAt);
+    const nextStatus = input.complete
+      ? "completed"
+      : automation.status === "cancelled" || automation.status === "completed"
+        ? automation.status
+        : shouldPause ? "paused" : "active";
     await tx.unsafe(
       "update automations set status=$1,next_run_at=$2,last_outcome=$3,last_error=$4,consecutive_failures=$5,updated_at=$6 where id=$7 and owner_id=$8",
-      [shouldPause ? "paused" : "active", nextRunAt, input.outcome, input.error ?? null, failures, now, run.automation_id, databaseOwnerId(input.ownerId)],
+      [nextStatus, nextStatus === "completed" ? null : nextRunAt, input.outcome, input.error ?? null, failures, now, run.automation_id, databaseOwnerId(input.ownerId)],
     );
     return true;
   });

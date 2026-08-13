@@ -5,8 +5,14 @@ import { getAutomationRow, insertAutomationRow, listAutomationRows, softDeleteAu
 
 export class AutomationNotFoundError extends Error {}
 
-export const listAutomations = (ownerId: string) => listAutomationRows(ownerId);
-export const getAutomation = (ownerId: string, id: string) => getAutomationRow(ownerId, id);
+export async function listAutomations(ownerId: string): Promise<Automation[]> {
+  return (await listAutomationRows(ownerId)).filter((item) => item.kind !== "reminder");
+}
+
+export async function getAutomation(ownerId: string, id: string): Promise<Automation | null> {
+  const item = await getAutomationRow(ownerId, id);
+  return item?.kind === "reminder" ? null : item;
+}
 
 export async function createAutomation(ownerId: string, input: unknown): Promise<Automation> {
   const values = parseAutomationMutation(input) as AutomationMutation;
@@ -17,6 +23,7 @@ export async function createAutomation(ownerId: string, input: unknown): Promise
 export async function updateAutomation(ownerId: string, id: string, input: unknown): Promise<Automation> {
   const current = await getAutomationRow(ownerId, id);
   if (!current) throw new AutomationNotFoundError("Automation not found.");
+  if (current.kind === "reminder") throw new AutomationNotFoundError("Use the reminder tools to edit a one-off reminder.");
   const patch = parseAutomationMutation(input, true);
   const merged = { ...current, ...patch };
   const status = patch.status ?? current.status;
