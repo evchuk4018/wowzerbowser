@@ -16,7 +16,7 @@ services:
       - 127.0.0.1
     volumes:
       - type: bind
-        source: ${WINDSCRIBE_CONF_PATH:-/srv/storage/wowzerbowser/secrets/windscribe-philadelphia.conf}
+        source: ${WINDSCRIBE_RESOLVED_CONF_PATH:-/srv/storage/wowzerbowser/secrets/windscribe-philadelphia.resolved.conf}
         target: /gluetun/wireguard/wg0.conf
         read_only: true
         bind:

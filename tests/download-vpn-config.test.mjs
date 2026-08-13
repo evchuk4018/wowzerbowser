@@ -9,6 +9,7 @@ test("download gateway uses the supplied WireGuard file and a hard kill switch",
   assert.match(compose, /image: qmcgaw\/gluetun:v3\.40\.4/);
   assert.match(compose, /container_name: download-vpn/);
   assert.match(compose, /target: \/gluetun\/wireguard\/wg0\.conf/);
+  assert.match(compose, /windscribe-philadelphia\.resolved\.conf/);
   assert.match(compose, /name: wowzerbowser-download-vpn-exit/);
   assert.match(compose, /ipv4_address: 172\.24\.0\.2/);
   assert.match(compose, /subnet: 172\.24\.0\.0\/28/);
@@ -48,6 +49,7 @@ test("boot supervision requires a restrictive secret and keeps normal services o
   assert.match(supervisor, /expected_secret_mode/);
   assert.match(supervisor, /env_value HOMETUBE_POSTGRES_PASSWORD/);
   assert.match(supervisor, /env_value POSTGRES_PASSWORD/);
+  assert.match(supervisor, /resolve-windscribe\.sh/);
   assert.match(supervisor, /stop_targets/);
   assert.match(supervisor, /start_vpn_targets/);
   assert.match(unit, /WantedBy=default\.target/);
@@ -69,4 +71,7 @@ test("Tailscale exit routing is fail-closed and persistent", async () => {
   assert.match(unit, /advertise-exit-node=true/);
   assert.match(unit, /netfilter-mode=nodivert/);
   assert.match(unit, /exit-node-apply\.sh down/);
+  const resolver = await read("ops/download-vpn/resolve-windscribe.sh");
+  assert.match(resolver, /getent ahostsv4/);
+  assert.match(resolver, /chmod 600/);
 });

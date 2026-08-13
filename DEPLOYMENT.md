@@ -316,6 +316,9 @@ deployment-only and must be installed at:
 
 Keep that regular file owned by the service user with mode `0600`. Never put its
 contents in this checkout, Compose environment variables, GitHub, or logs.
+Gluetun requires a numeric peer endpoint; the supervisor resolves the
+hostname into a separate runtime-only `windscribe-philadelphia.resolved.conf`
+with mode `0600` and leaves the supplied source profile unchanged.
 
 The isolated set is:
 

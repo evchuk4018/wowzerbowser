@@ -25,3 +25,4 @@ deployment.env*
 .codex-*
 secrets
 ops/download-vpn/*.conf
+ops/download-vpn/*.resolved.conf

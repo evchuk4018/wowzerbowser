@@ -24,6 +24,12 @@ stored in Git, Compose environment variables, or logs. Rotate it by installing
 the replacement at the same path, checking its ownership/mode, and restarting
 `wowzerbowser-download-vpn.service`.
 
+Gluetun requires a numeric WireGuard endpoint. At startup,
+`resolve-windscribe.sh` resolves only the profile's endpoint hostname and
+creates the runtime-only `windscribe-philadelphia.resolved.conf` beside the
+source profile, also mode `0600`. The source profile remains authoritative and
+is never rewritten or displayed.
+
 ## Startup and operations
 
 The system unit is installed with:

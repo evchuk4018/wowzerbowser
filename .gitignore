@@ -47,3 +47,4 @@ next-env.d.ts
 # accidental local copies out of source control as well.
 /secrets/
 /ops/download-vpn/*.conf
+/ops/download-vpn/*.resolved.conf

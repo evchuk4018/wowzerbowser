@@ -4,6 +4,8 @@ set -u
 deployment_root=/srv/storage/wowzerbowser
 media_root=/opt/media-stack
 secret_path=${WINDSCRIBE_CONF_PATH:-/srv/storage/wowzerbowser/secrets/windscribe-philadelphia.conf}
+resolved_secret_path=${WINDSCRIBE_RESOLVED_CONF_PATH:-/srv/storage/wowzerbowser/secrets/windscribe-philadelphia.resolved.conf}
+resolver_script="${deployment_root}/ops/download-vpn/resolve-windscribe.sh"
 vpn_file="${deployment_root}/ops/download-vpn/compose.yaml"
 media_compose="${media_root}/compose.yml"
 media_overlay="${deployment_root}/ops/download-vpn/media-compose.vpn.yaml"
@@ -29,7 +31,7 @@ if [ -z "$hometube_postgres_password" ]; then
 fi
 
 vpn_compose() {
-  docker compose -p wowzerbowser-download-vpn --env-file "$deployment_root/deployment.env" \
+  WINDSCRIBE_RESOLVED_CONF_PATH="$resolved_secret_path" docker compose -p wowzerbowser-download-vpn --env-file "$deployment_root/deployment.env" \
     -f "$vpn_file" "$@"
 }
 
@@ -92,15 +94,21 @@ if [ "$secret_mode" != "$expected_secret_mode" ]; then
   echo "Download VPN secret must be owned by the service user with mode 0600: $secret_path" >&2
   exit 78
 fi
+if ! "$resolver_script" >/dev/null; then
+  exit 78
+fi
 
 stop_targets
+vpn_compose up -d download-vpn >/dev/null 2>&1 || true
 start_normal_targets >/dev/null 2>&1 || true
 last_healthy=0
 
 while :; do
   if ! gateway_running; then
     stop_targets
-    vpn_compose up -d download-vpn >/dev/null 2>&1 || true
+    if "$resolver_script" >/dev/null 2>&1; then
+      vpn_compose up -d download-vpn >/dev/null 2>&1 || true
+    fi
     last_healthy=0
   fi
 
