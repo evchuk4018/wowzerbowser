@@ -1,6 +1,6 @@
 import "server-only";
 
-import { getDatabase } from "../database/database";
+import { discardDatabase, getDatabase, isDatabaseTransportError } from "../database/database";
 import type { Sql } from "postgres";
 
 export const CHAT_JOB_EVENTS_CHANNEL = "wowzerbowser_chat_events";
@@ -19,6 +19,11 @@ type Listen = (
   onnotify: (value: string) => void,
   onlisten?: () => void,
 ) => ListenRequest;
+
+export type ChatJobEventSubscriptionOptions = {
+  /** Replaces the listener source after one transport failure during startup. */
+  recoverInitialListen?: (error: unknown) => Listen | Promise<Listen>;
+};
 
 export type ChatJobEventSubscription = {
   /** Resolves after PostgreSQL has accepted the LISTEN command. */
@@ -54,6 +59,14 @@ function isForJob(notification: ChatJobEventNotification | null, key: ChatJobEve
     && notification.jobId === key.jobId;
 }
 
+function abortedChatJobEventSubscription(): ChatJobEventSubscription {
+  return {
+    ready: Promise.resolve(),
+    waitForNotification: () => Promise.resolve(),
+    close: async () => undefined,
+  };
+}
+
 /**
  * Create one job-scoped subscription over a shared postgres LISTEN channel.
  * The injected listener keeps lifecycle behavior testable without opening a
@@ -63,12 +76,15 @@ export function createChatJobEventSubscription(
   listen: Listen,
   key: ChatJobEventKey,
   signal: AbortSignal,
+  options: ChatJobEventSubscriptionOptions = {},
 ): ChatJobEventSubscription {
+  if (signal.aborted) return abortedChatJobEventSubscription();
+
   let pendingNotification = false;
   const waiters = new Set<() => void>();
   let closed = false;
   let closePromise: Promise<void> | null = null;
-  let listener: { unlisten: () => Promise<void> } | null = null;
+  let listener: Awaited<ListenRequest> | null = null;
 
   const onNotification = (payload: string): void => {
     if (closed) return;
@@ -104,25 +120,43 @@ export function createChatJobEventSubscription(
     });
   };
 
-  let request: ListenRequest;
-  try {
-    request = listen(CHAT_JOB_EVENTS_CHANNEL, onNotification);
-  } catch (error) {
-    signal.removeEventListener("abort", onAbort);
-    const ready = Promise.reject(error);
-    void ready.catch(() => undefined);
-    return {
-      ready,
-      waitForNotification,
-      close: async () => undefined,
-    };
-  }
-  void request.catch(() => undefined);
+  const startListen = (listenSource: Listen): ListenRequest => {
+    try {
+      const request = listenSource(CHAT_JOB_EVENTS_CHANNEL, onNotification);
+      void request.catch(() => undefined);
+      return request;
+    } catch (error) {
+      const request = Promise.reject(error) as ListenRequest;
+      void request.catch(() => undefined);
+      return request;
+    }
+  };
 
-  const ready = request.then((result) => {
-    listener = result;
-  });
+  const ready = (async (): Promise<void> => {
+    const initialRequest = startListen(listen);
+    try {
+      listener = await initialRequest;
+    } catch (error) {
+      if (!options.recoverInitialListen || closed || signal.aborted || !isDatabaseTransportError(error)) throw error;
+      const recoveredListen = await options.recoverInitialListen(error);
+      if (closed || signal.aborted) throw signal.reason ?? error;
+      // This is deliberately the only retry. A second failure, including a
+      // permanent SQL error, remains the caller-visible failure.
+      listener = await startListen(recoveredListen);
+    }
+  })();
   void ready.catch(() => undefined);
+
+  const releaseListener = async (): Promise<void> => {
+    try {
+      await ready;
+    } catch {
+      // The listener was never ready, or its startup failed.
+    }
+    const activeListener = listener;
+    listener = null;
+    if (activeListener) await activeListener.unlisten();
+  };
 
   const close = (): Promise<void> => {
     if (closePromise) return closePromise;
@@ -130,13 +164,11 @@ export function createChatJobEventSubscription(
       closed = true;
       signal.removeEventListener("abort", onAbort);
       for (const resolve of [...waiters]) resolve();
-      try {
-        if (listener) await listener.unlisten();
-        else {
-          const result = await request;
-          await result.unlisten();
-        }
-      } catch {
+      if (signal.aborted) {
+        void releaseListener().catch(() => undefined);
+        return;
+      }
+      try { await releaseListener(); } catch {
         // A lost listener is already closed from the caller's perspective.
       }
     })();
@@ -150,6 +182,15 @@ export function subscribeToChatJobEvents(
   key: ChatJobEventKey,
   signal: AbortSignal,
 ): ChatJobEventSubscription {
+  if (signal.aborted) return abortedChatJobEventSubscription();
   const database = getDatabase();
-  return createChatJobEventSubscription(database.listen.bind(database), key, signal);
+  return createChatJobEventSubscription(database.listen.bind(database), key, signal, {
+    recoverInitialListen: async (error) => {
+      if (signal.aborted || !isDatabaseTransportError(error)) throw signal.reason ?? error;
+      discardDatabase(database);
+      if (signal.aborted) throw signal.reason ?? error;
+      const recoveredDatabase = getDatabase();
+      return recoveredDatabase.listen.bind(recoveredDatabase);
+    },
+  });
 }

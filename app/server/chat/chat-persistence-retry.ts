@@ -1,5 +1,7 @@
 import "server-only";
 
+import { isRetryableDatabaseError } from "../database/database";
+
 export type ChatPersistenceRetryOptions = {
   attempts?: number;
   baseDelayMs?: number;
@@ -8,16 +10,10 @@ export type ChatPersistenceRetryOptions = {
   sleep?: (milliseconds: number) => Promise<void>;
 };
 
-const transientPostgresCodes = new Set([
-  "08000", "08001", "08003", "08004", "08006", "08007", "08P01",
-  "40001", "40P01", "55P03", "57P01", "57P02", "57P03", "53300",
-  "53400", "57014",
-]);
-
 export function isTransientChatPersistenceError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const value = error as { code?: unknown; status?: unknown; name?: unknown };
-  if (typeof value.code === "string" && transientPostgresCodes.has(value.code)) return true;
+  if (isRetryableDatabaseError(error)) return true;
   if (typeof value.status === "number" && (value.status === 408 || value.status === 429 || value.status >= 500)) return true;
   return value.name === "FetchError" || value.name === "AbortError";
 }

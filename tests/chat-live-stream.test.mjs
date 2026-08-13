@@ -72,6 +72,56 @@ test("aborting a job notification subscription resolves the waiter and unlistens
   assert.equal(unlistenCalls, 1);
 });
 
+test("recovers one failed initial LISTEN transport with an injected listener", async () => {
+  const transportError = Object.assign(new Error("write CONNECT_TIMEOUT postgres:5432"), { code: "CONNECT_TIMEOUT" });
+  let listenCalls = 0;
+  let recoveryCalls = 0;
+  let recoveredNotify;
+  let unlistenCalls = 0;
+  const listen = (channel, onnotify) => {
+    assert.equal(channel, CHAT_JOB_EVENTS_CHANNEL);
+    listenCalls += 1;
+    if (listenCalls === 1) return Promise.reject(transportError);
+    recoveredNotify = onnotify;
+    return Promise.resolve({ unlisten: async () => { unlistenCalls += 1; } });
+  };
+  const subscription = createChatJobEventSubscription(listen, {
+    ownerId: "owner-1",
+    conversationId: "conversation-1",
+    jobId: "job-1",
+  }, new AbortController().signal, {
+    recoverInitialListen: async (error) => {
+      assert.equal(error, transportError);
+      recoveryCalls += 1;
+      return listen;
+    },
+  });
+
+  await subscription.ready;
+  assert.equal(listenCalls, 2);
+  assert.equal(recoveryCalls, 1);
+  const notification = subscription.waitForNotification();
+  recoveredNotify(JSON.stringify({ ownerId: "owner-1", conversationId: "conversation-1", jobId: "job-1" }));
+  await notification;
+  await subscription.close();
+  assert.equal(unlistenCalls, 1);
+});
+
+test("does not recover permanent initial LISTEN SQL errors", async () => {
+  const sqlError = { code: "42501" };
+  let recoveryCalls = 0;
+  const subscription = createChatJobEventSubscription(
+    () => Promise.reject(sqlError),
+    { ownerId: "owner-1", conversationId: "conversation-1", jobId: "job-1" },
+    new AbortController().signal,
+    { recoverInitialListen: async () => { recoveryCalls += 1; return () => Promise.resolve({ unlisten: async () => undefined }); } },
+  );
+
+  await assert.rejects(subscription.ready, (error) => error === sqlError);
+  assert.equal(recoveryCalls, 0);
+  await subscription.close();
+});
+
 test("reads fragmented SSE frames in order", async () => {
   const frames = [
     { type: "submission", submission: { jobId: "job-1", status: "queued", resumed: false } },

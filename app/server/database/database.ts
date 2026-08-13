@@ -14,6 +14,20 @@ type DatabaseGlobals = {
 };
 
 const globals = globalThis as typeof globalThis & DatabaseGlobals;
+const transientPostgresCodes = new Set([
+  "08000", "08001", "08003", "08004", "08006", "08007", "08P01",
+  "40001", "40P01", "55P03", "57P01", "57P02", "57P03", "53300",
+  "53400", "57014",
+]);
+
+// Postgres.js emits the named connection errors, while socket failures can
+// arrive as the native Node error codes. Keep these separate from SQLSTATEs so
+// callers can decide when replacing a shared client is safe.
+const databaseTransportCodes = new Set([
+  "CONNECT_TIMEOUT", "CONNECTION_CLOSED", "CONNECTION_DESTROYED", "CONNECTION_ENDED",
+  "EAI_AGAIN", "ECONNABORTED", "ECONNREFUSED", "ECONNRESET", "EHOSTDOWN",
+  "EHOSTUNREACH", "ENETDOWN", "ENETUNREACH", "EPIPE", "ETIMEDOUT",
+]);
 
 function poolSize(): number {
   const configured = Number(process.env.POSTGRES_POOL_MAX ?? 4);
@@ -67,6 +81,21 @@ export async function closeDatabase(): Promise<void> {
   if (client) await client.end({ timeout: 5 });
 }
 
+/**
+ * Drop a failed shared client without making cleanup part of request
+ * recovery. The identity check prevents a late failure from closing a newer
+ * client created by another request.
+ */
+export function discardDatabase(client: Sql): void {
+  if (globals.postgresClient !== client) return;
+  globals.postgresClient = undefined;
+  try {
+    void client.end({ timeout: 5 }).catch(() => undefined);
+  } catch {
+    // A failed transport is already being discarded; cleanup is best effort.
+  }
+}
+
 export function databaseOwnerId(requestedOwnerId?: string): string {
   // The authenticated ID is deliberately not used as the database key. It
   // remains an explicit parameter so repository call sites show the owner
@@ -87,11 +116,13 @@ export function jsonb(value: unknown): unknown {
 export function isRetryableDatabaseError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const code = (error as { code?: unknown }).code;
-  return typeof code === "string" && new Set([
-    "08000", "08001", "08003", "08004", "08006", "08007", "08P01",
-    "40001", "40P01", "55P03", "57P01", "57P02", "57P03", "53300",
-    "53400", "57014",
-  ]).has(code);
+  return typeof code === "string" && (transientPostgresCodes.has(code) || databaseTransportCodes.has(code));
+}
+
+export function isDatabaseTransportError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && databaseTransportCodes.has(code);
 }
 
 export function isoTimestamp(value: unknown): string {
