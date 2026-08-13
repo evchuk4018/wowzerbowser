@@ -22,6 +22,7 @@ import { formatDuration } from "./format-duration";
 import type { ChatCitation, ChatSource } from "../../lib/chat-citations";
 import { SubagentDisclosure, type SubagentActivity } from "./subagent-activity";
 import { PythonCode, pythonSourceFor } from "./assistant-python-code";
+import { normalizeReasoningText } from "./normalize-reasoning-text";
 
 export type {
   AssistantActivity,
@@ -258,7 +259,7 @@ function ReasoningCard({
       {open && (
         <div className="reasoning-content">
           {phaseActivities.map((item) => {
-            if (item.kind === "reasoning") return <div key={item.id}>{item.content}</div>;
+            if (item.kind === "reasoning") return <div key={item.id}>{normalizeReasoningText(item.content)}</div>;
             if (item.kind === "python") return <div className="reasoning-python-list" key={item.id}><PythonDisclosure activity={item} /></div>;
             if (item.kind === "web") return <WebDisclosure key={item.id} activity={item} />;
             if (item.kind === "image") return <ImageDisclosure key={item.id} activity={item} />;

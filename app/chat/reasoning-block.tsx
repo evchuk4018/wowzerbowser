@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Message } from "./conversation-types";
 import { formatDuration } from "./format-duration";
+import { normalizeReasoningText } from "./normalize-reasoning-text";
 
 export type ReasoningBlockProps = {
   message: Message;
@@ -28,7 +29,7 @@ export function ReasoningBlock({ message, liveDurationMs }: ReasoningBlockProps)
       </button>
       {open && (
         <div className="reasoning-content">
-          {message.reasoning}
+          {normalizeReasoningText(message.reasoning ?? "")}
         </div>
       )}
     </div>
