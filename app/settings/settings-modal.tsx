@@ -462,6 +462,8 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage, hasSession
                 onVisionModelChange={(visionModel) => setDraft((current) => ({ ...current, visionModel }))}
                 automationModel={draft.automationModel}
                 onAutomationModelChange={(automationModel) => setDraft((current) => ({ ...current, automationModel }))}
+                defaultModel={draft.defaultModel}
+                onDefaultModelChange={(defaultModel) => setDraft((current) => ({ ...current, defaultModel }))}
                 onRuntimeConfigChange={handleRuntimeConfigChange}
               />
             ) : (
@@ -479,6 +481,7 @@ export function SettingsModal({ settings, onClose, onSave, loadUsage, hasSession
                   userPresence: draft.userPresence.trim(),
                   visionModel: draft.visionModel,
                   automationModel: draft.automationModel,
+                  defaultModel: draft.defaultModel,
                   focusedContextEnabled: draft.focusedContextEnabled,
                 }, runtimeConfigDraft ?? undefined)}
               >

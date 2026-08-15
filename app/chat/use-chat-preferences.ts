@@ -40,10 +40,11 @@ export function normalizeChatModels(values: unknown): ChatModelInfo[] {
   return models.length ? models : DEFAULT_CHAT_MODELS;
 }
 const findModel = (ref: ChatModelRef, models: ChatModelInfo[]) => models.find((item) => chatModelIdentity(item.ref) === chatModelIdentity(ref));
-export type UseChatPreferencesOptions = { activeConversationId: string; hasSession: () => Promise<boolean>; initialModelPreferences?: Record<string, ChatModelPreference>; bootstrapComplete?: boolean };
-export function useChatPreferences({ activeConversationId, hasSession, initialModelPreferences = {}, bootstrapComplete = false }: UseChatPreferencesOptions): ChatPreferences {
+export type UseChatPreferencesOptions = { activeConversationId: string; hasSession: () => Promise<boolean>; initialModelPreferences?: Record<string, ChatModelPreference>; bootstrapComplete?: boolean; defaultModel?: ChatModelRef };
+export function useChatPreferences({ activeConversationId, hasSession, initialModelPreferences = {}, bootstrapComplete = false, defaultModel }: UseChatPreferencesOptions): ChatPreferences {
+  const defaultPreference = useMemo<ChatModelPreference>(() => ({ model: defaultModel ?? DEFAULT_CHAT_MODEL_PREFERENCE.model, thinking: DEFAULT_CHAT_MODEL_PREFERENCE.thinking, reasoningEffort: DEFAULT_CHAT_MODEL_PREFERENCE.reasoningEffort }), [defaultModel]);
   const [models, setModels] = useState<ChatModelInfo[]>(DEFAULT_CHAT_MODELS);
-  const [model, setModel] = useState(DEFAULT_CHAT_MODEL_PREFERENCE.model);
+  const [model, setModel] = useState(defaultPreference.model);
   const [thinking, setThinking] = useState(DEFAULT_CHAT_MODEL_PREFERENCE.thinking);
   const [effort, setEffort] = useState<ChatReasoningEffort>("high");
   const [modelPreferences, setModelPreferences] = useState(initialModelPreferences);
@@ -68,13 +69,13 @@ export function useChatPreferences({ activeConversationId, hasSession, initialMo
   const effectiveEffort = supportedEfforts.includes(effort) ? effort : selectedModel?.defaultReasoningEffort ?? supportedEfforts[0] ?? "medium";
   useEffect(() => {
     if (!activeConversationId || !modelPreferencesLoaded) return;
-    const stored = modelPreferences[activeConversationId] ?? DEFAULT_CHAT_MODEL_PREFERENCE;
+    const stored = modelPreferences[activeConversationId] ?? defaultPreference;
     const metadata = findModel(stored.model, models);
-    const normalized = metadata ? normalizeModelPreference(stored, metadata) : DEFAULT_CHAT_MODEL_PREFERENCE;
+    const normalized = metadata ? normalizeModelPreference(stored, metadata) : defaultPreference;
     // Conversation selection synchronizes these controlled values with storage.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setModel(normalized.model); setThinking(normalized.thinking); setEffort(normalized.reasoningEffort);
-  }, [activeConversationId, modelPreferences, modelPreferencesLoaded, models]);
+  }, [activeConversationId, defaultPreference, modelPreferences, modelPreferencesLoaded, models]);
   const persistModelPreference = useCallback((preference: ChatModelPreference) => {
     if (!activeConversationId) return;
     const normalized = normalizeModelPreference(preference, findModel(preference.model, models) ?? DEFAULT_CHAT_MODELS[0]);

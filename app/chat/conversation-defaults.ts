@@ -1,4 +1,4 @@
-import { DEFAULT_CHAT_SYSTEM_PROMPT } from "../../lib/chat-protocol";
+import { DEFAULT_CHAT_SYSTEM_PROMPT, DEFAULT_CHAT_MODELS } from "../../lib/chat-protocol";
 import type { ChatSettings, Conversation } from "./conversation-types";
 import { DEFAULT_AUTOMATION_MODEL } from "../../lib/automation-protocol";
 
@@ -9,6 +9,7 @@ export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   userPresence: "",
   visionModel: null,
   automationModel: DEFAULT_AUTOMATION_MODEL,
+  defaultModel: DEFAULT_CHAT_MODELS[0].ref,
   focusedContextEnabled: false,
 };
 

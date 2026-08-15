@@ -9,7 +9,7 @@ import {
   type RuntimeConfigResponse,
   type RuntimeConfigValues,
 } from "../../lib/runtime-config-protocol";
-import { chatModelIdentity, type ChatModelInfo, type ChatModelRef } from "../../lib/chat-model-protocol";
+import { chatModelIdentity, DEFAULT_CHAT_MODELS, type ChatModelInfo, type ChatModelRef } from "../../lib/chat-model-protocol";
 
 const CATEGORY_LABELS: Record<RuntimeConfigDescriptor["category"], string> = {
   search: "Search",
@@ -39,6 +39,8 @@ type ConfigurablesSettingsProps = {
   onVisionModelChange: (model: ChatModelRef | null) => void;
   automationModel: ChatModelRef;
   onAutomationModelChange: (model: ChatModelRef) => void;
+  defaultModel: ChatModelRef;
+  onDefaultModelChange: (model: ChatModelRef) => void;
   onRuntimeConfigChange: (values: Partial<RuntimeConfigValues>) => void;
 };
 
@@ -68,9 +70,10 @@ function ConfigField({ descriptor, values, restartRequired, onChange }: {
   }} />{help}</label>;
 }
 
-export function ConfigurablesSettings({ hasSession, visionModel, onVisionModelChange, automationModel, onAutomationModelChange, onRuntimeConfigChange }: ConfigurablesSettingsProps) {
+export function ConfigurablesSettings({ hasSession, visionModel, onVisionModelChange, automationModel, onAutomationModelChange, defaultModel, onDefaultModelChange, onRuntimeConfigChange }: ConfigurablesSettingsProps) {
   const [visionModels, setVisionModels] = useState<ChatModelInfo[]>([]);
   const [automationModels, setAutomationModels] = useState<ChatModelInfo[]>([]);
+  const [defaultModels, setDefaultModels] = useState<ChatModelInfo[]>([]);
   const [runtime, setRuntime] = useState<RuntimeConfigResponse | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
@@ -92,6 +95,7 @@ export function ConfigurablesSettings({ hasSession, visionModel, onVisionModelCh
       if (!active) return;
       setVisionModels(visionBody.models ?? []);
       setAutomationModels((chatBody.models ?? []).filter((model) => model.toolSupport));
+      setDefaultModels((chatBody.models ?? []).filter((model) => model.toolSupport));
       setRuntime(configuration);
       setStatus("ready");
     }).catch((error) => {
@@ -124,6 +128,12 @@ export function ConfigurablesSettings({ hasSession, visionModel, onVisionModelCh
   return <div className="configurables-settings">
     <div className="settings-panel-heading"><h3>Configurables</h3><p>Choose models and control safe runtime behavior for the local providers and worker.</p></div>
     <div className="configurables-subheading"><h4>Models</h4><p>These choices are saved with your chat preferences.</p></div>
+    <label className="settings-field"><span>Default model</span><select aria-label="Default model" value={chatModelIdentity(defaultModel)} onChange={(event) => {
+      onDefaultModelChange(defaultModels.find((item) => chatModelIdentity(item.ref) === event.target.value)?.ref ?? DEFAULT_CHAT_MODELS[0].ref);
+    }}>
+      {!defaultModels.some((model) => chatModelIdentity(model.ref) === chatModelIdentity(DEFAULT_CHAT_MODELS[0].ref)) && <option value={chatModelIdentity(DEFAULT_CHAT_MODELS[0].ref)}>DeepSeek V4 Flash — deepseek/deepseek-v4-flash</option>}
+      {defaultModels.map((model) => <option key={chatModelIdentity(model.ref)} value={chatModelIdentity(model.ref)}>{model.displayName} — {model.ref.model}</option>)}
+    </select><small>Model used for new conversations; existing conversations keep their own choice.</small></label>
     <label className="settings-field"><span>Vision model</span><select aria-label="Vision model" value={visionModel ? chatModelIdentity(visionModel) : "auto"} onChange={(event) => {
       onVisionModelChange(visionModels.find((item) => chatModelIdentity(item.ref) === event.target.value)?.ref ?? null);
     }}><option value="auto">Auto (current default)</option>{visionModels.map((model) => <option key={chatModelIdentity(model.ref)} value={chatModelIdentity(model.ref)}>{model.displayName} — {model.ref.model}</option>)}</select><small>Auto uses OpenRouter’s existing automatic fallback chain.</small></label>

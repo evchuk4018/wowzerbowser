@@ -24,5 +24,6 @@ export type ChatSettings = {
   userPresence: string;
   visionModel: ChatModelRef | null;
   automationModel: ChatModelRef;
+  defaultModel: ChatModelRef;
   focusedContextEnabled: boolean;
 };

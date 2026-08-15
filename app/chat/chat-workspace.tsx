@@ -221,6 +221,7 @@ export function ChatWorkspace({
           userPresence: bootstrap.userPreferences.userPresence,
           visionModel: bootstrap.userPreferences.visionModel ?? null,
           automationModel: bootstrap.userPreferences.automationModel ?? DEFAULT_CHAT_SETTINGS.automationModel,
+          defaultModel: bootstrap.userPreferences.defaultModel ?? DEFAULT_CHAT_SETTINGS.defaultModel,
           focusedContextEnabled: bootstrap.userPreferences.focusedContextEnabled ?? false,
         });
         setBootstrapModelPreferences(modelPreferencesRecord(bootstrap.modelPreferences));
@@ -295,6 +296,7 @@ export function ChatWorkspace({
         userPresence: snapshot.userPresence,
         visionModel: snapshot.visionModel ?? null,
         automationModel: snapshot.automationModel ?? DEFAULT_CHAT_SETTINGS.automationModel,
+        defaultModel: snapshot.defaultModel ?? DEFAULT_CHAT_SETTINGS.defaultModel,
       });
       setBootstrapModelPreferences(modelPreferencesRecord(snapshot.modelPreferences));
     }
@@ -405,6 +407,7 @@ export function ChatWorkspace({
     hasSession,
     initialModelPreferences: bootstrapModelPreferences,
     bootstrapComplete,
+    defaultModel: settings.defaultModel,
   });
   const generation = useChatGeneration({
     state,
@@ -645,6 +648,7 @@ export function ChatWorkspace({
       userPresence: source.settings.userPresence,
       visionModel: source.settings.visionModel,
       automationModel: source.settings.automationModel,
+      defaultModel: source.settings.defaultModel,
       modelPreferences: Object.entries(source.modelPreferences).map(([conversationId, preference]) => ({
         conversationId,
         ...preference,
