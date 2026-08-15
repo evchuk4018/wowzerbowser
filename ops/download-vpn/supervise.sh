@@ -35,8 +35,41 @@ vpn_compose() {
     -f "$vpn_file" "$@"
 }
 
+vpn_target_refs() {
+  for service in jellyseerr radarr sonarr qbittorrent prowlarr flaresolverr; do
+    docker ps -aq \
+      --filter "label=com.docker.compose.project=media-stack" \
+      --filter "label=com.docker.compose.service=$service"
+  done
+  docker ps -aq \
+    --filter "label=com.docker.compose.project=hometube" \
+    --filter "label=com.docker.compose.service=worker"
+  docker ps -aq \
+    --filter "label=com.docker.compose.project=musicplayer" \
+    --filter "label=com.docker.compose.service=worker"
+}
+
 stop_targets() {
-  "$deployment_root/ops/download-vpn/stop.sh"
+  vpn_target_refs | while IFS= read -r container; do
+    [ -n "$container" ] || continue
+    docker stop --time 30 "$container" >/dev/null 2>&1 || true
+  done
+}
+
+remove_targets() {
+  vpn_target_refs | while IFS= read -r container; do
+    [ -n "$container" ] || continue
+    docker rm "$container" >/dev/null 2>&1 || true
+  done
+}
+
+restart_gateway() {
+  stop_targets
+  remove_targets
+  vpn_compose stop download-vpn >/dev/null 2>&1 || true
+  if "$resolver_script" >/dev/null 2>&1; then
+    vpn_compose up -d download-vpn >/dev/null 2>&1 || true
+  fi
 }
 
 start_normal_targets() {
@@ -64,10 +97,6 @@ start_vpn_targets() {
 vpn_health() {
   status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' download-vpn 2>/dev/null || true)
   [ "$status" = healthy ]
-}
-
-gateway_running() {
-  [ "$(docker inspect --format '{{.State.Status}}' download-vpn 2>/dev/null || true)" = running ]
 }
 
 shutdown() {
@@ -99,16 +128,16 @@ if ! "$resolver_script" >/dev/null; then
 fi
 
 stop_targets
+remove_targets
 vpn_compose up -d download-vpn >/dev/null 2>&1 || true
 start_normal_targets >/dev/null 2>&1 || true
 last_healthy=0
 
 while :; do
-  if ! gateway_running; then
-    stop_targets
-    if "$resolver_script" >/dev/null 2>&1; then
-      vpn_compose up -d download-vpn >/dev/null 2>&1 || true
-    fi
+  gateway_state=$(docker inspect --format '{{.State.Status}}' download-vpn 2>/dev/null || true)
+  gateway_health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' download-vpn 2>/dev/null || true)
+  if [ "$gateway_state" != running ] || [ "$gateway_health" = unhealthy ]; then
+    restart_gateway
     last_healthy=0
   fi
 
