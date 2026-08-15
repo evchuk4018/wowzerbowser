@@ -30,6 +30,9 @@ services:
     environment:
       VPN_SERVICE_PROVIDER: custom
       VPN_TYPE: wireguard
+      # 1280 tunnel MTU; 25s keepalive holds external NAT states
+      WIREGUARD_MTU: "1280"
+      WIREGUARD_PERSISTENT_KEEPALIVE_INTERVAL: "25s"
       TZ: ${TZ:-America/New_York}
       FIREWALL: on
       # These are the existing media UI ports. Binding remains limited to the

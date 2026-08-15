@@ -9,3 +9,7 @@ iptables -t nat -A POSTROUTING -s 100.64.0.0/10 -o tun0 -j MASQUERADE
 # The gateway namespace has IPv6 disabled. Never permit a forwarded IPv6
 # packet from a Tailnet client to use another interface.
 ip6tables -I FORWARD 1 -s fd7a:115c:a1e0::/48 -j DROP
+
+# The Windscribe tunnel MTU is 1280. Clamp TCP MSS to the outgoing PMTU so
+# 1500-byte LAN/Tailnet frames are not fragmented inside the tunnel.
+iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
