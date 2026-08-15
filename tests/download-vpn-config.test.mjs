@@ -18,6 +18,7 @@ test("download gateway uses the supplied WireGuard file and a hard kill switch",
   assert.match(compose, /FIREWALL: on/);
   assert.match(compose, /FIREWALL_INPUT_PORTS: "8080,5055,7878,8989,9696,8191,4000"/);
   assert.match(compose, /FIREWALL_OUTBOUND_SUBNETS: .*172\.24\.0\.0\/28/);
+  assert.match(compose, /hometube:\r?\n\s+ipv4_address: 172\.22\.0\.3/);
   assert.match(compose, /DNS_UPSTREAM_IPV6: off/);
   assert.match(compose, /test: \["CMD", "\/gluetun-entrypoint", "healthcheck"\]/);
   assert.doesNotMatch(compose, /PrivateKey|PresharedKey|WIREGUARD_PRIVATE_KEY/u);

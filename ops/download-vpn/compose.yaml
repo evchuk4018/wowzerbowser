@@ -65,6 +65,7 @@ services:
           - jellyseerr
           - flaresolverr
       hometube:
+        ipv4_address: 172.22.0.3
         aliases:
           - worker
       application:
