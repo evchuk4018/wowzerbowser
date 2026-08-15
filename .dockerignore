@@ -16,9 +16,11 @@ work
 # live beside the source checkout on homelab. They must never enter the build
 # context (some database directories are intentionally unreadable).
 hometube
+hometube-*
 hometube-postgres
 hometube-media
 files
+navidrome-backups
 config/runtime.env
 config/searxng
 deployment.env*
