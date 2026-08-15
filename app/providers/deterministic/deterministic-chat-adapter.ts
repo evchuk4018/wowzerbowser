@@ -55,3 +55,4 @@ function adapter(provider: ChatProvider): ChatProviderAdapter {
 
 export const deterministicDeepSeekChatProviderAdapter = adapter("deepseek");
 export const deterministicOpenRouterChatProviderAdapter = adapter("openrouter");
+export const deterministicOpenCodeChatProviderAdapter = adapter("opencode");

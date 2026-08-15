@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { ChatArtifact, ChatAssistantRound, ChatRequest, ChatStreamEvent, ChatToolCall, ChatToolResult, ChatUsage } from "../../lib/chat-protocol";
+import type { ChatArtifact, ChatAssistantRound, ChatProvider, ChatRequest, ChatStreamEvent, ChatToolCall, ChatToolResult, ChatUsage } from "../../lib/chat-protocol";
 import type { ChatModelPricing } from "../../lib/chat-model-protocol";
 import { chatProviderAdapter } from "../server/chat/chat-provider-registry";
 import { authorizeAutomationModel, authorizeChatModel } from "../server/chat/chat-model-catalog-service";
@@ -104,7 +104,7 @@ export type ChatRoundUsage = {
   round: number;
   usage: ChatUsage | null;
   estimatedUsage?: ChatUsage;
-  provider: "deepseek" | "openrouter";
+  provider: ChatProvider;
   model: string;
   exactCostUsd?: number;
   pricing?: ChatModelPricing | null;

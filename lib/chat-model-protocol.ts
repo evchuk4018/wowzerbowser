@@ -1,5 +1,5 @@
 /** Provider and model metadata shared by chat execution and settings. */
-export const CHAT_PROVIDERS = ["deepseek", "openrouter"] as const;
+export const CHAT_PROVIDERS = ["deepseek", "openrouter", "opencode"] as const;
 export type ChatProvider = (typeof CHAT_PROVIDERS)[number];
 export type ChatModelRef = { provider: ChatProvider; model: string };
 

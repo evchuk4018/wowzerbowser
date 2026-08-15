@@ -52,9 +52,9 @@ export function ModelsSettings({ hasSession }: { hasSession: () => Promise<boole
     }
   };
   return <div className="models-settings">
-    <div className="settings-panel-heading"><h3>Models</h3><p>Choose built-in DeepSeek models and discover eligible OpenRouter chat models.</p></div>
+    <div className="settings-panel-heading"><h3>Models</h3><p>Choose built-in DeepSeek models and discover eligible OpenRouter and OpenCode chat models.</p></div>
     <h4>Built in</h4><div className="model-card-grid">{DEFAULT_CHAT_MODELS.map((model) => <article className="model-card" key={chatModelIdentity(model.ref)}><strong>{model.displayName}</strong><code>{model.ref.model}</code><p>{context(model.contextLength)} context · Text · Tools</p><span>Reasoning: High, Max</span><b>Always enabled</b></article>)}</div>
-    <div className="model-catalog-heading"><h4>OpenRouter discovery</h4><span>{catalog?.total ?? 0} results</span></div>
+    <div className="model-catalog-heading"><h4>OpenRouter and OpenCode discovery</h4><span>{catalog?.total ?? 0} results</span></div>
     <div className="model-toolbar">
       <input aria-label="Search models" placeholder="Search name, slug, or author" value={filters.q ?? ""} onChange={(event) => update("q", event.target.value)} />
       <select aria-label="Sort models" value={filters.sort} onChange={(event) => update("sort", event.target.value)}>{sorts.filter(([value]) => OPENROUTER_SORTS.includes(value)).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>

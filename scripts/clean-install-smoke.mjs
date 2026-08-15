@@ -394,6 +394,7 @@ async function smoke() {
     "DISCORD_ALLOWED_USER_ID=",
     "DEEPSEEK_API_KEY=",
     "OPENROUTER_API_KEY=",
+    "OPENCODE_API_KEY=",
     "AUTOMATION_DISPATCH_SECRET=",
   ].join("\n") + "\n";
   const baseUrl = `http://127.0.0.1:${port}`;

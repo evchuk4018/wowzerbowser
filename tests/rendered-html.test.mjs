@@ -327,6 +327,7 @@ test("keeps DeepSeek access server-side and uses the V4 thinking contract", asyn
   ]);
 
   assert.match(envExample, /^DEEPSEEK_API_KEY=$/m);
+  assert.match(envExample, /^OPENCODE_API_KEY=$/m);
   assert.doesNotMatch(page, /api\.deepseek\.com|DEEPSEEK_API_KEY|@supabase\/supabase-js/);
   assert.doesNotMatch(client, /api\.deepseek\.com|DEEPSEEK_API_KEY|@supabase\/supabase-js/);
   assert.match(modelProtocol, /deepseek-v4-flash/);
