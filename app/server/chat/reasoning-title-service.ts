@@ -3,8 +3,8 @@ import "server-only";
 import type { ChatStreamEvent } from "../../../lib/chat-protocol";
 import { summarizeReasoningWithQwenFlash, type QwenReasoningSummaryAnswer } from "../../providers/openrouter/openrouter-qwen-text-adapter";
 
-const FIRST_TITLE_DELAY_MS = 1_000;
-const REFRESH_DELAY_MS = 2_000;
+const FIRST_TITLE_DELAY_MS = 10_000;
+const REFRESH_DELAY_MS = 10_000;
 const FINAL_WAIT_MS = 5_000;
 const MAX_TITLE_LENGTH = 120;
 
