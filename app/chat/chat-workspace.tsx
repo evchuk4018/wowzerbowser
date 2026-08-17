@@ -70,8 +70,6 @@ export type ChatWorkspaceProps = {
   user: AuthUser;
   hasSession: () => Promise<boolean>;
   initialDraft?: string;
-  onSignOut: () => Promise<void>;
-  onSessionInvalid: () => Promise<void>;
 };
 
 function createStartupConversationState(requestedConversationId?: string) {
@@ -96,8 +94,6 @@ export function ChatWorkspace({
   user,
   hasSession,
   initialDraft = "",
-  onSignOut,
-  onSessionInvalid,
 }: ChatWorkspaceProps) {
   const router = useRouter();
   const params = useParams<{ conversationId?: string }>();
@@ -264,10 +260,6 @@ export function ChatWorkspace({
         });
       } catch (error) {
         if (!mounted || requestId !== bootstrapRequestRef.current) return;
-        if (error instanceof ChatRequestError && error.status === 401) {
-          await onSessionInvalid();
-          return;
-        }
         setStartupError(
           error instanceof Error
             ? error.message
@@ -282,7 +274,7 @@ export function ChatWorkspace({
     return () => {
       mounted = false;
     };
-  }, [bootstrapAttempt, hasSession, onSessionInvalid, persistSnapshot, snapshot, snapshotLoaded, user.id]);
+  }, [bootstrapAttempt, hasSession, persistSnapshot, snapshot, snapshotLoaded, user.id]);
 
   useEffect(() => {
     if (!snapshotLoaded || remoteAuthorized) return;
@@ -902,7 +894,6 @@ export function ChatWorkspace({
           setOpenConversationActions(null);
           setSettingsOpen(true);
         }}
-        onSignOut={onSignOut}
       />
       {searchOpen && (
         <ChatSearchDialog

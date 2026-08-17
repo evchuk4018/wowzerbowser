@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { useAuthSession } from "../auth/use-auth-session";
 import type { Project, ProjectDetail, ProjectFile } from "./project-types";
 import {
   createProject,
@@ -33,7 +32,6 @@ function FileState({ file }: { file: ProjectFile }) {
 
 export function ProjectPage() {
   const router = useRouter();
-  const { state: authState } = useAuthSession();
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
@@ -62,11 +60,6 @@ export function ProjectPage() {
   }, []);
 
   useEffect(() => {
-    if (authState.status === "anonymous") {
-      router.replace("/login?callbackUrl=/projects");
-      return;
-    }
-    if (authState.status !== "authenticated") return;
     let active = true;
     void listProjects().then((items) => {
       if (!active) return;
@@ -82,7 +75,7 @@ export function ProjectPage() {
       if (active) setLoading(false);
     });
     return () => { active = false; };
-  }, [authState.status, loadDetail, router]);
+  }, [loadDetail]);
 
   function selectProject(projectId: string) {
     setSelectedId(projectId);

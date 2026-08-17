@@ -29,7 +29,6 @@ export type ChatSidebarProps = {
   onCancelConversationLongPress: () => void;
   onDeleteConversation: (conversationId: string) => void;
   onOpenSettings: () => void;
-  onSignOut: () => void | Promise<void>;
 };
 
 /** Controlled conversation history/sidebar shell. */
@@ -54,7 +53,6 @@ export function ChatSidebar({
   onCancelConversationLongPress,
   onDeleteConversation,
   onOpenSettings,
-  onSignOut,
 }: ChatSidebarProps) {
   return (
     <>
@@ -181,14 +179,6 @@ export function ChatSidebar({
             <div className="account-name">{userEmail}</div>
             <div className="account-note">Owner account</div>
           </div>
-          <button
-            className="sign-out-button"
-            type="button"
-            aria-label="Sign out"
-            onClick={() => void onSignOut()}
-          >
-            Sign out
-          </button>
         </div>
       </aside>
     </>

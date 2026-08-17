@@ -52,7 +52,9 @@ test("chat routes keep the workspace in a persistent layout", async () => {
     source("app/chat/chat-workspace.tsx"),
   ]);
   assert.match(root, /redirect\("\/chat"\)/);
-  assert.match(layout, /<ChatPage \/>/);
+  assert.match(layout, /<ChatPage user=\{[^}]*\}/);
+  assert.match(layout, /configuredOwner\(\)/);
+  assert.doesNotMatch(layout, /redirect\(|login/);
   assert.match(index, /return null/);
   assert.match(page, /return null/);
   assert.match(workspace, /useParams/);

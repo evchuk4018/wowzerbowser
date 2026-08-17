@@ -16,7 +16,6 @@ const stylesheetPaths = [
   "../app/globals.css",
   "../app/styles/tokens.css",
   "../app/styles/base.css",
-  "../app/styles/auth.css",
   "../app/styles/app-shell.css",
   "../app/styles/sidebar.css",
   "../app/styles/settings.css",
@@ -107,7 +106,12 @@ async function withNextServer(callback) {
   const port = 43123;
   const server = spawn(process.execPath, [nextCli, "start", "-p", String(port)], {
     cwd: process.cwd(),
-    env: { ...process.env, PORT: String(port) },
+    env: {
+      ...process.env,
+      PORT: String(port),
+      APP_OWNER_ID: "11111111-1111-4111-8111-111111111111",
+      APP_OWNER_EMAIL: "owner@example.test",
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let serverOutput = "";
@@ -140,15 +144,14 @@ async function withNextServer(callback) {
   }
 }
 
-test("server renders the local auth-aware app shell", async () => {
+test("server renders the single-user app shell without a login gate", async () => {
   await withNextServer(async (response) => {
     assert.equal(response.status, 200);
     assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
     const html = await response.text();
     assert.match(html, /<title>Chat<\/title>/i);
-    assert.match(html, /id="sign-in-title"/);
-    assert.match(html, /name="password"/);
+    assert.doesNotMatch(html, /sign-in-title|name="password"/);
   });
 });
 
@@ -241,75 +244,56 @@ test("keeps PWA icon references and service worker behavior safe", async () => {
   assert.match(styles, /env\(safe-area-inset-right\)/);
   assert.match(styles, /env\(safe-area-inset-bottom\)/);
   assert.match(styles, /env\(safe-area-inset-left\)/);
-  assert.match(styles, /\.auth-form input[\s\S]*?font-size: 16px;/);
   assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*?\.settings-field textarea \{[\s\S]*?font-size: 16px;/);
   assert.match(styles, /\.composer textarea[\s\S]*?font-size: 16px;/);
   assert.match(styles, /min-height: 100dvh;/);
   assert.match(styles, /height: 100dvh;/);
 });
 
-test("keeps Auth.js credentials and local object storage separate", async () => {
-  const [page, authConfig, authRoute, ownerService, authService, authForm, storageAdapter, storageRuntime] = await Promise.all([
+test("keeps local object storage and the owner identity separate from any hosted auth", async () => {
+  const [page, ownerService, storageAdapter, storageRuntime] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../auth.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/api/auth/[...nextauth]/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/auth/owner-auth-service.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/auth/auth-service.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/auth/login-form.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/server/storage/local-filesystem-storage.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/local-filesystem-storage.mjs", import.meta.url), "utf8"),
   ]);
 
   assert.doesNotMatch(page, /@supabase\/supabase-js|createClient\(/);
-  assert.match(authConfig, /Credentials/);
-  assert.match(authConfig, /strategy: "jwt"/);
-  assert.match(authConfig, /trustHost: true/);
-  assert.match(authConfig, /sessionVersion/);
-  assert.match(authRoute, /handlers/);
-  assert.match(ownerService, /ownerForSession/);
-  assert.match(ownerService, /NEXT_PUBLIC_SITE_URL/);
-  assert.match(authService, /authSignIn\("credentials"/);
-  assert.doesNotMatch(authService, /supabase|magic|signUp/i);
-  assert.match(authForm, /Password/);
-  assert.doesNotMatch(authForm, /Create password account|magic link|signUp/i);
+  assert.match(ownerService, /APP_OWNER_ID/);
+  assert.doesNotMatch(ownerService, /@supabase|next-auth|Credentials|magic/i);
   assert.match(storageAdapter + "\n" + storageRuntime, /atomic|rename/);
   assert.doesNotMatch(storageAdapter + "\n" + storageRuntime, /supabase|storage\.from|signed.?url/i);
 });
 
-test("renders a non-blocking startup shell before remote chat bootstrap", async () => {
-  const [page, shell, workspace, composer] = await Promise.all([
+test("renders a non-blocking startup state before remote chat bootstrap", async () => {
+  const [page, workspace, composer] = await Promise.all([
     readFile(new URL("../app/chat/chat-page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/chat/chat-startup-shell.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/chat-workspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/chat-composer.tsx", import.meta.url), "utf8"),
   ]);
-  assert.match(page, /<ChatStartupShell/);
-  assert.doesNotMatch(page, /className="loading-shell"/);
-  assert.match(shell, /startup-shell/);
-  assert.doesNotMatch(shell, /ChatTranscript|react-markdown|KaTeX|SettingsModal|ChatSearchDialog|PdfPreview|attachment/i);
+  assert.match(page, /<ChatWorkspace/);
+  assert.doesNotMatch(page, /LoginForm|useAuthSession|loading-shell/);
   assert.doesNotMatch(workspace, /if \(!ready \|\| !active\) return <main className="loading-shell"/);
   assert.match(workspace, /startupPending=\{startupPending\}/);
   assert.match(composer, /startupPending\?: boolean/);
   assert.match(composer, /Restoring chat/);
 });
 
-test("collapses authenticated chat startup into one bootstrap request", async () => {
-  const [authService, page, workspace, preferences, client] = await Promise.all([
-    readFile(new URL("../app/auth/auth-service.ts", import.meta.url), "utf8"),
+test("collapses single-user chat startup into one bootstrap request", async () => {
+  const [page, workspace, preferences, client] = await Promise.all([
     readFile(new URL("../app/chat/chat-page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/chat-workspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/use-chat-preferences.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/chat/chat-service.ts", import.meta.url), "utf8"),
   ]);
 
-  assert.match(authService, /\/api\/auth\/session/);
-  assert.match(authService, /body\?\.user/);
+  assert.doesNotMatch(page, /api\/auth\/session|LoginForm|useAuthSession/);
   assert.match(client, /fetchChatBootstrap/);
   assert.match(workspace, /fetchChatBootstrap\(initialConversationIdRef\.current\)/);
   assert.doesNotMatch(workspace, /loadConversationIndex\(|loadSettings\(/);
   assert.doesNotMatch(preferences, /fetchChatModelPreferences/);
   assert.match(preferences, /bootstrapComplete/);
-  assert.match(page, /onSessionInvalid/);
+  assert.doesNotMatch(page, /onSessionInvalid|onSignOut/);
 });
 
 test("keeps DeepSeek access server-side and uses the V4 thinking contract", async () => {

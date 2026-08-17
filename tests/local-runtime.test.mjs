@@ -10,7 +10,6 @@ test("runtime preflight rejects hosted or unsafe installation assumptions", () =
     DATABASE_URL: "postgresql://app:password@postgres:5432/app",
     APP_OWNER_EMAIL: "owner@example.test",
     APP_OWNER_ID: "11111111-1111-4111-8111-111111111111",
-    AUTH_SECRET: "a".repeat(32),
     NEXT_PUBLIC_SITE_URL: "https://homelab.example.test",
     APP_STORAGE_ROOT: "/srv/storage/wowzerbowser",
     NODE_ENV: "production",
@@ -21,7 +20,6 @@ test("runtime preflight rejects hosted or unsafe installation assumptions", () =
     DATABASE_URL: "https://hosted.example.test/db",
     APP_OWNER_EMAIL: "owner@example.test",
     APP_OWNER_ID: "not-a-uuid",
-    AUTH_SECRET: "short",
     NEXT_PUBLIC_SITE_URL: "https://homelab.example.test",
     APP_STORAGE_ROOT: "/srv/storage/media/files",
     NODE_ENV: "production",
@@ -43,7 +41,7 @@ test("the startup path, health route, and update procedure use local readiness b
   assert.match(update, /git pull --ff-only origin main/u);
   assert.match(update, /migrate\.mjs --initialize/u);
   assert.doesNotMatch(update, /down\s+-v/u);
-  for (const boundary of ["owner-login", "response.body?.cancel", "documents/upload", "api/automations", "api/memory", "restart", "media", "signout"]) {
+  for (const boundary of ["response.body?.cancel", "documents/upload", "api/automations", "api/memory", "restart", "media"]) {
     assert.match(smoke, new RegExp(boundary.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
   }
 });

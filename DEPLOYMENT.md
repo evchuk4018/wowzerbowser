@@ -120,7 +120,7 @@ chmod 600 /srv/storage/wowzerbowser/deployment.env
 
 Set `APP_UID` and `APP_GID` from `id -u` and `id -g`. Set a random
 `POSTGRES_PASSWORD`, make `DATABASE_URL` use the same password, and set
-`APP_OWNER_EMAIL`. Set a random `AUTH_SECRET` and keep
+`APP_OWNER_EMAIL`. Keep
 `NEXT_PUBLIC_SITE_URL` on the private Tailscale HTTPS origin. Local binaries
 are stored below `/srv/storage/wowzerbowser/files`; do not configure that path
 to point at `/srv/storage/media`. Also replace the Miniflux and Firecrawl
@@ -141,17 +141,12 @@ node scripts/ensure-app-owner-id.mjs --env-file /srv/storage/wowzerbowser/deploy
 ```
 
 Keep the resulting `APP_OWNER_ID` fixed for the lifetime of this installation.
-It is the stable local PostgreSQL owner UUID used by Auth.js and all application
-repositories. Never expose it, `AUTH_SECRET`, passwords, or provider
+It is the stable local PostgreSQL owner UUID used by all application
+repositories. Never expose it or provider
 credentials to client code.
 
 Set `NEXT_PUBLIC_SITE_URL` to the private HTTPS hostname reported by Tailscale
 Serve after it is configured.
-
-If authenticated reads work but state-changing requests such as conversation
-deletion or OAuth connection start return `Unauthorized`, compare this value
-with the browser origin exactly. The same-origin guard and provider callback
-URLs both use it; changing it does not require rotating the Auth.js session.
 
 Validate the rendered Compose file:
 
@@ -210,20 +205,6 @@ replace the generated path with a symlink, mount `/srv/storage` or
 Set `PYTHON_WORKER_SECRET` in `/srv/storage/wowzerbowser/deployment.env` to a
 new random value of at least 32 characters. The web, durable worker, and local
 Python worker must share this value.
-
-Bootstrap the one owner once the migration is applied. The command is
-idempotent for the configured owner and never logs the password:
-
-```bash
-DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh run --rm -e SKIP_DATABASE_MIGRATION_CHECK=1 web node scripts/bootstrap-owner.mjs --env-file /srv/storage/wowzerbowser/deployment.env
-```
-
-Rotate the owner password when needed; this increments the session version and
-invalidates every existing Auth.js session:
-
-```bash
-DEPLOYMENT_ENV_FILE=/srv/storage/wowzerbowser/deployment.env ./docker/compose.sh run --rm -e SKIP_DATABASE_MIGRATION_CHECK=1 web node scripts/reset-owner-password.mjs --env-file /srv/storage/wowzerbowser/deployment.env
-```
 
 ## Database migrations
 

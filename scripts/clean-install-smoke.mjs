@@ -183,25 +183,6 @@ async function assertReady(baseUrl, jar) {
   return true;
 }
 
-async function login(baseUrl, jar, email, password) {
-  const csrf = await jsonRequest(baseUrl, jar, "/api/auth/csrf", {}, 200);
-  assert.equal(typeof csrf.value?.csrfToken, "string");
-  const body = new URLSearchParams({
-    csrfToken: csrf.value.csrfToken,
-    email,
-    password,
-    callbackUrl: `${baseUrl}/chat`,
-  });
-  const response = await request(baseUrl, jar, "/api/auth/callback/credentials", {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body,
-  }, { redirect: "manual" });
-  assert.ok([200, 302, 303].includes(response.status), "Credentials login did not succeed.");
-  const session = await jsonRequest(baseUrl, jar, "/api/auth/session", {}, 200);
-  assert.equal(session.value?.user?.email, email);
-}
-
 function jsonHeaders() {
   return { "content-type": "application/json", accept: "application/json" };
 }
@@ -360,9 +341,7 @@ async function smoke() {
   const pythonExecutionNetworkName = smokeName("wowzerbowser-smoke-python-net");
   const ownerId = randomUUID();
   const ownerEmail = "owner@example.test";
-  const ownerPassword = `SmokeOwner-${randomUUID().replaceAll("-", "")}`;
   const database = { name: "wowzerbowser_smoke", user: "wowzerbowser_smoke", password: `SmokeDb-${randomUUID().replaceAll("-", "")}` };
-  const authSecret = `SmokeAuth-${randomUUID().replaceAll("-", "")}`;
   const env = [
     `COMPOSE_PROJECT_NAME=${projectName}`,
     `SMOKE_STORAGE_PATH=${normalizeComposePath(storagePath)}`,
@@ -374,7 +353,6 @@ async function smoke() {
     `DEPLOYMENT_ENV_FILE=${normalizeComposePath(environmentFile)}`,
     `APP_OWNER_EMAIL=${ownerEmail}`,
     `APP_OWNER_ID=${ownerId}`,
-    `AUTH_SECRET=${authSecret}`,
     `NEXT_PUBLIC_SITE_URL=http://127.0.0.1:${port}`,
     `POSTGRES_DB=${database.name}`,
     `POSTGRES_USER=${database.user}`,
@@ -423,17 +401,12 @@ async function smoke() {
     await poll("local Python worker health", async () => (await compose(environmentFile, projectName, ["exec", "-T", "python-worker", "python", "-c", "import urllib.request; response = urllib.request.urlopen('http://127.0.0.1:5003/health', timeout=3); raise SystemExit(0 if response.status == 200 else 1)"], { allowFailure: true })).code === 0, 60_000, 500);
     console.log("smoke-stage-migrations");
     await compose(environmentFile, projectName, ["run", "--rm", "--no-deps", "-T", "-e", "SKIP_DATABASE_MIGRATION_CHECK=1", "web", "node", "scripts/migrate.mjs", "--initialize"]);
-    console.log("smoke-stage-bootstrap");
-    await compose(environmentFile, projectName, ["run", "--rm", "--no-deps", "-T", "web", "node", "scripts/bootstrap-owner.mjs", "--password-stdin"], { input: `${ownerPassword}\n` });
     console.log("smoke-stage-start-app");
     await compose(environmentFile, projectName, ["up", "-d", "web", "background-worker"]);
     console.log("smoke-stage-wait-readiness");
     await poll("web TCP port", () => tcpReachable(baseUrl), 60_000, 250);
     await poll("web readiness", () => assertReady(baseUrl, jar), 120_000);
-    console.log("clean-install-smoke\towner-login");
-    const unauthenticated = await jsonRequest(baseUrl, jar, "/api/chat/conversations");
-    assert.equal(unauthenticated.response.status, 401);
-    await login(baseUrl, jar, ownerEmail, ownerPassword);
+    console.log("clean-install-smoke\topen-access");
     const { conversationId } = await submitChat(baseUrl, jar, ownerEmail);
     await submitDocument(baseUrl, jar, conversationId);
     console.log("clean-install-smoke\tfile-and-chat-persistence\tok");
@@ -462,18 +435,6 @@ async function smoke() {
     await poll("background-worker heartbeat after restart", async () => (await compose(environmentFile, projectName, ["exec", "-T", "background-worker", "node", "scripts/background-worker.mjs", "--health"], { allowFailure: true })).code === 0, 30_000);
     await resourceSnapshot(environmentFile, projectName);
     console.log("clean-install-smoke\trestart-persistence-media-isolation\tok");
-
-    const csrf = await jsonRequest(baseUrl, jar, "/api/auth/csrf", {}, 200);
-    const logout = await request(baseUrl, jar, "/api/auth/signout", {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ csrfToken: csrf.value.csrfToken, callbackUrl: `${baseUrl}/login` }),
-    }, { redirect: "manual" });
-    assert.ok([200, 302, 303].includes(logout.status), "Logout did not complete.");
-    jar.clear();
-    const afterLogout = await jsonRequest(baseUrl, jar, "/api/chat/conversations");
-    assert.equal(afterLogout.response.status, 401);
-    console.log("clean-install-smoke\tlogout\tok");
   } finally {
     if (stackStarted) await compose(environmentFile, projectName, ["down", "--remove-orphans"], { allowFailure: true });
     if (volumeName.startsWith("wowzerbowser-smoke-")) await command(["volume", "rm", volumeName], { allowFailure: true });

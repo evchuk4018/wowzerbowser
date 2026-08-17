@@ -4,7 +4,6 @@ import "katex/dist/katex.min.css";
 import "./globals.css";
 import "./styles/tokens.css";
 import "./styles/base.css";
-import "./styles/auth.css";
 import "./styles/app-shell.css";
 import "./styles/sidebar.css";
 import "./styles/settings.css";

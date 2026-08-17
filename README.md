@@ -42,10 +42,9 @@ HDD mount is present before any application container is started.
 
 ## Authentication
 
-The app uses Auth.js Credentials authentication for exactly one owner. There is
-no signup or email-based login flow. Auth.js stores the encrypted session in an
-HttpOnly cookie, while the owner email and Node scrypt
-password hash live in local PostgreSQL. Application binaries live in the local
+The app is a single-user workspace for a private Tailscale deployment, so it
+has no login or session authentication. The configured owner identity comes
+from environment variables only. Application binaries live in the local
 filesystem under `/srv/storage/wowzerbowser/files` and their ownership,
 associations, MIME types, sizes, and hashes live in PostgreSQL.
 
@@ -53,23 +52,16 @@ Copy `.env.example` to an ignored `.env` and provide these settings before
 starting the app:
 
 ```bash
-APP_OWNER_EMAIL=the-only-email-allowed-to-sign-in
+APP_OWNER_EMAIL=owner@example.com
 APP_OWNER_ID=stable-owner-uuid
-AUTH_SECRET=at-least-32-random-characters
 NEXT_PUBLIC_SITE_URL=https://homelab.tail861ffd.ts.net
 ```
 
-Keep `AUTH_SECRET` and `APP_OWNER_ID` server-only. On a new installation, create
-the one owner with the private CLI after migrations:
+Keep `APP_OWNER_ID` server-only. On a new installation, generate a stable UUID
+after migrations:
 
 ```bash
-node scripts/bootstrap-owner.mjs --env-file /srv/storage/wowzerbowser/deployment.env
-```
-
-To rotate the password and invalidate every existing session, use:
-
-```bash
-node scripts/reset-owner-password.mjs --env-file /srv/storage/wowzerbowser/deployment.env
+node scripts/ensure-app-owner-id.mjs --env-file /srv/storage/wowzerbowser/deployment.env
 ```
 
 For local testing, set `NEXT_PUBLIC_SITE_URL` to `http://localhost:3000`.
