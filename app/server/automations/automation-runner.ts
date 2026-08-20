@@ -10,6 +10,7 @@ import {
   finishAutomationRun,
   getAutomationRow,
   heartbeatAutomationRun,
+  setAutomationRunAwaitingInput,
   type ClaimedAutomationRun,
 } from "./automation-repository";
 import { nextFutureAutomationRun } from "./automation-schedule";
@@ -19,7 +20,7 @@ import { chatAutomationDelivery, type AutomationDeliveryAdapter } from "./automa
 import { resolveAutomationAnswer } from "./automation-answer";
 
 export type AutomationRunExecution = {
-  outcome: "notified" | "no_match" | "failed" | "lease_lost";
+  outcome: "notified" | "no_match" | "failed" | "lease_lost" | "awaiting_input";
 };
 
 export type AutomationRunnerDependencies = {
@@ -151,7 +152,8 @@ export async function runClaimedAutomation(
     let content = "";
     let generationError = "";
     let structuredAnswer: AutomationRunResult | null = null;
-    await dependencies.generate({
+    let pendingQuestionId: string | null = null;
+    const generationResult = await dependencies.generate({
       systemPrompt: [
         "You are executing a recurring automation without a live user.",
         "Use available tools when current information is required.",
@@ -183,7 +185,13 @@ export async function runClaimedAutomation(
         conversationId: `automation-${automation.id}`,
         jobId,
       });
-    }, undefined, { profile: "automation", onAutomationResult: (value) => { structuredAnswer = value; } });
+    }, undefined, { profile: "automation", automationRunId: run.id, onAutomationResult: (value) => { structuredAnswer = value; }, onUserQuestion: (questionId: string) => { pendingQuestionId = questionId; } });
+    if ((generationResult as unknown as { awaitingInput?: boolean; pendingUserQuestionId?: string | null })?.awaitingInput || pendingQuestionId) {
+      const questionId = pendingQuestionId ?? (generationResult as unknown as { pendingUserQuestionId?: string | null })?.pendingUserQuestionId ?? "pending";
+      const applied = await setAutomationRunAwaitingInput(run.id, run.owner_id, run.lease_token, questionId).catch(() => false);
+      if (applied) return { outcome: "awaiting_input" as const };
+      return { outcome: "lease_lost" as const };
+    }
     if (generationError) throw new Error(generationError);
     const answer = resolveAutomationAnswer(structuredAnswer, content, automation.name);
     const matched = automation.kind === "report" ? true : answer.matched;

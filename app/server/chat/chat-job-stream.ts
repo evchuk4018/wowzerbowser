@@ -3,7 +3,7 @@ import { encodeChatLiveEnvelope, encodeChatLiveHeartbeat } from "./encode-chat-l
 import { getChatJob } from "./chat-job-store";
 import { subscribeToChatJobEvents } from "./chat-live-notifier";
 
-const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "awaiting_approval"]);
+const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "awaiting_approval", "awaiting_input"]);
 const LIVE_HEARTBEAT_MS = 15_000;
 
 function waitFor(milliseconds: number, signal: AbortSignal): Promise<void> {

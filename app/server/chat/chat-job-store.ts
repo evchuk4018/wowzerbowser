@@ -197,7 +197,7 @@ export async function cancelChatJob(ownerId: string, conversationId: string, job
 export async function cancelChatJobsForConversation(ownerId: string, conversationId: string): Promise<void> {
   const rows = await query<{ job_id: string }>(
     "select job_id from chat_jobs where owner_id=$1 and conversation_id=$2 and status=any($3::text[])",
-    [databaseOwnerId(ownerId), conversationId, ["queued", "running", "awaiting_approval"]],
+    [databaseOwnerId(ownerId), conversationId, ["queued", "running", "awaiting_approval", "awaiting_input"]],
   );
   await Promise.all(rows.map((row) => cancelChatJob(ownerId, conversationId, row.job_id)));
 }
@@ -206,12 +206,25 @@ export async function setChatJobAwaitingApproval(ownerId: string, conversationId
   await query("update chat_jobs set status='awaiting_approval',lease_expires_at=null,lease_token=null,heartbeat_at=$1,updated_at=$1 where owner_id=$2 and conversation_id=$3 and job_id=$4 and status='running' and ($5::uuid is null or lease_token=$5::uuid)", [new Date().toISOString(), databaseOwnerId(ownerId), conversationId, jobId, leaseToken ?? null]);
 }
 
+export async function setChatJobAwaitingInput(ownerId: string, conversationId: string, jobId: string, leaseToken?: string): Promise<void> {
+  await query("update chat_jobs set status='awaiting_input',lease_expires_at=null,lease_token=null,heartbeat_at=$1,updated_at=$1 where owner_id=$2 and conversation_id=$3 and job_id=$4 and status='running' and ($5::uuid is null or lease_token=$5::uuid)", [new Date().toISOString(), databaseOwnerId(ownerId), conversationId, jobId, leaseToken ?? null]);
+}
+
 export async function saveChatJobResearchPlan(ownerId: string, conversationId: string, jobId: string, plan: DeepResearchPlan): Promise<void> {
   await query("update chat_jobs set request=jsonb_set(request,'{deepResearchPlan}', $1::jsonb, true),updated_at=$2 where owner_id=$3 and conversation_id=$4 and job_id=$5 and status='running'", [jsonb(plan), new Date().toISOString(), databaseOwnerId(ownerId), conversationId, jobId]);
 }
 
 export async function resumeChatJobAfterApproval(ownerId: string, conversationId: string, jobId: string): Promise<void> {
   await query("update chat_jobs set status='queued',request=jsonb_set(request,'{deepResearchPhase}','\"execute\"'::jsonb,true),updated_at=$1 where owner_id=$2 and conversation_id=$3 and job_id=$4 and status='awaiting_approval'", [new Date().toISOString(), databaseOwnerId(ownerId), conversationId, jobId]);
+}
+
+export async function resumeChatJobAfterInput(ownerId: string, conversationId: string, jobId: string, answer: string): Promise<void> {
+  const now = new Date().toISOString();
+  const safeAnswer = answer.trim().slice(0, 4000) || "(no answer)";
+  await query(
+    "update chat_jobs set status='queued',request=jsonb_set(request,'{messages}', (request->'messages') || jsonb_build_array(jsonb_build_object('role','user','content', $1::text)), true),updated_at=$2 where owner_id=$3 and conversation_id=$4 and job_id=$5 and status='awaiting_input'",
+    [safeAnswer, now, databaseOwnerId(ownerId), conversationId, jobId],
+  );
 }
 
 export async function deleteChatJobsForConversation(ownerId: string, conversationId: string): Promise<void> {

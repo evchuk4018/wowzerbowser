@@ -12,6 +12,44 @@ const localDateTimeInput = (date: Date) => {
 };
 const emptyReminder = () => ({ title: "", message: "", at: localDateTimeInput(new Date(Date.now() + 60 * 60_000)), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Etc/UTC" });
 
+type PendingQuestion = { id: string; question: string; context: string | null; status: string; createdAt: string; conversationId: string | null };
+
+function PendingQuestionsPanel({ hasSession }: { hasSession: () => Promise<boolean> }) {
+  const [questions, setQuestions] = useState<PendingQuestion[]>([]);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState<string | null>(null);
+  const loadQuestions = useCallback(async () => {
+    if (!(await hasSession())) return;
+    try {
+      const response = await authFetch("/api/user-questions");
+      if (!response.ok) return;
+      const body = (await response.json()) as { questions: PendingQuestion[] };
+      setQuestions(body.questions ?? []);
+    } catch {}
+  }, [hasSession]);
+  useEffect(() => { void loadQuestions(); }, [loadQuestions]);
+  const submit = async (id: string) => {
+    const answer = answers[id]?.trim();
+    if (!answer) return;
+    if (!(await hasSession())) return;
+    setSaving(id);
+    try {
+      const response = await authFetch(`/api/user-questions/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ answer }) });
+      if (!response.ok) throw new Error("Failed");
+      setAnswers((current) => ({ ...current, [id]: "" }));
+      await loadQuestions();
+    } catch {} finally { setSaving(null); }
+  };
+  if (!questions.length) return null;
+  return <div className="automation-list" style={{ border: "1px solid #f59e0b", borderRadius: 8, padding: 12 }}>
+    <h4>Pending questions — your input is needed</h4>
+    {questions.map((item) => <article className="automation-row" key={item.id} style={{ flexDirection: "column", alignItems: "stretch" }}>
+      <div><strong>{item.question}</strong>{item.context && <small style={{ display: "block", marginTop: 4 }}>{item.context}</small>}<small>Asked {new Date(item.createdAt).toLocaleString()} · {item.conversationId ? `chat ${item.conversationId.slice(0, 8)}` : "automation"}</small></div>
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}><input style={{ flex: 1 }} placeholder="Your answer" value={answers[item.id] ?? ""} onChange={(event) => setAnswers((current) => ({ ...current, [item.id]: event.target.value }))} /><button type="button" className="settings-save" disabled={!answers[item.id]?.trim() || saving === item.id} onClick={() => void submit(item.id)}>{saving === item.id ? "Sending…" : "Answer"}</button></div>
+    </article>)}
+  </div>;
+}
+
 export function AutomationsSettings({ hasSession }: { hasSession: () => Promise<boolean> }) {
   const [items, setItems] = useState<Automation[]>([]);
   const [reminders, setReminders] = useState<Reminder[]>([]);
@@ -75,6 +113,7 @@ export function AutomationsSettings({ hasSession }: { hasSession: () => Promise<
     try { await reminderRequest(`/${item.id}`, { method: "DELETE" }); load(); } catch { setStatus("error"); }
   };
   return <div className="automations-settings">
+    <PendingQuestionsPanel hasSession={hasSession} />
     <div className="settings-panel-heading"><h3>Automations and reminders</h3><p>Run recurring reports, monitor conditions, or receive a one-off reminder at a specific local time.</p></div>
     {status === "error" && <p className="settings-status settings-error" role="alert">Automations or reminders could not be saved or loaded.</p>}
     <div className="automation-list">

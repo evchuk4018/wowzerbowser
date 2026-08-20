@@ -90,6 +90,101 @@ export async function heartbeatAutomationRun(ownerId: string, runId: string, lea
   return row?.heartbeat_automation_run === true;
 }
 
+export async function setAutomationRunAwaitingInput(
+  runId: string,
+  ownerId: string,
+  leaseToken: string,
+  questionId: string,
+): Promise<boolean> {
+  const now = new Date().toISOString();
+  const [row] = await query<{ id: string }>(
+    "update automation_runs set status='awaiting_input',lease_expires_at=null,lease_token=null,updated_at=$1 where id=$2 and owner_id=$3 and status='running' and lease_token=$4::uuid returning id",
+    [now, runId, databaseOwnerId(ownerId), leaseToken],
+  );
+  if (!row) return false;
+  await query("update user_questions set automation_run_id=$1 where id=$2 and owner_id=$3", [runId, questionId, databaseOwnerId(ownerId)]).catch(() => undefined);
+  return true;
+}
+
+export async function resumeAutomationRunAfterInput(
+  ownerId: string,
+  runId: string,
+  answer: string,
+): Promise<{ automationId: string; scheduledFor: string } | null> {
+  const now = new Date().toISOString();
+  return withTransaction(async (tx) => {
+    const [run] = await tx.unsafe<{ id: string; automation_id: string; scheduled_for: unknown; status: string }>(
+      "select id,automation_id,scheduled_for,status from automation_runs where id=$1 and owner_id=$2 and status='awaiting_input' for update",
+      [runId, databaseOwnerId(ownerId)],
+    );
+    if (!run) return null;
+    await tx.unsafe("update automation_runs set status='running',lease_token=gen_random_uuid(),lease_expires_at=$1,updated_at=$1 where id=$2 and owner_id=$3", [new Date(Date.now() + 15 * 60 * 1000).toISOString(), runId, databaseOwnerId(ownerId)]);
+    const [updated] = await tx.unsafe<{ lease_token: string }>("select lease_token from automation_runs where id=$1 and owner_id=$2", [runId, databaseOwnerId(ownerId)]);
+    void updated;
+    return { automationId: String(run.automation_id), scheduledFor: isoTimestamp(run.scheduled_for) };
+  });
+}
+
+export async function finishAwaitingInputAutomationRun(
+  runId: string,
+  input: { ownerId: string; answer: string; question: string },
+): Promise<boolean> {
+  const now = new Date().toISOString();
+  return withTransaction(async (tx) => {
+    const [run] = await tx.unsafe<{ owner_id: string; automation_id: string; scheduled_for: unknown }>(
+      "select owner_id,automation_id,scheduled_for from automation_runs where id=$1 and owner_id=$2 and status='awaiting_input' for update",
+      [runId, databaseOwnerId(input.ownerId)],
+    );
+    if (!run) return false;
+    await tx.unsafe(
+      "update automation_runs set status='notified',matched=true,title=$1,output=$2,error=null,lease_expires_at=null,lease_token=null,completed_at=$3,updated_at=$3 where id=$4 and owner_id=$5",
+      [input.question.slice(0, 160), input.answer.slice(0, 4000), now, runId, databaseOwnerId(input.ownerId)],
+    );
+    const [automation] = await tx.unsafe<{ consecutive_failures: number; status: string; deleted_at: string | null; schedule: unknown; time_zone: string; next_run_at: unknown }>(
+      "select consecutive_failures,status,deleted_at,schedule,time_zone,next_run_at from automations where id=$1 and owner_id=$2 for update",
+      [run.automation_id, databaseOwnerId(input.ownerId)],
+    );
+    if (!automation) throw new Error("Automation not found.");
+    let nextRunAt: string | null = null;
+    try {
+      const { nextFutureAutomationRun } = await import("./automation-schedule");
+      nextRunAt = nextFutureAutomationRun(automation.schedule as never, automation.time_zone, new Date(String(run.scheduled_for)), new Date()).toISOString();
+    } catch { nextRunAt = null; }
+    const shouldPause = automation.status !== "active" || automation.deleted_at !== null;
+    const persistedNextRunAt = automation.next_run_at == null ? null : isoTimestamp(automation.next_run_at as never);
+    const finalNextRunAt = shouldPause ? null : (persistedNextRunAt ?? nextRunAt);
+    const nextStatus = shouldPause ? "paused" : "active";
+    await tx.unsafe(
+      "update automations set status=$1,next_run_at=$2,last_outcome='notified',last_error=null,consecutive_failures=0,updated_at=$3 where id=$4 and owner_id=$5",
+      [nextStatus, finalNextRunAt, now, run.automation_id, databaseOwnerId(input.ownerId)],
+    );
+    return true;
+  });
+}
+
+export async function expireAwaitingInputAutomationRuns(ownerId: string, leaseMs = 900_000): Promise<number> {
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const runs = await query<{ id: string; owner_id: string; automation_id: string; lease_token: string | null }>(
+    "select id,owner_id,automation_id,lease_token from automation_runs where owner_id=$1 and status='awaiting_input' and updated_at <= $2",
+    [databaseOwnerId(ownerId), cutoff],
+  );
+  let expired = 0;
+  for (const run of runs) {
+    try {
+      const now = new Date().toISOString();
+      await withTransaction(async (tx) => {
+        const [locked] = await tx.unsafe<{ id: string }>("select id from automation_runs where id=$1 and owner_id=$2 and status='awaiting_input' for update", [run.id, databaseOwnerId(ownerId)]);
+        if (!locked) return;
+        await tx.unsafe("update automation_runs set status='expired',error='User did not answer within 24h.',lease_expires_at=null,lease_token=null,completed_at=$1,updated_at=$1 where id=$2 and owner_id=$3", [now, run.id, databaseOwnerId(ownerId)]);
+        await tx.unsafe("update automations set last_outcome='failed',last_error='User did not answer within 24h.',consecutive_failures=consecutive_failures+1,updated_at=$1 where id=$2 and owner_id=$3", [now, run.automation_id, databaseOwnerId(ownerId)]);
+        await tx.unsafe("update user_questions set status='expired',updated_at=$1 where automation_run_id=$2 and status='pending'", [now, run.id]);
+      });
+      expired += 1;
+    } catch {}
+  }
+  return expired;
+}
+
 export async function finishAutomationRun(
   runId: string,
   input: {

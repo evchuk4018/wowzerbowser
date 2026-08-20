@@ -98,7 +98,7 @@ export async function recoverPersistedJob({
     try {
       let existing: ChatJobResumeResponse | null = null;
       try { existing = await fetchJob(candidate.conversationId, candidate.message.jobId, after, signal); } catch {}
-      if (existing?.status === "awaiting_approval") {
+      if (existing?.status === "awaiting_approval" || existing?.status === "awaiting_input") {
         for (const event of existing.events) {
           if (!isSequencedEvent(event) || event.sequence <= after) continue;
           after = event.sequence;

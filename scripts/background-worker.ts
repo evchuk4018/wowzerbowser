@@ -14,6 +14,7 @@ import { runAutomationSchedulerTickForOwner } from "../app/server/automations/au
 import { runAbandonedUploadMaintenance, runIncompleteFileMaintenance as runStorageMaintenance, runStaleChatMaintenance } from "../app/server/maintenance/maintenance-service";
 import { describeBackgroundError, logBackgroundTaskFailure } from "../app/server/observability/background-error";
 import { processPendingDiscordMessage } from "../app/server/discord/discord-chat-service";
+import { expireStaleUserQuestions } from "../app/server/user-questions/user-question-service";
 import { ensureRuntimeConfigLoaded, runtimeConfigSnapshot } from "../app/server/config/runtime-config-service";
 
 function boundedInteger(value: string | undefined, fallback: number, minimum: number, maximum: number): number {
@@ -193,6 +194,11 @@ const loop = new BackgroundWorkerLoop({
       name: "incomplete-file",
       intervalMs: maintenanceIntervalMs,
       run: schedulerTask("incomplete-file", async () => ({ cleaned: await runStorageMaintenance({ ownerId, limit: maintenanceLimit }) })),
+    },
+    {
+      name: "user-question-expiry",
+      intervalMs: 300_000,
+      run: schedulerTask("user-question-expiry", async () => ({ expired: await expireStaleUserQuestions(ownerId) })),
     },
     ...(discordProcessingEnabled ? [{
       name: "discord-message",

@@ -27,8 +27,10 @@ const internalAppUrl = new URL(required("DISCORD_APP_URL")).origin;
 const publicAppUrl = new URL(required("NEXT_PUBLIC_SITE_URL")).origin;
 const activeDeliveries = new Set();
 const activeAutomationDeliveries = new Set();
+const activeUserQuestionDeliveries = new Set();
 const AUTOMATION_POLL_INTERVAL_MS = 5_000;
 const SUBMISSION_POLL_INTERVAL_MS = 5_000;
+const USER_QUESTION_POLL_INTERVAL_MS = 5_000;
 let heartbeatTimer;
 
 function required(name) {
@@ -132,6 +134,87 @@ async function acknowledgeAutomationDelivery(notificationId, result) {
   });
 }
 
+async function acknowledgeUserQuestionDelivery(notificationId, result) {
+  await appRequest(`/api/internal/discord/user-question-notifications/${notificationId}`, {
+    method: "PATCH",
+    body: JSON.stringify(result),
+  });
+}
+
+async function deliverUserQuestionNotification(notification) {
+  if (activeUserQuestionDeliveries.has(notification.id)) return;
+  activeUserQuestionDeliveries.add(notification.id);
+  try {
+    const user = await client.users.fetch(allowedUserId);
+    const channel = await user.createDM();
+    const question = notification.question.replaceAll("*", "\\*");
+    const context = notification.context ? `\n\nContext: ${notification.context.replaceAll("*", "\\*")}` : "";
+    const prompt = `**Bobert needs your input**\n\n${question}${context}\n\nReply to this message with your answer.`;
+    const chunks = splitResponse(prompt, conversationLink(notification.conversationId));
+    let firstMessage;
+    for (const chunk of chunks) {
+      const sent = await channel.send({ content: chunk, allowedMentions: { parse: [] } });
+      firstMessage ??= sent;
+    }
+    await acknowledgeUserQuestionDelivery(notification.id, {
+      status: "delivered",
+      channelId: channel.id,
+      messageId: firstMessage.id,
+    });
+  } catch (error) {
+    const message = safeError(error);
+    await acknowledgeUserQuestionDelivery(notification.id, {
+      status: "failed",
+      error: message,
+    }).catch((ackError) => {
+      console.error({ event: "discord-user-question-failure-ack-failed", notificationId: notification.id, error: safeError(ackError) });
+    });
+    throw error;
+  } finally {
+    activeUserQuestionDeliveries.delete(notification.id);
+  }
+}
+
+async function pollUserQuestionNotifications() {
+  try {
+    const { notifications } = await appRequest("/api/internal/discord/user-question-notifications");
+    await Promise.allSettled((notifications ?? []).map(async (notification) => {
+      try { await deliverUserQuestionNotification(notification); } catch (error) {
+        console.error({ event: "discord-user-question-delivery-failed", notificationId: notification.id, error: safeError(error) });
+      }
+    }));
+  } catch (error) {
+    console.error({ event: "discord-user-question-poll-failed", error: safeError(error) });
+  }
+}
+
+async function tryAnswerPendingQuestion(message) {
+  const content = message.content?.trim();
+  if (!content) return false;
+  if (content.startsWith("/") || content.toLowerCase() === "/new") return false;
+  let questions = [];
+  try {
+    const body = await appRequest("/api/internal/user-questions");
+    questions = body.questions ?? [];
+  } catch { return false; }
+  if (!questions.length) return false;
+  const target = questions[0];
+  try {
+    await appRequest(`/api/internal/user-questions/${target.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ answer: content.slice(0, 4000) }),
+    });
+    await message.reply({
+      content: `Got it — relayed your answer to the pending question:\n> ${target.question.slice(0, 500)}\n\nYour answer has been recorded and the paused run will resume shortly.`,
+      allowedMentions: { parse: [], repliedUser: false },
+    }).catch(() => undefined);
+    return true;
+  } catch (error) {
+    console.error({ event: "discord-answer-pending-question-failed", questionId: target.id, error: safeError(error) });
+    return false;
+  }
+}
+
 async function deliverAutomationNotification(notification) {
   if (activeAutomationDeliveries.has(notification.id)) return;
   activeAutomationDeliveries.add(notification.id);
@@ -212,6 +295,10 @@ const client = new Client({
 
 client.on("messageCreate", async (message) => {
   if (message.author.bot || message.guildId || message.author.id !== allowedUserId) return;
+  try {
+    const answered = await tryAnswerPendingQuestion(message);
+    if (answered) return;
+  } catch {}
   let placeholder;
   try {
     placeholder = await message.reply({
@@ -252,12 +339,16 @@ client.once("ready", async () => {
   console.log(JSON.stringify({ event: "discord-worker-ready", user: client.user.tag, internalAppUrl, reconnectRecovery: true }));
   await pollPendingSubmissions();
   await pollAutomationNotifications();
+  await pollUserQuestionNotifications();
   setInterval(() => {
     void pollPendingSubmissions();
   }, SUBMISSION_POLL_INTERVAL_MS).unref();
   setInterval(() => {
     void pollAutomationNotifications();
   }, AUTOMATION_POLL_INTERVAL_MS).unref();
+  setInterval(() => {
+    void pollUserQuestionNotifications();
+  }, USER_QUESTION_POLL_INTERVAL_MS).unref();
 });
 
 client.on("error", (error) => console.error({ event: "discord-client-error", error: safeError(error) }));

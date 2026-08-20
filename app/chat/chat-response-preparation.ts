@@ -6,6 +6,9 @@ export type ChatExecutionProfile = "chat" | "automation" | "subagent";
 export type ChatExecutionOptions = {
   profile?: ChatExecutionProfile;
   subagentDepth?: number;
+  automationRunId?: string;
+  onUserQuestion?: (questionId: string) => void;
+  onAutomationResult?: (result: import("../server/agent/automation-run-result-tool").AutomationRunResult) => void;
 };
 
 export function isAutomationExecution(options: ChatExecutionOptions): boolean {

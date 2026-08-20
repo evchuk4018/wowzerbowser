@@ -99,6 +99,10 @@ import {
   stableConversationId,
   type ChatExecutionOptions,
 } from "./chat-response-preparation";
+import { HOMELAB_OPENCODE_TOOL_DEFINITION, HOMELAB_OPENCODE_TOOL_NAME, availableHomelabOpencodeTools } from "../server/agent/homelab-opencode-tool-manifest";
+import { executeHomelabOpencodeTool } from "../server/agent/homelab-opencode-tool";
+import { ASK_USER_TOOL_DEFINITION, ASK_USER_TOOL_NAME } from "../server/agent/ask-user-tool-manifest";
+import { executeAskUserTool } from "../server/agent/ask-user-tool";
 
 export type ChatRoundUsage = {
   round: number;
@@ -119,8 +123,8 @@ export async function generateChatResponse(
   persistEvent: (event: ChatStreamEvent) => Promise<void>,
   persistUsage?: (usage: ChatRoundUsage) => Promise<void>,
   persistSummaryUsage?: (usage: ChatSummaryUsage) => Promise<void>,
-  executionOptions: ChatExecutionOptions & { onAutomationResult?: (result: AutomationRunResult) => void } = {},
-): Promise<{ awaitingApproval: boolean }> {
+  executionOptions: ChatExecutionOptions = {},
+): Promise<{ awaitingApproval: boolean; awaitingInput?: boolean; pendingUserQuestionId?: string | null }> {
   const automationExecution = isAutomationExecution(executionOptions);
   const subagentExecution = isSubagentExecution(executionOptions);
   const configuration = runtimeConfigSnapshot();
@@ -190,6 +194,8 @@ export async function generateChatResponse(
   }
   const availableProjectImageIds = projectImages.map((image) => image.id);
   const visibleImageIds = [...new Set([...allowedImageIds, ...availableProjectImageIds])];
+  const homelabTools = availableHomelabOpencodeTools();
+  const askUserTools = [ASK_USER_TOOL_DEFINITION];
   const imageTools = availableImageTools(visibleImageIds.length > 0);
   const workspaceImageTools = availableWorkspaceImageTools(isLocalPythonConfigured());
   const allPdfEditTools = availablePdfEditTools([...authoritativePdfs.values()].some((document) => document.contentType === "application/pdf"));
@@ -223,6 +229,8 @@ export async function generateChatResponse(
     ...(connectorDiscoveryAvailable ? [{ id: "connectors", summary: `Discover actions in connected services: ${connectorCatalog.filter((item) => item.installed).map((item) => item.name).join(", ")}.`, keywords: ["gmail", "email", "drive", "file", "notion", "page", "slack", "message", "connected service", "connector", "mcp"], fallback: true }] : []),
     ...customTools.map((tool) => ({ id: `custom:${tool.name}`, summary: tool.description, keywords: [tool.name, tool.description], fallback: true })),
     ...(potentialTodoTools.length ? [{ id: "todos", summary: "Update the visible task todo list.", keywords: ["todo", "plan", "steps", "tasks"], required: true }] : []),
+    ...(homelabTools.length ? [{ id: "homelab", summary: "Run opencode on the homelab host over SSH for repo, GitHub, and shell tasks.", keywords: ["homelab", "opencode", "ssh", "github", "issue", "repo", "code", "close issues"], fallback: true }] : []),
+    ...(askUserTools.length ? [{ id: "ask_user", summary: "Ask the human a clarifying question and wait for a reply via Discord or web.", keywords: ["ask", "question", "confirm", "human", "user"], fallback: true }] : []),
     ...(automationExecution ? [{ id: "automation-result", summary: "Complete the current automation run.", keywords: [], required: true }] : []),
   ];
   const plannerPromise = automationExecution || subagentExecution ? Promise.resolve({ list: null, plannedThisTurn: false }) : planTodos({
@@ -315,6 +323,8 @@ export async function generateChatResponse(
   const customDefinitions = customToolDefinitions(activeCustomTools);
   const skillTools = selected("skills") && !automationExecution ? SKILL_TOOL_DEFINITIONS : [];
   const todoTools = selected("todos") && !automationExecution && (planner.plannedThisTurn || Boolean(planner.list?.items.length)) ? TODO_TOOL_DEFINITIONS : [];
+  const homelabDefinitions = selected("homelab") ? homelabTools : [];
+  const askUserDefinitions = selected("ask_user") ? askUserTools : [];
   const automationResultTools = selected("automation-result") && automationExecution ? [COMPLETE_AUTOMATION_RUN_TOOL_DEFINITION] : [];
   const contextTools = focusedPlan?.searchEntries.length ? [currentChatContextToolDefinition()] : [];
   const documentContextLimits = { maxInlineTokens: configuration.documentInlineMaxTokens, maxInlinePages: configuration.documentInlineMaxPages };
@@ -330,7 +340,7 @@ export async function generateChatResponse(
   }));
   chatRequest = { ...chatRequest, messages: contextualMessages };
   const allowedProjectIds = new Set([...authoritativePdfs.values()].map((document) => document.projectId).filter((projectId): projectId is string => Boolean(projectId)));
-  const baseToolDefinitions = [...activePythonTools, ...activeWorkspaceTools, ...activeSpreadsheetTools, ...activeImageTools, ...activeWorkspaceImageTools, ...activeWebTools, ...activeDeepResearchTools, ...pdfEditTools, ...activePhaseTools, ...customDefinitions, ...activeChatMemoryTools, ...activeUserMemoryTools, ...skillTools, ...todoTools, ...automationResultTools, ...contextTools, ...(connectorDiscoveryAvailable && selected("connectors") ? [SEARCH_CONNECTOR_TOOLS_DEFINITION] : []), ...(subagentExecution ? [] : [subagentToolDefinition()])];
+  const baseToolDefinitions = [...activePythonTools, ...activeWorkspaceTools, ...activeSpreadsheetTools, ...activeImageTools, ...activeWorkspaceImageTools, ...activeWebTools, ...activeDeepResearchTools, ...pdfEditTools, ...activePhaseTools, ...customDefinitions, ...activeChatMemoryTools, ...activeUserMemoryTools, ...skillTools, ...todoTools, ...homelabDefinitions, ...askUserDefinitions, ...automationResultTools, ...contextTools, ...(connectorDiscoveryAvailable && selected("connectors") ? [SEARCH_CONNECTOR_TOOLS_DEFINITION] : []), ...(subagentExecution ? [] : [subagentToolDefinition()])];
   const imageToolAdvertised = activeImageTools.some((tool) => tool.function.name === INSPECT_IMAGE_TOOL_NAME);
 
   const enqueue = async (event: ChatStreamEvent) => {
@@ -404,6 +414,7 @@ export async function generateChatResponse(
       let currentPhase = 1;
       let automationToolsUnlocked = automationKeywordUnlock;
       let calendarToolsUnlocked = calendarKeywordUnlock;
+      let pendingUserQuestionId: string | null = null;
       let activeResearchRun: ResearchRun | null = null;
       let connectorModelTools: ReturnType<typeof connectorToolsToModelTools> = [];
       const sourceCatalog = new Map<string, ChatSource>();
@@ -845,6 +856,28 @@ export async function generateChatResponse(
                 onApproval: async (approval) => enqueue({ type: "connector_approval", approval }),
               });
             }
+            if (homelabDefinitions.some((tool) => tool.function.name === call.name) && call.name === HOMELAB_OPENCODE_TOOL_NAME) {
+              return executeHomelabOpencodeTool(call, roundSignal);
+            }
+            if (askUserDefinitions.some((tool) => tool.function.name === call.name) && call.name === ASK_USER_TOOL_NAME) {
+              const result = await executeAskUserTool(call, {
+                ownerId,
+                conversationId,
+                jobId: responseId,
+                signal: roundSignal,
+                executionOptions: {
+                  ...(executionOptions as unknown as Record<string, unknown>),
+                  source: isAutomationExecution(executionOptions) ? "automation" : "chat",
+                  automationRunId: executionOptions.automationRunId,
+                  onUserQuestion: (questionId: string) => {
+                    pendingUserQuestionId = questionId;
+                    executionOptions.onUserQuestion?.(questionId);
+                  },
+                } as never,
+              });
+              if (result.ok) pendingUserQuestionId ??= `ask-${call.id}`;
+              return result;
+            }
             return {
               id: call.id,
               name: call.name,
@@ -925,6 +958,7 @@ export async function generateChatResponse(
             ...(reasoningDetails.length ? { reasoningDetails } : {}),
             toolCalls: calls,
           });
+          if (pendingUserQuestionId) break;
         }
       } catch (error: unknown) {
         if (!signal.aborted) {
@@ -936,7 +970,7 @@ export async function generateChatResponse(
         if (signal.aborted) titleCoordinator.cancel();
         else await titleCoordinator.finish();
         await (executor as LocalPythonExecutor | null)?.close().catch(() => undefined);
-        if (!signal.aborted) {
+        if (!signal.aborted && !pendingUserQuestionId) {
           await enqueue({
             type: "done",
             usage: sumRoundUsage(roundUsages),
@@ -947,5 +981,6 @@ export async function generateChatResponse(
           });
         }
       }
+      if (pendingUserQuestionId) return { awaitingApproval: false, awaitingInput: true, pendingUserQuestionId };
       return { awaitingApproval: false };
 }

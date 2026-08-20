@@ -48,6 +48,8 @@ import {
 } from "./workspace-tool-manifest";
 import { SPREADSHEET_TOOL_NAME } from "./spreadsheet-tool-manifest";
 import { RUN_SUBAGENT_TOOL_NAME } from "./subagent-tool-manifest";
+import { HOMELAB_OPENCODE_TOOL_NAME } from "./homelab-opencode-tool-manifest";
+import { ASK_USER_TOOL_NAME } from "./ask-user-tool-manifest";
 
 export type ToolExecutionPolicy = "parallel-safe" | "serial";
 export type ToolExecutionMetadata = { executionPolicy: ToolExecutionPolicy };
@@ -119,6 +121,8 @@ export const TOOL_EXECUTION_METADATA: Readonly<Record<string, ToolExecutionMetad
   ["phase_break"]: { executionPolicy: "serial" },
   ["search_connector_tools"]: { executionPolicy: "serial" },
   ["complete_automation_run"]: { executionPolicy: "serial" },
+  [HOMELAB_OPENCODE_TOOL_NAME]: { executionPolicy: "serial" },
+  [ASK_USER_TOOL_NAME]: { executionPolicy: "serial" },
 } as const;
 
 export function toolExecutionMetadata(

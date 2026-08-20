@@ -9,7 +9,7 @@ import type {
 } from "../../../lib/chat-protocol";
 import { generateChatResponse } from "../../chat/chat-server-service";
 import { recordPromptUsage, refreshPromptCost } from "../usage/prompt-cost-service";
-import { claimChatJob, createChatJobEventWriter, finishChatJob, renewChatJob, saveChatJobResearchPlan, setChatJobAwaitingApproval, type ChatJobClaim } from "./chat-job-store";
+import { claimChatJob, createChatJobEventWriter, finishChatJob, renewChatJob, saveChatJobResearchPlan, setChatJobAwaitingApproval, setChatJobAwaitingInput, type ChatJobClaim } from "./chat-job-store";
 import { createChatEventCoalescer } from "./chat-event-coalescer";
 import { CHAT_JOB_HEARTBEAT_MS } from "./chat-job-lease";
 import type { ChatCitation, ChatSource } from "../../../lib/chat-citations";
@@ -255,6 +255,10 @@ export async function runClaimedChatJob(
       if (researchPlan) await saveChatJobResearchPlan(ownerId, claim.conversationId, claim.jobId, researchPlan);
       await setChatJobAwaitingApproval(ownerId, claim.conversationId, claim.jobId, leaseToken);
       return terminalResponse("awaiting_approval", null);
+    }
+    if (!controller.signal.aborted && generation.awaitingInput) {
+      await setChatJobAwaitingInput(ownerId, claim.conversationId, claim.jobId, leaseToken);
+      return terminalResponse("awaiting_input", null);
     }
     if (!controller.signal.aborted) {
       const status = generationError ? "failed" : "completed";

@@ -308,7 +308,7 @@ export type ChatSubmissionMetadata = {
   versionIndex: number;
 };
 
-export type ChatJobStatus = "queued" | "running" | "awaiting_approval" | "completed" | "failed" | "cancelled";
+export type ChatJobStatus = "queued" | "running" | "awaiting_approval" | "awaiting_input" | "completed" | "failed" | "cancelled";
 export type SequencedChatStreamEvent = ChatStreamEvent & { sequence: number; jobId: string };
 export type ChatJobResumeResponse = {
   jobId: string;
