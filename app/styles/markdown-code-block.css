@@ -1,0 +1,62 @@
+.markdown-code-block {
+  position: relative;
+  margin: 0 0 12px;
+}
+
+.markdown-code-block pre {
+  margin: 0;
+  padding-right: 72px;
+}
+
+.markdown-code-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #3b3c38;
+  border-radius: 8px;
+  background: #2b2c29;
+  padding: 6px 10px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 560;
+  line-height: 1;
+}
+
+.markdown-code-copy:hover,
+.markdown-code-copy:focus-visible {
+  border-color: #5a5c57;
+  background: #343530;
+  outline: 0;
+}
+
+.markdown-code-copy:active {
+  background: #2f302d;
+}
+
+.markdown-code-copy-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.6;
+}
+
+.markdown-code-copy[data-state="copied"] {
+  border-color: #5f7a3a;
+  background: #2f3526;
+  color: #d9ed9e;
+}
+
+.markdown-code-copy[data-state="error"] {
+  border-color: #7a3a3a;
+  background: #352626;
+  color: #ffb4ac;
+}

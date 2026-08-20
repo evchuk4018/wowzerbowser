@@ -50,6 +50,9 @@
   padding: 14px 16px;
 }
 .assistant-markdown pre code { background: transparent; padding: 0; font-size: .86em; }
+.assistant-markdown .markdown-code-block pre { padding-right: 72px; }
+.assistant-markdown .markdown-code-block { margin: 0 0 12px; }
+.assistant-markdown .markdown-code-block pre { margin: 0; }
 .assistant-markdown-table {
   max-width: 100%;
   overflow-x: auto;

@@ -135,6 +135,8 @@
 .artifact-preview-markdown :first-child { margin-top: 0; }
 .artifact-preview-markdown :last-child { margin-bottom: 0; }
 .artifact-preview-markdown pre { overflow: auto; border-radius: 8px; background: #0f100f; padding: 12px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.artifact-preview-markdown .markdown-code-block { margin: 0 0 12px; }
+.artifact-preview-markdown .markdown-code-block pre { margin: 0; padding-right: 72px; }
 .artifact-preview-status { display: grid; place-content: center; gap: 12px; padding: 24px; color: var(--muted); text-align: center; }
 .artifact-preview-status p { margin: 0; }
 .artifact-preview-status button {

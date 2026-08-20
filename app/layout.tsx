@@ -10,6 +10,7 @@ import "./styles/settings.css";
 import "./styles/delete-dialog.css";
 import "./styles/transcript.css";
 import "./styles/assistant-markdown.css";
+import "./styles/markdown-code-block.css";
 import "./styles/message-actions.css";
 import "./styles/reasoning.css";
 import "./styles/assistant-activity.css";

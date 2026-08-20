@@ -60,3 +60,29 @@ test("memoizes completed Markdown and conversation turns", async () => {
   assert.match(generation, /window\.setTimeout\(flushPendingEvents, STREAM_RENDER_INTERVAL_MS\)/);
   assert.doesNotMatch(generation, /requestAnimationFrame\(flushPendingEvents/);
 });
+
+test("renders fenced code blocks with a top-right copy control", async () => {
+  const [renderer, copyBlock, markdownStyles, codeBlockStyles, layout] = await Promise.all([
+    source("app/chat/assistant-response.tsx"),
+    source("app/chat/copyable-code-block.tsx"),
+    source("app/styles/assistant-markdown.css"),
+    source("app/styles/markdown-code-block.css"),
+    source("app/layout.tsx"),
+  ]);
+
+  assert.match(renderer, /CopyableCodeBlock/);
+  assert.match(renderer, /pre: CopyableCodeBlock/);
+  assert.match(copyBlock, /navigator\.clipboard\.writeText/);
+  assert.match(copyBlock, /aria-label="Copy code"/);
+  assert.match(copyBlock, /markdown-code-block/);
+  assert.match(copyBlock, /markdown-code-copy/);
+  assert.match(copyBlock, /Copied/);
+  assert.match(copyBlock, /Copy failed/);
+  assert.match(codeBlockStyles, /\.markdown-code-block/);
+  assert.match(codeBlockStyles, /\.markdown-code-copy/);
+  assert.match(codeBlockStyles, /position: absolute/);
+  assert.match(codeBlockStyles, /top: 8px/);
+  assert.match(codeBlockStyles, /right: 8px/);
+  assert.match(markdownStyles, /\.assistant-markdown \.markdown-code-block/);
+  assert.match(layout, /markdown-code-block\.css/);
+});

@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import type { ChatCitation, ChatSource } from "../../lib/chat-citations";
 import type { ChatArtifact } from "../../lib/chat-protocol";
+import { CopyableCodeBlock } from "./copyable-code-block";
 import { splitMarkdownTail } from "./assistant-markdown";
 import { normalizeLatexDelimiters } from "./normalize-latex-delimiters";
 import { resolvePdfArtifact } from "./pdf-preview-layout";
@@ -168,7 +169,7 @@ function AssistantResponseInner({
         </div>
       );
     };
-    return { p: wrap("p"), h1: wrap("h1"), h2: wrap("h2"), h3: wrap("h3"), h4: wrap("h4"), li: wrap("li"), blockquote: wrap("blockquote"), strong: wrap("strong"), em: wrap("em"), a: MarkdownLink, table: MarkdownTable, td: wrap("td"), th: wrap("th") } as unknown as Components;
+    return { p: wrap("p"), h1: wrap("h1"), h2: wrap("h2"), h3: wrap("h3"), h4: wrap("h4"), li: wrap("li"), blockquote: wrap("blockquote"), strong: wrap("strong"), em: wrap("em"), a: MarkdownLink, table: MarkdownTable, td: wrap("td"), th: wrap("th"), pre: CopyableCodeBlock } as unknown as Components;
   }, [annotations, artifacts, onOpenArtifact, sources]);
   return (
     <>

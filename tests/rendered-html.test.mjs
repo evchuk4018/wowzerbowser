@@ -21,11 +21,13 @@ const stylesheetPaths = [
   "../app/styles/settings.css",
   "../app/styles/transcript.css",
   "../app/styles/assistant-markdown.css",
+  "../app/styles/markdown-code-block.css",
   "../app/styles/message-actions.css",
   "../app/styles/reasoning.css",
   "../app/styles/assistant-activity.css",
   "../app/styles/artifacts.css",
   "../app/styles/pdf-preview.css",
+  "../app/styles/artifact-preview.css",
   "../app/styles/composer.css",
   "../app/styles/chat-search.css",
   "../app/styles/responsive.css",
@@ -903,4 +905,35 @@ test("renders explicit phase breaks as visible reasoning boundaries", async () =
   assert.match(styles, /\.reasoning-phase/);
   assert.match(styles, /\.phase-progress-update/);
   assert.match(styles, /\.phase-progress-update-label/);
+});
+
+test("shows a copy control in the top-right corner of every Markdown code block", async () => {
+  const [assistantRenderer, artifactPanel, copyBlock, styles, layout] = await Promise.all([
+    readFile(new URL("../app/chat/assistant-response.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/artifact-preview-panel.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/copyable-code-block.tsx", import.meta.url), "utf8"),
+    readStyles(),
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(assistantRenderer, /CopyableCodeBlock/);
+  assert.match(assistantRenderer, /import \{ CopyableCodeBlock \} from "\.\/copyable-code-block"/);
+  assert.match(assistantRenderer, /pre: CopyableCodeBlock/);
+  assert.match(artifactPanel, /CopyableCodeBlock/);
+  assert.match(artifactPanel, /components=\{\{ pre: CopyableCodeBlock \}\}/);
+  assert.match(copyBlock, /"use client"/);
+  assert.match(copyBlock, /navigator\.clipboard\.writeText/);
+  assert.match(copyBlock, /aria-label="Copy code"/);
+  assert.match(copyBlock, /markdown-code-block/);
+  assert.match(copyBlock, /markdown-code-copy/);
+  assert.match(copyBlock, /Copied/);
+  assert.match(copyBlock, /Copy failed/);
+  assert.match(layout, /markdown-code-block\.css/);
+  assert.match(styles, /\.markdown-code-block \{\s*position: relative;/);
+  assert.match(styles, /\.markdown-code-block pre \{\s*margin: 0;/);
+  assert.match(styles, /\.markdown-code-copy \{\s*position: absolute;/);
+  assert.match(styles, /\.markdown-code-copy \{\s*position: absolute;[\s\S]*?top: 8px;[\s\S]*?right: 8px;/);
+  assert.match(styles, /\.markdown-code-copy:focus-visible/);
+  assert.match(styles, /\.assistant-markdown \.markdown-code-block pre[\s\S]*?padding-right: 72px;/);
+  assert.match(styles, /\.artifact-preview-markdown \.markdown-code-block pre[\s\S]*?padding-right: 72px;/);
 });

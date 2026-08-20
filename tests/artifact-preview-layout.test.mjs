@@ -40,3 +40,22 @@ test("artifact panel exposes editing actions, states, accessible resizing, and s
   assert.match(styles, /@media \(max-width: 1019px\)/);
   assert.match(styles, /artifact-preview-fullscreen-compatible/);
 });
+
+test("artifact Markdown previews expose a top-right copy control for code blocks", async () => {
+  const [panel, copyBlock, markdownStyles, artifactStyles, layout] = await Promise.all([
+    readFile(new URL("../app/chat/artifact-preview-panel.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/chat/copyable-code-block.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/styles/markdown-code-block.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/styles/artifact-preview.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(panel, /CopyableCodeBlock/);
+  assert.match(panel, /components=\{\{ pre: CopyableCodeBlock \}\}/);
+  assert.match(copyBlock, /aria-label="Copy code"/);
+  assert.match(copyBlock, /markdown-code-copy/);
+  assert.match(markdownStyles, /\.markdown-code-copy/);
+  assert.match(markdownStyles, /position: absolute/);
+  assert.match(artifactStyles, /\.artifact-preview-markdown \.markdown-code-block/);
+  assert.match(layout, /markdown-code-block\.css/);
+});

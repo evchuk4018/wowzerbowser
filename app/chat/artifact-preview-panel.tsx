@@ -13,6 +13,7 @@ import {
 } from "./artifact-preview-layout";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { CopyableCodeBlock } from "./copyable-code-block";
 
 export type ArtifactPreviewMode = "code" | "preview";
 
@@ -278,7 +279,7 @@ export function ArtifactPreviewPanel<TArtifact extends PreviewableArtifact>({
           <div className="artifact-preview-status" role="alert">This image is not backed by a workspace file.</div>
         )}
         {loadState === "ready" && mode === "preview" && kind === "markdown" && (
-          <div className="artifact-preview-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{artifact.content}</ReactMarkdown></div>
+          <div className="artifact-preview-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ pre: CopyableCodeBlock }}>{artifact.content}</ReactMarkdown></div>
         )}
         {loadState === "ready" && mode === "preview" && kind === "text" && (
           <pre className="artifact-preview-text"><code>{artifact.content}</code></pre>
