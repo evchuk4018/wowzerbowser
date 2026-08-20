@@ -9,11 +9,9 @@ function textFromNode(node: React.ReactNode): string {
   return "";
 }
 
-type CopyableCodeBlockProps = {
-  children?: React.ReactNode;
-  className?: string;
+type CopyableCodeBlockProps = React.HTMLAttributes<HTMLPreElement> & {
   node?: unknown;
-} & Record<string, unknown>;
+};
 
 export function CopyableCodeBlock({ children, node: _node, className, ...rest }: CopyableCodeBlockProps) {
   const [state, setState] = useState<"idle" | "copied" | "error">("idle");
