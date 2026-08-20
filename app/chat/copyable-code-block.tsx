@@ -9,7 +9,7 @@ function textFromNode(node: React.ReactNode): string {
   return "";
 }
 
-type CopyableCodeBlockProps = React.HTMLAttributes<HTMLPreElement> & {
+type CopyableCodeBlockProps = React.HTMLAttributes<HTMLElement> & {
   node?: unknown;
 };
 
