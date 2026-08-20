@@ -54,14 +54,28 @@ function parseJsonEvents(stdout: string, collected: HomelabOpencodeJsonEvent[], 
 }
 
 function extractFinalText(events: HomelabOpencodeJsonEvent[], rawStdout: string): string {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
+  const getPartText = (event: HomelabOpencodeJsonEvent): string | null => {
     if (typeof event.text === "string" && event.text.trim()) return String(event.text).trim();
+    const part = (event as unknown as { part?: unknown }).part;
+    if (part && typeof part === "object") {
+      const record = part as Record<string, unknown>;
+      if (typeof record.text === "string" && String(record.text).trim()) return String(record.text).trim();
+      if (typeof record.content === "string" && String(record.content).trim()) return String(record.content).trim();
+    }
     if (typeof event.content === "string" && String(event.content).trim()) return String(event.content).trim();
     if (typeof event.message === "string" && String(event.message).trim()) return String(event.message).trim();
     if (typeof event.delta === "string" && String(event.delta).trim()) return String(event.delta).trim();
+    return null;
+  };
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const candidate = getPartText(events[index]);
+    if (candidate) return candidate;
   }
-  const nonJsonText = events.filter((event) => event.type === "text" && typeof event.text === "string").map((event) => String(event.text)).join("\n").trim();
+  const nonJsonText = events
+    .map((event) => getPartText(event))
+    .filter((text): text is string => Boolean(text))
+    .join("\n")
+    .trim();
   if (nonJsonText) return nonJsonText.slice(0, 48_000);
   const fallback = rawStdout.trim().split("\n").filter((line) => {
     const trimmed = line.trim();
@@ -81,14 +95,14 @@ export async function runHomelabOpencodeTurn(
   const spawn: HomelabSpawn = hooks.spawn ?? spawnHomelabSsh;
   const now = hooks.now ?? Date.now;
   const startedAt = now();
-  const sessionId = request.sessionId ?? randomUUID();
+  const requestedSessionId = request.sessionId ?? null;
   const timeoutMs = options.timeoutMs ?? config.timeoutMs;
   return withSemaphore(config.maxConcurrent, async () => {
     const events: HomelabOpencodeJsonEvent[] = [];
     const rawLines: string[] = [];
     const result = await spawn(
       request.prompt,
-      { sessionId, cwd: request.cwd, agent: request.agent, model: request.model, signal: options.signal, timeoutMs },
+      { ...(requestedSessionId ? { sessionId: requestedSessionId } : {}), cwd: request.cwd, agent: request.agent, model: request.model, signal: options.signal, timeoutMs },
       {
         onStdoutLine: (line) => {
           rawLines.push(line);
@@ -126,8 +140,22 @@ export async function runHomelabOpencodeTurn(
     if (result.timedOut && !finalText && !events.length) {
       events.push({ type: "error", message: `Homelab opencode timed out after ${timeoutMs}ms.` });
     }
+    const sessionIdFromEvents = (() => {
+      for (const event of events) {
+        const candidate = (event as unknown as { sessionID?: unknown; sessionId?: unknown }).sessionID ?? (event as unknown as { sessionId?: unknown }).sessionId;
+        if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+        const part = (event as unknown as { part?: unknown }).part;
+        if (part && typeof part === "object") {
+          const record = part as Record<string, unknown>;
+          if (typeof record.sessionID === "string" && record.sessionID.trim()) return record.sessionID.trim();
+          if (typeof record.sessionId === "string" && record.sessionId.trim()) return record.sessionId.trim();
+        }
+      }
+      return null;
+    })();
+    const resolvedSessionId = requestedSessionId ?? sessionIdFromEvents ?? randomUUID();
     return {
-      sessionId,
+      sessionId: resolvedSessionId,
       prompt: request.prompt,
       finalText: finalText || (status === "error" ? (rawStderr.slice(0, 4_000) || "Homelab opencode failed without output.") : ""),
       events,
