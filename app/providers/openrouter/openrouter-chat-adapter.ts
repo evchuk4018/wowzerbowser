@@ -3,6 +3,7 @@ import type { ChatMessageInput, ChatModelInfo, ChatRequest, ChatStreamEvent, Cha
 import type { ChatProviderAdapter, ChatProviderRoundOptions } from "../../server/chat/chat-provider-adapter";
 import { OPENROUTER_API_KEY, OPENROUTER_BASE_URL, openRouterHeaders } from "./openrouter-config";
 import { OpenRouterError } from "./openrouter-catalog-adapter";
+import { gemmaCompatibleToolDefinitions, isGemmaModel } from "./openrouter-tool-schema";
 
 type ProviderMessage = Record<string, unknown>;
 type Chunk = { model?: unknown; choices?: Array<{ delta?: Record<string, unknown> }>; usage?: Record<string, unknown>; error?: { message?: unknown } };
@@ -49,12 +50,15 @@ export async function* streamOpenRouterChatRound(request: ChatRequest, metadata:
   const reasoning = metadata.reasoningRequired || request.thinking
     ? { effort: request.reasoningEffort }
     : metadata.supportedEfforts.length ? { effort: "none" } : undefined;
+  const tools = options.tools?.length && isGemmaModel(request.model.model)
+    ? gemmaCompatibleToolDefinitions(options.tools)
+    : options.tools;
   const response = await fetchImpl(`${OPENROUTER_BASE_URL}/chat/completions`, {
     method: "POST", headers: openRouterHeaders(), signal,
     body: JSON.stringify({
       model: request.model.model, messages: buildOpenRouterMessages(request, options), stream: true,
       ...(reasoning ? { reasoning } : {}),
-      ...(options.tools?.length ? { tools: options.tools, ...(metadata.supportedParameters.includes("tool_choice") ? { tool_choice: "auto" } : {}) } : {}),
+      ...(tools?.length ? { tools, ...(metadata.supportedParameters.includes("tool_choice") ? { tool_choice: "auto" } : {}) } : {}),
     }),
   });
   if (!response.ok || !response.body) {

@@ -7,6 +7,7 @@ import {
   availableSpreadsheetTools,
   SPREADSHEET_TOOL_NAME,
 } from "../app/server/agent/spreadsheet-tool-manifest.ts";
+import { gemmaCompatibleToolDefinitions } from "../app/providers/openrouter/openrouter-tool-schema.ts";
 
 const call = (argumentsValue) => ({
   id: "spreadsheet-call-1",
@@ -104,6 +105,35 @@ test("spreadsheet tool is advertised only when the local workbook runtime is ava
   const definition = availableSpreadsheetTools(true)[0];
   assert.deepEqual(definition.function.parameters.properties.operation.enum, ["create", "read", "edit"]);
   assert.equal(definition.function.parameters.properties.path.description.includes(".xlsx"), true);
+});
+
+test("Gemma receives a Gemini-compatible spreadsheet schema", () => {
+  const definition = availableSpreadsheetTools(true)[0];
+  const [tool] = gemmaCompatibleToolDefinitions([definition]);
+  const parameters = tool.function.parameters;
+  const sheets = parameters.properties.sheets.items;
+  const rowsValue = sheets.properties.rows.items.items;
+  const cellValue = sheets.properties.cells.items.properties.value;
+
+  assert.deepEqual(rowsValue, {
+    anyOf: [{ type: "string" }, { type: "number" }, { type: "boolean" }],
+    nullable: true,
+  });
+  assert.deepEqual(cellValue, rowsValue);
+
+  const unsupported = new Set([
+    "additionalProperties", "const", "discriminator", "exclusiveMinimum", "maxItems", "maxLength",
+    "maximum", "minItems", "minLength", "minimum", "oneOf", "pattern",
+  ]);
+  const visit = (value) => {
+    if (!value || typeof value !== "object") return [];
+    if (Array.isArray(value)) return value.flatMap(visit);
+    return Object.entries(value).flatMap(([key, child]) => [
+      ...(unsupported.has(key) ? [key] : []),
+      ...visit(child),
+    ]);
+  };
+  assert.deepEqual(visit(parameters), []);
 });
 
 test("chat orchestration includes spreadsheet selection, instructions, and execution", async () => {
