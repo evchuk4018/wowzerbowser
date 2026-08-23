@@ -60,22 +60,26 @@ vpn_target_refs() {
 vpn_target_isolated() {
   project=$1
   service=$2
+  expected_network_mode=$3
   containers=$(docker ps -q \
     --filter "label=com.docker.compose.project=$project" \
     --filter "label=com.docker.compose.service=$service")
   [ -n "$containers" ] || return 1
   for container in $containers; do
     network_mode=$(docker inspect --format '{{.HostConfig.NetworkMode}}' "$container" 2>/dev/null || true)
-    [ "$network_mode" = "container:download-vpn" ] || return 1
+    [ "$network_mode" = "$expected_network_mode" ] || return 1
   done
 }
 
 vpn_targets_are_isolated() {
+  gateway_id=$(docker inspect --format '{{.Id}}' download-vpn 2>/dev/null || true)
+  [ -n "$gateway_id" ] || return 1
+  expected_network_mode="container:$gateway_id"
   for service in jellyseerr radarr sonarr qbittorrent prowlarr flaresolverr; do
-    vpn_target_isolated media-stack "$service" || return 1
+    vpn_target_isolated media-stack "$service" "$expected_network_mode" || return 1
   done
-  vpn_target_isolated hometube worker || return 1
-  vpn_target_isolated musicplayer worker || return 1
+  vpn_target_isolated hometube worker "$expected_network_mode" || return 1
+  vpn_target_isolated musicplayer worker "$expected_network_mode" || return 1
 }
 
 stop_targets() {

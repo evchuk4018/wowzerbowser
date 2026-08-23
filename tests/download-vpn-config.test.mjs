@@ -66,7 +66,9 @@ test("boot supervision requires a restrictive secret and keeps normal services o
   assert.match(supervisor, /stop_targets/);
   assert.match(supervisor, /start_vpn_targets/);
   assert.match(supervisor, /vpn_targets_are_isolated/);
-  assert.match(supervisor, /container:download-vpn/);
+  assert.match(supervisor, /gateway_id=/);
+  assert.match(supervisor, /expected_network_mode=/);
+  assert.match(supervisor, /container:\$gateway_id/);
   assert.match(supervisor, /vpn_compose rm -f download-vpn/);
   assert.match(supervisor, /ip -4 route get 1\.1\.1\.1/);
   assert.match(supervisor, /MEDIA_LAN_IP=/);
