@@ -31,7 +31,15 @@ if [ -z "$hometube_postgres_password" ]; then
 fi
 
 vpn_compose() {
-  WINDSCRIBE_RESOLVED_CONF_PATH="$resolved_secret_path" docker compose -p wowzerbowser-download-vpn --env-file "$deployment_root/deployment.env" \
+  lan_ip=${MEDIA_LAN_IP:-}
+  if [ -z "$lan_ip" ]; then
+    lan_ip=$(env_value MEDIA_LAN_IP)
+  fi
+  if [ -z "$lan_ip" ]; then
+    lan_ip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") {print $(i + 1); exit}}' || true)
+  fi
+  lan_ip=${lan_ip:-127.0.0.1}
+  MEDIA_LAN_IP="$lan_ip" WINDSCRIBE_RESOLVED_CONF_PATH="$resolved_secret_path" docker compose -p wowzerbowser-download-vpn --env-file "$deployment_root/deployment.env" \
     -f "$vpn_file" "$@"
 }
 

@@ -15,6 +15,7 @@ test("download gateway uses the supplied WireGuard file and a hard kill switch",
   assert.match(compose, /subnet: 172\.24\.0\.0\/28/);
   assert.match(compose, /VPN_SERVICE_PROVIDER: custom/);
   assert.match(compose, /VPN_TYPE: wireguard/);
+  assert.match(compose, /MEDIA_LAN_IP:-127\.0\.0\.1/);
   assert.match(compose, /FIREWALL_ENABLED_DISABLING_IT_SHOOTS_YOU_IN_YOUR_FOOT: on/);
   assert.match(compose, /FIREWALL_INPUT_PORTS: "8080,5055,7878,8989,9696,8191,4000"/);
   assert.match(compose, /FIREWALL_OUTBOUND_SUBNETS: .*172\.24\.0\.0\/28/);
@@ -65,6 +66,8 @@ test("boot supervision requires a restrictive secret and keeps normal services o
   assert.match(supervisor, /start_vpn_targets/);
   assert.match(supervisor, /vpn_targets_are_isolated/);
   assert.match(supervisor, /container:download-vpn/);
+  assert.match(supervisor, /ip -4 route get 1\.1\.1\.1/);
+  assert.match(supervisor, /MEDIA_LAN_IP=/);
   assert.match(supervisor, /Download VPN gateway failed to start/);
   assert.match(unit, /WantedBy=default\.target/);
   assert.match(unit, /RequiresMountsFor=\/srv\/storage\/wowzerbowser/);
