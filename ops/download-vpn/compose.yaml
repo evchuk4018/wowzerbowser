@@ -34,16 +34,17 @@ services:
       WIREGUARD_MTU: "1280"
       WIREGUARD_PERSISTENT_KEEPALIVE_INTERVAL: "25s"
       TZ: ${TZ:-America/New_York}
-      FIREWALL: on
+      # These names are the v3.40.4 configuration interface.
+      FIREWALL_ENABLED_DISABLING_IT_SHOOTS_YOU_IN_YOUR_FOOT: on
       # These are the existing media UI ports. Binding remains limited to the
       # LAN and Tailscale addresses used by the current media stack.
       FIREWALL_INPUT_PORTS: "8080,5055,7878,8989,9696,8191,4000"
       FIREWALL_OUTBOUND_SUBNETS: "172.18.0.0/16,172.21.0.0/16,172.22.0.0/16,172.23.0.0/16,172.24.0.0/28,192.168.0.0/24,100.64.0.0/10"
-      DNS_UPSTREAM_RESOLVER_TYPE: dot
-      DNS_UPSTREAM_RESOLVERS: cloudflare,google
-      DNS_UPSTREAM_IPV6: off
+      DOT: on
+      DOT_PROVIDERS: cloudflare,google
+      DOT_IPV6: off
       BLOCK_MALICIOUS: on
-      HEALTH_TARGET_ADDRESSES: cloudflare.com:443
+      HEALTH_TARGET_ADDRESS: cloudflare.com:443
     ports:
       - "${MEDIA_TAILSCALE_IP:-100.98.43.68}:${MEDIA_QBIT_HOST_PORT:-8080}:8080"
       - "${MEDIA_LAN_IP:-192.168.0.148}:${MEDIA_JELLYSEERR_HOST_PORT:-5055}:5055"

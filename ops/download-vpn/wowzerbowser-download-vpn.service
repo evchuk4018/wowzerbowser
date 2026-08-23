@@ -3,10 +3,13 @@ Description=Windscribe gateway for download-only homelab services
 After=network-online.target
 Wants=network-online.target
 RequiresMountsFor=/srv/storage/wowzerbowser
-ConditionPathExists=/srv/storage/wowzerbowser/secrets/windscribe-philadelphia.conf
 
 [Service]
 Type=simple
+ExecStartPre=/srv/storage/wowzerbowser/docker/require-storage-mount.sh
+ExecStartPre=/srv/storage/wowzerbowser/ops/download-vpn/stop.sh
+ExecStartPre=/usr/bin/test ! -L /srv/storage/wowzerbowser/secrets/windscribe-philadelphia.conf
+ExecStartPre=/usr/bin/test -f /srv/storage/wowzerbowser/secrets/windscribe-philadelphia.conf
 ExecStartPre=/srv/storage/wowzerbowser/ops/download-vpn/resolve-windscribe.sh
 ExecStart=/srv/storage/wowzerbowser/ops/download-vpn/supervise.sh
 ExecStop=/srv/storage/wowzerbowser/ops/download-vpn/stop.sh

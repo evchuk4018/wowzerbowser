@@ -15,11 +15,17 @@ test("download gateway uses the supplied WireGuard file and a hard kill switch",
   assert.match(compose, /subnet: 172\.24\.0\.0\/28/);
   assert.match(compose, /VPN_SERVICE_PROVIDER: custom/);
   assert.match(compose, /VPN_TYPE: wireguard/);
-  assert.match(compose, /FIREWALL: on/);
+  assert.match(compose, /FIREWALL_ENABLED_DISABLING_IT_SHOOTS_YOU_IN_YOUR_FOOT: on/);
   assert.match(compose, /FIREWALL_INPUT_PORTS: "8080,5055,7878,8989,9696,8191,4000"/);
   assert.match(compose, /FIREWALL_OUTBOUND_SUBNETS: .*172\.24\.0\.0\/28/);
   assert.match(compose, /hometube:\r?\n\s+ipv4_address: 172\.22\.0\.3/);
-  assert.match(compose, /DNS_UPSTREAM_IPV6: off/);
+  assert.match(compose, /DOT: on/);
+  assert.match(compose, /DOT_PROVIDERS: cloudflare,google/);
+  assert.match(compose, /DOT_IPV6: off/);
+  assert.match(compose, /HEALTH_TARGET_ADDRESS: cloudflare\.com:443/);
+  assert.doesNotMatch(compose, /^\s*FIREWALL: on\s*$/mu);
+  assert.doesNotMatch(compose, /^\s*DNS_UPSTREAM_/mu);
+  assert.doesNotMatch(compose, /^\s*HEALTH_TARGET_ADDRESSES:/mu);
   assert.match(compose, /test: \["CMD", "\/gluetun-entrypoint", "healthcheck"\]/);
   assert.doesNotMatch(compose, /PrivateKey|PresharedKey|WIREGUARD_PRIVATE_KEY/u);
 });
@@ -57,8 +63,27 @@ test("boot supervision requires a restrictive secret and keeps normal services o
   assert.match(supervisor, /docker rm/);
   assert.match(supervisor, /stop_targets/);
   assert.match(supervisor, /start_vpn_targets/);
+  assert.match(supervisor, /vpn_targets_are_isolated/);
+  assert.match(supervisor, /container:download-vpn/);
+  assert.match(supervisor, /Download VPN gateway failed to start/);
   assert.match(unit, /WantedBy=default\.target/);
   assert.match(unit, /RequiresMountsFor=\/srv\/storage\/wowzerbowser/);
+  assert.doesNotMatch(unit, /^ConditionPathExists=/mu);
+  assert.match(unit, /ExecStartPre=.*require-storage-mount\.sh/);
+  assert.match(unit, /ExecStartPre=.*stop\.sh/);
+  assert.match(unit, /ExecStartPre=\/usr\/bin\/test ! -L \/srv\/storage\/wowzerbowser\/secrets\/windscribe-philadelphia\.conf/);
+  assert.match(unit, /ExecStartPre=\/usr\/bin\/test -f \/srv\/storage\/wowzerbowser\/secrets\/windscribe-philadelphia\.conf/);
+
+  const tailscaleUnit = await read("ops/download-vpn/wowzerbowser-tailscale-exit.service");
+  assert.doesNotMatch(tailscaleUnit, /^ConditionPathExists=/mu);
+  assert.match(tailscaleUnit, /ExecStartPre=.*require-storage-mount\.sh/);
+  assert.match(tailscaleUnit, /ExecStartPre=\/usr\/bin\/test ! -L \/srv\/storage\/wowzerbowser\/secrets\/windscribe-philadelphia\.conf/);
+});
+
+test("operations documentation uses user systemd and valid container networking", async () => {
+  const readme = await read("ops/download-vpn/README.md");
+  assert.match(readme, /systemctl --user status wowzerbowser-download-vpn\.service/);
+  assert.doesNotMatch(readme, /^\s*dns:\s*$/mu);
 });
 
 test("Tailscale exit routing is fail-closed and persistent", async () => {

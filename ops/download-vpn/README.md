@@ -40,15 +40,16 @@ The system unit is installed with:
 /srv/storage/wowzerbowser/ops/download-vpn/install-systemd.sh
 ```
 
-It starts after Docker and the storage mount. The supervisor starts the VPN
-gateway first, waits for Gluetun's actual healthcheck, then starts the isolated
-media/HomeTube/music workers. On a VPN health failure it stops those workers;
-normal services continue independently.
+It waits for the storage mount and retries when Docker or an external bridge is
+not ready. The supervisor starts the VPN gateway first, waits for Gluetun's
+actual healthcheck, then starts the isolated media/HomeTube/music workers. On a
+VPN health failure it stops those workers; normal services continue
+independently.
 
 Useful checks:
 
 ```bash
-systemctl status wowzerbowser-download-vpn.service
+systemctl --user status wowzerbowser-download-vpn.service
 docker inspect --format '{{.State.Health.Status}}' download-vpn
 docker compose -p wowzerbowser-download-vpn -f /srv/storage/wowzerbowser/ops/download-vpn/compose.yaml ps
 systemctl --user status wowzerbowser-tailscale-exit.service
@@ -62,9 +63,11 @@ To add a future downloader, put it in the appropriate overlay with:
 ```yaml
 network_mode: "container:download-vpn"
 networks: !reset []
-dns:
-  - 127.0.0.1
 ```
+
+Do not add a `dns` setting to a sidecar using `container:download-vpn`.
+Docker shares the gateway's network namespace, including its DNS listener at
+`127.0.0.1`.
 
 If it needs a web UI, add its port to the gateway's `ports` and
 `FIREWALL_INPUT_PORTS`. If it needs a local service, attach the gateway to

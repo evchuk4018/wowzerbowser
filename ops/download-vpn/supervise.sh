@@ -49,6 +49,27 @@ vpn_target_refs() {
     --filter "label=com.docker.compose.service=worker"
 }
 
+vpn_target_isolated() {
+  project=$1
+  service=$2
+  containers=$(docker ps -q \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter "label=com.docker.compose.service=$service")
+  [ -n "$containers" ] || return 1
+  for container in $containers; do
+    network_mode=$(docker inspect --format '{{.HostConfig.NetworkMode}}' "$container" 2>/dev/null || true)
+    [ "$network_mode" = "container:download-vpn" ] || return 1
+  done
+}
+
+vpn_targets_are_isolated() {
+  for service in jellyseerr radarr sonarr qbittorrent prowlarr flaresolverr; do
+    vpn_target_isolated media-stack "$service" || return 1
+  done
+  vpn_target_isolated hometube worker || return 1
+  vpn_target_isolated musicplayer worker || return 1
+}
+
 stop_targets() {
   vpn_target_refs | while IFS= read -r container; do
     [ -n "$container" ] || continue
@@ -67,8 +88,13 @@ restart_gateway() {
   stop_targets
   remove_targets
   vpn_compose stop download-vpn >/dev/null 2>&1 || true
-  if "$resolver_script" >/dev/null 2>&1; then
-    vpn_compose up -d download-vpn >/dev/null 2>&1 || true
+  if ! "$resolver_script"; then
+    echo "Download VPN endpoint resolution failed; will retry." >&2
+    return 1
+  fi
+  if ! vpn_compose up -d download-vpn; then
+    echo "Download VPN gateway failed to start; will retry." >&2
+    return 1
   fi
 }
 
@@ -129,8 +155,12 @@ fi
 
 stop_targets
 remove_targets
-vpn_compose up -d download-vpn >/dev/null 2>&1 || true
-start_normal_targets >/dev/null 2>&1 || true
+if ! vpn_compose up -d download-vpn; then
+  echo "Download VPN gateway failed to start; will retry." >&2
+fi
+if ! start_normal_targets; then
+  echo "Normal download-adjacent services failed to start; will retry." >&2
+fi
 last_healthy=0
 
 while :; do
@@ -142,9 +172,12 @@ while :; do
   fi
 
   if vpn_health; then
-    if [ "$last_healthy" -eq 0 ]; then
+    if [ "$last_healthy" -eq 0 ] || ! vpn_targets_are_isolated; then
+      last_healthy=0
       if start_vpn_targets; then
         last_healthy=1
+      else
+        echo "VPN targets failed to start in the isolated network; will retry." >&2
       fi
     fi
   else

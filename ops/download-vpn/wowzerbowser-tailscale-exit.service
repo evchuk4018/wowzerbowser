@@ -3,10 +3,12 @@ Description=Route Tailscale exit-node traffic through Windscribe
 After=wowzerbowser-download-vpn.service
 Wants=wowzerbowser-download-vpn.service
 RequiresMountsFor=/srv/storage/wowzerbowser
-ConditionPathExists=/srv/storage/wowzerbowser/secrets/windscribe-philadelphia.conf
 
 [Service]
 Type=simple
+ExecStartPre=/srv/storage/wowzerbowser/docker/require-storage-mount.sh
+ExecStartPre=/usr/bin/test ! -L /srv/storage/wowzerbowser/secrets/windscribe-philadelphia.conf
+ExecStartPre=/usr/bin/test -f /srv/storage/wowzerbowser/secrets/windscribe-philadelphia.conf
 ExecStartPre=/srv/storage/wowzerbowser/ops/download-vpn/exit-node-apply.sh down
 ExecStartPre=/usr/bin/tailscale set --advertise-exit-node=true --netfilter-mode=nodivert
 ExecStart=/srv/storage/wowzerbowser/ops/download-vpn/exit-node-supervise.sh
