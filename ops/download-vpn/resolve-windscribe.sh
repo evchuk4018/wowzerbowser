@@ -25,7 +25,23 @@ case "$endpoint_port" in
   ''|*[!0-9]*) echo "The Windscribe endpoint port is invalid." >&2; exit 78 ;;
 esac
 
-endpoint_ip=$(getent ahostsv4 "$endpoint_host" | awk 'NR == 1 {print $1; exit}')
+endpoint_ip=$(timeout 5s getent ahostsv4 "$endpoint_host" | awk 'NR == 1 {print $1; exit}' || true)
+if [ -z "$endpoint_ip" ] && command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+  # The tunnel cannot start until this host is resolved. Use HTTPS DNS when
+  # the local resolver is unavailable, without weakening the tunnel firewall.
+  endpoint_ip=$(
+    curl --fail --silent --show-error --connect-timeout 5 --max-time 10 \
+      --get --data-urlencode "name=$endpoint_host" --data-urlencode "type=A" \
+      https://dns.google/resolve |
+      jq -r --arg endpoint_host "$endpoint_host" '
+        .Answer[]?
+        | select(.type == 1)
+        | select((.name | ascii_downcase) == (($endpoint_host | ascii_downcase) + "."))
+        | .data
+      ' |
+      awk '/^[0-9]+(\.[0-9]+){3}$/ {print; exit}'
+  ) || endpoint_ip=
+fi
 if [ -z "$endpoint_ip" ]; then
   echo "Could not resolve the Windscribe WireGuard endpoint." >&2
   exit 75
