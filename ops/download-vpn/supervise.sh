@@ -92,10 +92,15 @@ remove_targets() {
   done
 }
 
+remove_gateway() {
+  vpn_compose rm -f download-vpn >/dev/null 2>&1 || true
+}
+
 restart_gateway() {
   stop_targets
   remove_targets
   vpn_compose stop download-vpn >/dev/null 2>&1 || true
+  remove_gateway
   if ! "$resolver_script"; then
     echo "Download VPN endpoint resolution failed; will retry." >&2
     return 1
@@ -163,6 +168,7 @@ fi
 
 stop_targets
 remove_targets
+remove_gateway
 if ! vpn_compose up -d download-vpn; then
   echo "Download VPN gateway failed to start; will retry." >&2
 fi
