@@ -19,7 +19,8 @@ test("download gateway uses the supplied WireGuard file and a hard kill switch",
   assert.match(compose, /FIREWALL_ENABLED_DISABLING_IT_SHOOTS_YOU_IN_YOUR_FOOT: on/);
   assert.match(compose, /FIREWALL_INPUT_PORTS: "8080,5055,7878,8989,9696,8191,4000"/);
   assert.match(compose, /FIREWALL_OUTBOUND_SUBNETS: .*172\.24\.0\.0\/28/);
-  assert.match(compose, /hometube:\r?\n\s+ipv4_address: 172\.22\.0\.3/);
+  assert.match(compose, /hometube:\r?\n\s+aliases:/);
+  assert.doesNotMatch(compose, /hometube:\r?\n\s+ipv4_address:/);
   assert.match(compose, /DOT: on/);
   assert.match(compose, /DOT_PROVIDERS: cloudflare,google/);
   assert.match(compose, /DOT_IPV6: off/);
