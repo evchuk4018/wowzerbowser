@@ -1,0 +1,12 @@
+--- compose.yml
++++ compose.yml
+@@ -31,3 +31,3 @@
+      JELLYFIN_WEB_DIR: /jellyfin/jellyfin-web
+      JELLYFIN_FFMPEG: /usr/lib/jellyfin-ffmpeg/ffmpeg
+-      JELLYFIN_PublishedServerUrl: http://${TAILSCALE_HOST}:${JELLYFIN_HOST_PORT}
++      JELLYFIN_PublishedServerUrl: ${JELLYFIN_PUBLISHED_SERVER_URL:-https://jellyfin.wowzerbowser.xyz}
+--- .env
++++ .env
+@@ -7,1 +7,2 @@
+ TAILSCALE_HOST=homelab.tail861ffd.ts.net
++JELLYFIN_PUBLISHED_SERVER_URL=https://jellyfin.wowzerbowser.xyz

@@ -18,6 +18,12 @@ test("Compose pins Firecrawl to a reproducible image", async () => {
   assert.doesNotMatch(compose, /image: ghcr\.io\/firecrawl\/firecrawl:latest/);
   assert.match(compose, /command: \["postgres", "-c", "cron\.database_name=firecrawl"\]/);
   assert.match(compose, /firecrawl:\r?\n(?:(?!\r?\n  \S).)*?mem_limit: 3g/s);
+  assert.match(compose, /NUQ_WORKER_COUNT: \$\{FIRECRAWL_NUQ_WORKER_COUNT:-1\}/);
+});
+
+test("Firecrawl worker count is explicitly bounded in the example environment", async () => {
+  const envExample = await read(".env.example");
+  assert.match(envExample, /^FIRECRAWL_NUQ_WORKER_COUNT=1$/m);
 });
 
 test("Compose keeps the app port localhost-only and PostgreSQL unpublished", async () => {
@@ -88,6 +94,40 @@ test("startup is guarded by the host mount check and container isolation check",
   assert.match(guard, /root_source=\$\(findmnt/);
   assert.match(entrypoint, /STORAGE_MOUNT_GUARD/);
   assert.match(entrypoint, /\/srv\/storage\/media/);
+});
+
+test("Caddy startup is storage-gated and Jellyfin advertises the canonical HTTPS URL", async () => {
+  const service = await read("ops/caddy-watchdog/caddy-watchdog.service");
+  const watchdog = await read("ops/caddy-watchdog/caddy-watchdog.sh");
+  const installer = await read("ops/caddy-watchdog/install-systemd.sh");
+  const urlScript = await read("ops/caddy-watchdog/apply-jellyfin-public-url.sh");
+  const urlPatch = await read("ops/caddy-watchdog/media-stack-jellyfin-public-url.patch");
+
+  assert.match(service, /RequiresMountsFor=\/srv\/storage\/caddy/);
+  assert.match(service, /ExecStartPre=\/usr\/bin\/test -f \/srv\/storage\/caddy\/Caddyfile/);
+  assert.match(service, /ExecStart=.*caddy-watchdog\.sh/);
+  assert.match(service, /Restart=always/);
+  assert.match(service, /WantedBy=default\.target/);
+
+  assert.match(watchdog, /require-storage-mount\.sh/);
+  assert.match(watchdog, /docker info/);
+  assert.match(watchdog, /--no-build/);
+  assert.match(watchdog, /127\.0\.0\.1:2019/);
+  assert.match(watchdog, /caddy validate/);
+  assert.match(watchdog, /CHECK_INTERVAL=30/);
+  assert.match(watchdog, /sleep "\$CHECK_INTERVAL"/);
+
+  assert.match(installer, /apply-jellyfin-public-url\.sh/);
+  assert.match(installer, /systemctl --user daemon-reload/);
+  assert.match(installer, /systemctl --user enable --now caddy-watchdog\.service/);
+
+  assert.match(urlScript, /patch --batch --forward/);
+  assert.match(urlScript, /bak-jellyfin-public-url/);
+  assert.match(urlScript, /--no-deps/);
+  assert.match(urlScript, /--force-recreate/);
+  assert.match(urlPatch, /JELLYFIN_PublishedServerUrl/);
+  assert.match(urlPatch, /JELLYFIN_PUBLISHED_SERVER_URL/);
+  assert.match(urlPatch, /https:\/\/jellyfin\.wowzerbowser\.xyz/);
 });
 
 test("background worker runs the PostgreSQL queue with bounded maintenance", async () => {

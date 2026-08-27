@@ -1,0 +1,21 @@
+[Unit]
+Description=Storage-gated Caddy reverse proxy watchdog
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor=/srv/storage/caddy
+StartLimitIntervalSec=5min
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStartPre=/usr/bin/test -f /srv/storage/caddy/Caddyfile
+ExecStartPre=/usr/bin/test -f /srv/storage/caddy/docker-compose.yml
+ExecStart=/usr/bin/env bash /srv/storage/wowzerbowser/ops/caddy-watchdog/caddy-watchdog.sh
+ExecStop=/usr/bin/docker compose --project-directory /srv/storage/caddy --file /srv/storage/caddy/docker-compose.yml stop caddy
+Restart=always
+RestartSec=15s
+TimeoutStartSec=120s
+TimeoutStopSec=60s
+
+[Install]
+WantedBy=default.target
